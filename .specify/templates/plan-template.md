@@ -31,7 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] **P1: Independent Slice Delivery** — Every user story listed in the spec is independently deliverable, has a unique ID, and acceptance criteria cover isolated validation.
+- [ ] **P2: Documented Plan-First Execution** — All upstream artifacts (research, spec, plan skeleton) have zero placeholders and received approval prior to implementation planning.
+- [ ] **P3: Test-First Proof** — Planned tasks include pre-implementation automated tests and identify the CI suites that must fail before coding begins.
+- [ ] **P4: Observable Operations Discipline** — Observability/operations documents list the instrumentation, runbooks, and validation steps this feature updates.
+- [ ] **P5: Governance Traceability** — Each artifact records feature identifier, authorship, and amendment date; any missing data has an assigned TODO with owner/due date.
 
 ## Project Structure
 
