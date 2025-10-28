@@ -4,3 +4,10 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Agent caches
+.codex/
+.codex/**/cache/
+.codex/**/secrets/
+.codex/state.json
+.codex/sessions/

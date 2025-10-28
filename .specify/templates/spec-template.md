@@ -3,7 +3,10 @@
 **Feature Branch**: `[###-feature-name]`  
 **Created**: [DATE]  
 **Status**: Draft  
+**Owner**: [NAME]  
 **Input**: User description: "$ARGUMENTS"
+
+> Replace all bracketed placeholders with concrete data before submitting for review. Missing information MUST be recorded as `TODO(<field>): owner + due date`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -113,3 +116,10 @@
 - **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+
+## Operational Readiness *(mandatory)*
+
+- **Logging & Metrics**: [What telemetry is added or updated? Which dashboards change?]
+- **Alerting**: [Thresholds, on-call runbooks, escalation paths]
+- **Runbook Updates**: [Link to updated docs or TODO with owner/due date]
+- **Validation Steps**: [Commands or scripts to exercise instrumentation locally/CI]
