@@ -1,0 +1,112 @@
+{
+  "doctype": "DocType",
+  "name": "Role Permission Matrix Entry",
+  "module": "Salitemiret",
+  "custom": 0,
+  "istable": 1,
+  "track_changes": 0,
+  "engine": "InnoDB",
+  "field_order": [
+    "target_doctype",
+    "module",
+    "permlevel",
+    "read",
+    "write",
+    "create",
+    "delete",
+    "submit",
+    "cancel",
+    "print",
+    "email",
+    "share",
+    "export",
+    "notes"
+  ],
+  "fields": [
+    {
+      "fieldname": "target_doctype",
+      "fieldtype": "Link",
+      "label": "Target DocType",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "module",
+      "fieldtype": "Data",
+      "label": "Module",
+      "reqd": 1
+    },
+    {
+      "fieldname": "permlevel",
+      "fieldtype": "Int",
+      "label": "Permission Level",
+      "default": "0"
+    },
+    {
+      "fieldname": "read",
+      "fieldtype": "Check",
+      "label": "Read",
+      "default": "0"
+    },
+    {
+      "fieldname": "write",
+      "fieldtype": "Check",
+      "label": "Write",
+      "default": "0"
+    },
+    {
+      "fieldname": "create",
+      "fieldtype": "Check",
+      "label": "Create",
+      "default": "0"
+    },
+    {
+      "fieldname": "delete",
+      "fieldtype": "Check",
+      "label": "Delete",
+      "default": "0"
+    },
+    {
+      "fieldname": "submit",
+      "fieldtype": "Check",
+      "label": "Submit",
+      "default": "0"
+    },
+    {
+      "fieldname": "cancel",
+      "fieldtype": "Check",
+      "label": "Cancel",
+      "default": "0"
+    },
+    {
+      "fieldname": "print",
+      "fieldtype": "Check",
+      "label": "Print",
+      "default": "0"
+    },
+    {
+      "fieldname": "email",
+      "fieldtype": "Check",
+      "label": "Email",
+      "default": "0"
+    },
+    {
+      "fieldname": "share",
+      "fieldtype": "Check",
+      "label": "Share",
+      "default": "0"
+    },
+    {
+      "fieldname": "export",
+      "fieldtype": "Check",
+      "label": "Export",
+      "default": "0"
+    },
+    {
+      "fieldname": "notes",
+      "fieldtype": "Small Text",
+      "label": "Notes"
+    }
+  ],
+  "permissions": []
+}

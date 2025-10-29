@@ -1,0 +1,60 @@
+{
+  "doctype": "DocType",
+  "name": "Role Permission Matrix",
+  "module": "Salitemiret",
+  "custom": 0,
+  "is_submittable": 0,
+  "istable": 0,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "allow_rename": 1,
+  "autoname": "field:role",
+  "engine": "InnoDB",
+  "field_order": [
+    "role",
+    "description",
+    "permissions"
+  ],
+  "fields": [
+    {
+      "fieldname": "role",
+      "fieldtype": "Link",
+      "label": "Role",
+      "options": "Role",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "description",
+      "fieldtype": "Small Text",
+      "label": "Description"
+    },
+    {
+      "fieldname": "permissions",
+      "fieldtype": "Table",
+      "label": "Permissions",
+      "options": "Role Permission Matrix Entry",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "permlevel": 0,
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 0,
+      "cancel": 0,
+      "print": 0,
+      "email": 0,
+      "share": 1,
+      "export": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "index_web_routes": 0,
+  "show_name_in_global_search": 0
+}

@@ -1,0 +1,10 @@
+[
+  {"doctype": "Role", "role_name": "Parish Registrar", "desk_access": 1},
+  {"doctype": "Role", "role_name": "PR Administrator", "desk_access": 1},
+  {"doctype": "Role", "role_name": "Finance Clerk", "desk_access": 1},
+  {"doctype": "Role", "role_name": "Media Coordinator", "desk_access": 1},
+  {"doctype": "Role", "role_name": "Sunday School Lead", "desk_access": 1},
+  {"doctype": "Role", "role_name": "Volunteer Coordinator", "desk_access": 1},
+  {"doctype": "Role", "role_name": "Council Secretary", "desk_access": 1},
+  {"doctype": "Role", "role_name": "System Operator", "desk_access": 1}
+]
