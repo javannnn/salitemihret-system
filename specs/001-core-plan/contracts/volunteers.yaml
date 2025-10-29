@@ -1,0 +1,189 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Volunteers API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /volunteers:
+    get:
+      summary: List volunteers with filters
+      operationId: listVolunteers
+      parameters:
+        - name: group
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Volunteer list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Volunteer'
+    post:
+      summary: Register volunteer
+      operationId: createVolunteer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VolunteerInput'
+      responses:
+        '201':
+          description: Volunteer created
+  /volunteers/{volunteerId}/roster:
+    patch:
+      summary: Update volunteer roster assignment
+      operationId: updateVolunteerRoster
+      parameters:
+        - name: volunteerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupName:
+                  type: string
+                role:
+                  type: string
+      responses:
+        '200':
+          description: Assignment updated
+  /volunteer-logs:
+    get:
+      summary: List volunteer service logs
+      operationId: listVolunteerLogs
+      parameters:
+        - name: volunteerId
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VolunteerLog'
+    post:
+      summary: Record service log
+      operationId: createVolunteerLog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VolunteerLogInput'
+      responses:
+        '201':
+          description: Log recorded
+  /volunteers/digests/inactivity:
+    post:
+      summary: Enqueue inactivity digest job
+      operationId: triggerInactivityDigest
+      responses:
+        '202':
+          description: Digest job accepted
+components:
+  schemas:
+    Volunteer:
+      type: object
+      required:
+        - id
+        - memberId
+        - groupName
+        - status
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        joinedOn:
+          type: string
+          format: date
+    VolunteerInput:
+      type: object
+      required:
+        - memberId
+        - groupName
+        - role
+      properties:
+        memberId:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+        notes:
+          type: string
+    VolunteerLog:
+      type: object
+      required:
+        - id
+        - volunteerId
+        - serviceDate
+        - hoursServed
+      properties:
+        id:
+          type: string
+        volunteerId:
+          type: string
+        serviceDate:
+          type: string
+          format: date
+        hoursServed:
+          type: number
+        activityType:
+          type: string
+        notes:
+          type: string
+    VolunteerLogInput:
+      type: object
+      required:
+        - volunteerId
+        - serviceDate
+        - hoursServed
+      properties:
+        volunteerId:
+          type: string
+        serviceDate:
+          type: string
+          format: date
+        hoursServed:
+          type: number
+        activityType:
+          type: string
+        notes:
+          type: string

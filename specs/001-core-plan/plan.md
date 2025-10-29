@@ -1,39 +1,120 @@
-# Implementation Plan — Core Plan (SPEC-CORE-001)
+# Implementation Plan: Core Plan
+
+**Branch**: `001-core-plan` | **Date**: 2025-10-29 | **Spec**: specs/001-core-plan/spec.md
+**Input**: Feature specification from `/specs/001-core-plan/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+
+## Summary
+
+Deliver SPEC-CORE-001 (SaliteMihret System Phase 1) as an admin-only platform covering members, payments, sponsorships, schools, volunteers, media, councils, and reporting. The solution uses a Frappe (Python) backend with DocTypes, REST endpoints, and background jobs, paired with a React + Tailwind + shadcn/ui administration front-end localized via i18next. Observability (logs, metrics, traces) and backup policy adhere to the Ops spec, with EN/Amharic i18n and WCAG AA accessibility baked into each slice.
 
 ## Technical Context
-Frontend: React + Tailwind + shadcn/ui + i18next; Router + TanStack Query.
-Backend: Frappe (Python) with DocTypes for all modules; REST endpoints; background jobs.
-DB: MariaDB. Queue: Frappe background workers. Storage: local + S3-compatible (media).
-Observability: logs + metrics + traces; backup policy per Ops spec.
-i18n/a11y: EN/Amharic, WCAG AA.
+
+<!--
+  ACTION REQUIRED: Replace the content in this section with the technical details
+  for the project. The structure here is presented in advisory capacity to guide
+  the iteration process.
+-->
+
+**Language/Version**: Python 3.11 (Frappe 15), TypeScript 5.x with React 18  
+**Primary Dependencies**: Frappe framework, MariaDB connector, Redis workers, React, TanStack Query, Tailwind CSS, shadcn/ui, i18next  
+**Storage**: MariaDB 10.6 (DocTypes), MinIO/S3-compatible object storage for media assets  
+**Testing**: pytest with Frappe test runner, Playwright + Vitest for React admin  
+**Target Platform**: Linux (Frappe bench on Ubuntu/Debian), modern evergreen browsers for admin UI  
+**Project Type**: Web application (Frappe backend + React admin frontend)  
+**Performance Goals**: REST p95 ≤400 ms (p99 ≤1.5 s), 10 000-row imports ≤3 min, background jobs ≤5 min (≤15 min for reporting)  
+**Constraints**: 99.5% monthly uptime, WCAG AA compliance, EN/Amharic parity, daily encrypted backups with 35-day retention, full audit logging  
+**Scale/Scope**: 150 active admins, 25 000 members, 600 000 payment records/year, 15% annual growth buffer
 
 ## Constitution Check
-Adhere to testing-first, observability, performance budgets, UX consistency, and traceable docs (see `.specify/memory/constitution.md`).
 
-## Phases
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+
+- [x] **P1: Independent Slice Delivery** — Every user story listed in the spec is independently deliverable, has a unique ID, and acceptance criteria cover isolated validation.
+- [x] **P2: Documented Plan-First Execution** — All upstream artifacts (research, spec, plan skeleton) have zero placeholders and received approval prior to implementation planning.
+- [x] **P3: Test-First Proof** — Planned tasks include pre-implementation automated tests and identify the CI suites that must fail before coding begins.
+- [x] **P4: Observable Operations Discipline** — Observability/operations documents list the instrumentation, runbooks, and validation steps this feature updates.
+- [x] **P5: Governance Traceability** — Each artifact records feature identifier, authorship, and amendment date; any missing data has an assigned TODO with owner/due date.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/001-core-plan/
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output (/speckit.plan command)
+├── data-model.md        # Phase 1 output (/speckit.plan command)
+├── quickstart.md        # Phase 1 output (/speckit.plan command)
+├── contracts/           # Phase 1 output (/speckit.plan command)
+└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+```
+
+### Source Code (repository root)
+
+```text
+server/
+├── apps/
+│   └── salitemihret/
+│       ├── api/
+│       ├── audit/
+│       ├── config/
+│       ├── doctype/
+│       ├── payments/
+│       ├── sponsorship/
+│       ├── volunteers/
+│       └── tests/
+└── sites/
+    └── common_site_config.json
+
+web/
+├── src/
+│   ├── features/
+│   ├── layouts/
+│   ├── lib/
+│   └── i18n/
+└── tests/ (co-located `__tests__` alongside features)
+
+contracts/
+├── members.yaml
+├── payments.yaml
+└── ...
+```
+
+**Structure Decision**: Web application split between `server/` (Frappe bench app `salitemihret`) and `web/` (React admin). OpenAPI specs live under `contracts/` to align with tasks and ensure backend/frontend parity.
+
+## Complexity Tracking
+
+> **Fill ONLY if Constitution Check has violations that must be justified**
+
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| None | - | - |
+
+## Phase Execution
+
 ### Phase 0 — Research & Setup
-- Confirm DocType schema per `docs/spec-kit/03-domain-model.md`.
-- Decide audit event model and RBAC matrix.
-- Baseline Frappe app, CI, pre-commit, test harness.
+- **Objectives**: Validate DocType coverage against `docs/spec-kit/03-domain-model.md`, finalize RBAC/audit approach, and baseline shared tooling (bench app, CI, pre-commit, pytest/Vitest harness).
+- **Key Activities**: Consolidate schema checklist, capture RBAC matrix decisions, scaffold Frappe app + React admin workspaces, document developer bootstrap instructions.
+- **Exit Criteria**: Research.md approved with open questions resolved, bench app builds locally, lint/test tooling executes, constitution gate reaffirmed.
 
 ### Phase 1 — Data Model & Contracts
-- Implement DocTypes + indexes.
-- Draft REST contracts in `/contracts/` (OpenAPI) for Members, Payments, Sponsorship, Newcomers, Schools, Volunteers, Media, Councils, Reports.
-- Seed fixtures (roles, permissions).
+- **Objectives**: Translate feature spec stories into DocTypes, indexes, and OpenAPI contracts covering members, payments, sponsorships/newcomers, schools, volunteers, media, councils, and reports.
+- **Key Activities**: Author `data-model.md`, publish aggregated OpenAPI spec, seed fixtures/DocPerm templates, and produce quickstart covering validation flows.
+- **Exit Criteria**: Data model reviewed with indexes defined, contracts lint clean via Redocly, quickstart walkthrough validated, tasks backlog ready for `/speckit.tasks`.
 
 ### Phase 2 — UX Shells
-- Admin console shell, nav, role guard, i18n scaffolding.
-- Members module UI (create, family, status, import stepper).
-- Payments ledger + correction UI.
+- **Objectives**: Deliver admin shell, navigation, role guard, i18n scaffolding, and members/payments core UI slices enabling MVP story coverage.
+- **Key Activities**: Implement AuthGate, admin layout, locale toggles, initial TanStack Query integration, and smoke tests for auth/member flows.
+- **Exit Criteria**: US1–US3 UI routes functional behind RBAC, base theming polished, Playwright smoke suite green, audit telemetry verified end-to-end.
 
 ### Phase 3 — Remaining Modules
-- Sponsorship/Newcomers, Schools, Volunteers, Media approvals, Councils, Reports.
-- Notifications (mail) and digests.
+- **Objectives**: Complete sponsorship/newcomer, schools, volunteers, media, councils, and reporting modules with background jobs and notifications.
+- **Key Activities**: Build module-specific DocTypes/services/UI, wire reminder/inactivity jobs, flesh out media approval + publishing, assemble council dashboards, implement reporting engine + scheduling.
+- **Exit Criteria**: Each module passes independent story tests, background workers stable under load test scripts, reporting exports validated against sample datasets.
 
 ### Phase 4 — Ops & Hardening
-- Backups, monitoring, dashboards.
-- Perf budget checks; a11y pass; i18n QA.
-
-## Deliverables
-- `specs/001-core-plan/` : spec.md, plan.md, tasks.md, research.md
-- `/contracts` OpenAPI, `/server` Frappe app, `/web` React app
+- **Objectives**: Finalize observability, backups, performance tuning, accessibility, and localization parity prior to release.
+- **Key Activities**: Configure tracing + metrics exporters, harden backup automation, execute WCAG AA audit, complete Amharic translation QA, run performance benchmarks.
+- **Exit Criteria**: Ops runbooks updated, telemetry dashboards populated, accessibility report signed off, performance targets met within documented thresholds.

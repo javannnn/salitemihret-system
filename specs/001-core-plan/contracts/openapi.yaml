@@ -1,0 +1,1362 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Core Plan API
+  version: 1.0.0
+  description: >
+    Consolidated REST contracts for Members, Payments, Sponsorships, Newcomers,
+    Schools, Volunteers, Media, Councils, and Reports modules.
+servers:
+  - url: https://salitemihret.local/api
+tags:
+  - name: Members
+  - name: Payments
+  - name: Sponsorships
+  - name: Newcomers
+  - name: Schools
+  - name: Volunteers
+  - name: Media
+  - name: Councils
+  - name: Reports
+paths:
+  /members:
+    get:
+      tags: [Members]
+      summary: List members
+      operationId: listMembers
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: Filter by member status
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Full-text search on name or member code
+      responses:
+        '200':
+          description: Paginated members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberPage'
+    post:
+      tags: [Members]
+      summary: Create member
+      operationId: createMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberInput'
+      responses:
+        '201':
+          description: Member created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+  /members/{memberId}:
+    get:
+      tags: [Members]
+      summary: Retrieve member
+      operationId: getMember
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      responses:
+        '200':
+          description: Member detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+    patch:
+      tags: [Members]
+      summary: Update member fields
+      operationId: updateMember
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberPatch'
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+  /members/{memberId}/status-suggestion:
+    get:
+      tags: [Members]
+      summary: Fetch status suggestion
+      operationId: getStatusSuggestion
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      responses:
+        '200':
+          description: Suggested status payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusSuggestion'
+  /members/import:
+    post:
+      tags: [Members]
+      summary: Import member CSV batch
+      operationId: importMembers
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Import accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+  /members/import/{batchId}/errors:
+    get:
+      tags: [Members]
+      summary: Download import error CSV
+      operationId: downloadImportErrors
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+  /payments/ledger:
+    get:
+      tags: [Payments]
+      summary: List payment entries
+      operationId: listPayments
+      parameters:
+        - in: query
+          name: memberId
+          schema:
+            type: string
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: type
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ledger page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentPage'
+    post:
+      tags: [Payments]
+      summary: Record payment entry
+      operationId: createPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInput'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/ledger/{paymentId}:
+    get:
+      tags: [Payments]
+      summary: Retrieve payment entry
+      operationId: getPayment
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/ledger/{paymentId}/corrections:
+    post:
+      tags: [Payments]
+      summary: Submit payment correction
+      operationId: createCorrection
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionInput'
+      responses:
+        '202':
+          description: Correction queued for approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Correction'
+  /payments/corrections/{correctionId}/decision:
+    post:
+      tags: [Payments]
+      summary: Decide correction
+      operationId: decideCorrection
+      parameters:
+        - name: correctionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionDecision'
+      responses:
+        '200':
+          description: Correction state updated
+  /sponsorships:
+    get:
+      tags: [Sponsorships]
+      summary: List sponsorship pledges
+      operationId: listSponsorships
+      responses:
+        '200':
+          description: Sponsorships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sponsorship'
+    post:
+      tags: [Sponsorships]
+      summary: Create sponsorship
+      operationId: createSponsorship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorshipInput'
+      responses:
+        '201':
+          description: Sponsorship created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sponsorship'
+  /sponsorships/{sponsorshipId}:
+    patch:
+      tags: [Sponsorships]
+      summary: Update sponsorship pledge
+      operationId: updateSponsorship
+      parameters:
+        - $ref: '#/components/parameters/SponsorshipId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorshipPatch'
+      responses:
+        '200':
+          description: Sponsorship updated
+  /sponsorships/{sponsorshipId}/reminder:
+    post:
+      tags: [Sponsorships]
+      summary: Trigger sponsorship reminder
+      operationId: triggerSponsorshipReminder
+      parameters:
+        - $ref: '#/components/parameters/SponsorshipId'
+      responses:
+        '202':
+          description: Reminder enqueued
+  /newcomers:
+    get:
+      tags: [Newcomers]
+      summary: List newcomers
+      operationId: listNewcomers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Newcomer list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Newcomer'
+    post:
+      tags: [Newcomers]
+      summary: Register newcomer
+      operationId: createNewcomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewcomerInput'
+      responses:
+        '201':
+          description: Newcomer registered
+  /newcomers/{newcomerId}/convert:
+    post:
+      tags: [Newcomers]
+      summary: Convert newcomer
+      operationId: convertNewcomer
+      parameters:
+        - name: newcomerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionInput'
+      responses:
+        '200':
+          description: Conversion recorded
+  /schools/enrollments:
+    get:
+      tags: [Schools]
+      summary: List enrollments
+      operationId: listEnrollments
+      parameters:
+        - name: program
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Enrollment list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Enrollment'
+    post:
+      tags: [Schools]
+      summary: Enroll student
+      operationId: createEnrollment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentInput'
+      responses:
+        '201':
+          description: Enrollment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Enrollment'
+  /schools/enrollments/{enrollmentId}/promotion:
+    post:
+      tags: [Schools]
+      summary: Promote enrollment
+      operationId: promoteEnrollment
+      parameters:
+        - name: enrollmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Promotion recorded
+  /schools/rosters:
+    get:
+      tags: [Schools]
+      summary: List class rosters
+      operationId: listRosters
+      responses:
+        '200':
+          description: Rosters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Roster'
+    post:
+      tags: [Schools]
+      summary: Create roster
+      operationId: createRoster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RosterInput'
+      responses:
+        '201':
+          description: Roster created
+  /schools/billing/reminders:
+    post:
+      tags: [Schools]
+      summary: Trigger billing reminders
+      operationId: triggerFeeReminder
+      responses:
+        '202':
+          description: Reminder job enqueued
+  /volunteers:
+    get:
+      tags: [Volunteers]
+      summary: List volunteers
+      operationId: listVolunteers
+      parameters:
+        - name: group
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Volunteer list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Volunteer'
+    post:
+      tags: [Volunteers]
+      summary: Register volunteer
+      operationId: createVolunteer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VolunteerInput'
+      responses:
+        '201':
+          description: Volunteer created
+  /volunteers/{volunteerId}/roster:
+    patch:
+      tags: [Volunteers]
+      summary: Update roster assignment
+      operationId: updateVolunteerRoster
+      parameters:
+        - name: volunteerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VolunteerRosterPatch'
+      responses:
+        '200':
+          description: Assignment updated
+  /volunteer-logs:
+    get:
+      tags: [Volunteers]
+      summary: List volunteer logs
+      operationId: listVolunteerLogs
+      parameters:
+        - name: volunteerId
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VolunteerLog'
+    post:
+      tags: [Volunteers]
+      summary: Create volunteer log
+      operationId: createVolunteerLog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VolunteerLogInput'
+      responses:
+        '201':
+          description: Log recorded
+  /volunteers/digests/inactivity:
+    post:
+      tags: [Volunteers]
+      summary: Trigger inactivity digest
+      operationId: triggerInactivityDigest
+      responses:
+        '202':
+          description: Digest job enqueued
+  /media/requests:
+    get:
+      tags: [Media]
+      summary: List media requests
+      operationId: listMediaRequests
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaRequest'
+    post:
+      tags: [Media]
+      summary: Submit media request
+      operationId: createMediaRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequestInput'
+      responses:
+        '201':
+          description: Request submitted
+  /media/requests/{requestId}:
+    get:
+      tags: [Media]
+      summary: Retrieve media request
+      operationId: getMediaRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRequest'
+  /media/requests/{requestId}/decision:
+    post:
+      tags: [Media]
+      summary: Decide media request
+      operationId: decideMediaRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaDecision'
+      responses:
+        '200':
+          description: Decision recorded
+  /media/public-feed:
+    get:
+      tags: [Media]
+      summary: List approved feed entries
+      operationId: listMediaFeed
+      responses:
+        '200':
+          description: Feed entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaFeedItem'
+  /councils:
+    get:
+      tags: [Councils]
+      summary: List councils
+      operationId: listCouncils
+      responses:
+        '200':
+          description: Councils
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Council'
+    post:
+      tags: [Councils]
+      summary: Create council
+      operationId: createCouncil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouncilInput'
+      responses:
+        '201':
+          description: Council created
+  /councils/{councilId}:
+    get:
+      tags: [Councils]
+      summary: Retrieve council
+      operationId: getCouncil
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Council detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Council'
+    patch:
+      tags: [Councils]
+      summary: Update council
+      operationId: updateCouncil
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouncilPatch'
+      responses:
+        '200':
+          description: Council updated
+  /councils/{councilId}/terms:
+    get:
+      tags: [Councils]
+      summary: List council terms
+      operationId: listCouncilTerms
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Council terms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CouncilTerm'
+    post:
+      tags: [Councils]
+      summary: Create council term
+      operationId: createCouncilTerm
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouncilTermInput'
+      responses:
+        '201':
+          description: Term created
+  /reports:
+    get:
+      tags: [Reports]
+      summary: List available reports
+      operationId: listReports
+      responses:
+        '200':
+          description: Reports catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportDefinition'
+  /reports/{reportId}/run:
+    post:
+      tags: [Reports]
+      summary: Execute report
+      operationId: runReport
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filters:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Report results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResult'
+  /reports/{reportId}/schedule:
+    post:
+      tags: [Reports]
+      summary: Configure report scheduling
+      operationId: scheduleReport
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportScheduleInput'
+      responses:
+        '202':
+          description: Schedule updated
+components:
+  parameters:
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      schema:
+        type: string
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema:
+        type: string
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+    SponsorshipId:
+      name: sponsorshipId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    MemberPage:
+      type: object
+      required: [data, nextCursor]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        nextCursor:
+          type: string
+          nullable: true
+    Member:
+      type: object
+      required: [id, fullName, status, joinedOn]
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        memberCode:
+          type: string
+        status:
+          type: string
+        suggestedStatus:
+          type: string
+          nullable: true
+        statusReason:
+          type: string
+          nullable: true
+        joinedOn:
+          type: string
+          format: date
+        lastPaymentOn:
+          type: string
+          format: date
+          nullable: true
+    MemberInput:
+      type: object
+      required: [fullName, status]
+      properties:
+        fullName:
+          type: string
+        memberCode:
+          type: string
+        status:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+    MemberPatch:
+      type: object
+      description: Partial update of member fields
+      additionalProperties: true
+    StatusSuggestion:
+      type: object
+      properties:
+        suggestedStatus:
+          type: string
+        confidence:
+          type: number
+          format: float
+        rationale:
+          type: string
+    ImportBatch:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    PaymentPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        nextCursor:
+          type: string
+          nullable: true
+    Payment:
+      type: object
+      required: [id, memberId, paymentType, amount, currency, postedOn, ledgerHash]
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        paymentType:
+          type: string
+        amount:
+          type: number
+          format: float
+        currency:
+          type: string
+        source:
+          type: string
+        postedOn:
+          type: string
+          format: date
+        ledgerHash:
+          type: string
+    PaymentInput:
+      type: object
+      required: [memberId, paymentType, amount, currency]
+      properties:
+        memberId:
+          type: string
+        paymentType:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        source:
+          type: string
+        referenceNo:
+          type: string
+    Correction:
+      type: object
+      required: [id, paymentId, deltaAmount, status]
+      properties:
+        id:
+          type: string
+        paymentId:
+          type: string
+        deltaAmount:
+          type: number
+          format: float
+        reason:
+          type: string
+        status:
+          type: string
+    CorrectionInput:
+      type: object
+      required: [deltaAmount, reason]
+      properties:
+        deltaAmount:
+          type: number
+        reason:
+          type: string
+        correctionType:
+          type: string
+    CorrectionDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string
+    Sponsorship:
+      type: object
+      required: [id, sponsorMemberId, beneficiaryMemberId, pledgeAmount, frequency, status]
+      properties:
+        id:
+          type: string
+        sponsorMemberId:
+          type: string
+        beneficiaryMemberId:
+          type: string
+        pledgeAmount:
+          type: number
+        frequency:
+          type: string
+        status:
+          type: string
+        nextReminderOn:
+          type: string
+          format: date
+    SponsorshipInput:
+      type: object
+      required: [sponsorMemberId, beneficiaryMemberId, pledgeAmount, frequency]
+      properties:
+        sponsorMemberId:
+          type: string
+        beneficiaryMemberId:
+          type: string
+        pledgeAmount:
+          type: number
+        frequency:
+          type: string
+        startDate:
+          type: string
+          format: date
+    SponsorshipPatch:
+      type: object
+      properties:
+        pledgeAmount:
+          type: number
+        status:
+          type: string
+        reminderFrequency:
+          type: string
+    Newcomer:
+      type: object
+      required: [id, fullName, conversionStatus]
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        conversionStatus:
+          type: string
+        assignedTo:
+          type: string
+        followUpOn:
+          type: string
+          format: date
+          nullable: true
+    NewcomerInput:
+      type: object
+      required: [fullName, arrivalDate]
+      properties:
+        fullName:
+          type: string
+        arrivalDate:
+          type: string
+          format: date
+        sponsorCandidate:
+          type: string
+        notes:
+          type: string
+    ConversionInput:
+      type: object
+      required: [conversionStatus]
+      properties:
+        conversionStatus:
+          type: string
+          enum: [Converted, Dropped]
+        sponsorshipId:
+          type: string
+    Enrollment:
+      type: object
+      required: [id, studentId, program, classLevel, status]
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        program:
+          type: string
+        classLevel:
+          type: string
+        term:
+          type: string
+        status:
+          type: string
+        feeDueOn:
+          type: string
+          format: date
+          nullable: true
+        lastPaidOn:
+          type: string
+          format: date
+          nullable: true
+    EnrollmentInput:
+      type: object
+      required: [studentId, program, classLevel, term]
+      properties:
+        studentId:
+          type: string
+        program:
+          type: string
+        classLevel:
+          type: string
+        term:
+          type: string
+        feeAmount:
+          type: number
+    Roster:
+      type: object
+      required: [id, program, level, term]
+      properties:
+        id:
+          type: string
+        program:
+          type: string
+        level:
+          type: string
+        term:
+          type: string
+        leaderId:
+          type: string
+        capacity:
+          type: integer
+        schedule:
+          type: string
+    RosterInput:
+      type: object
+      required: [program, level, term]
+      properties:
+        program:
+          type: string
+        level:
+          type: string
+        term:
+          type: string
+        leaderId:
+          type: string
+        capacity:
+          type: integer
+    Volunteer:
+      type: object
+      required: [id, memberId, groupName, status]
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        joinedOn:
+          type: string
+          format: date
+    VolunteerInput:
+      type: object
+      required: [memberId, groupName, role]
+      properties:
+        memberId:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+        notes:
+          type: string
+    VolunteerRosterPatch:
+      type: object
+      properties:
+        groupName:
+          type: string
+        role:
+          type: string
+    VolunteerLog:
+      type: object
+      required: [id, volunteerId, serviceDate, hoursServed]
+      properties:
+        id:
+          type: string
+        volunteerId:
+          type: string
+        serviceDate:
+          type: string
+          format: date
+        hoursServed:
+          type: number
+        activityType:
+          type: string
+        notes:
+          type: string
+    VolunteerLogInput:
+      type: object
+      required: [volunteerId, serviceDate, hoursServed]
+      properties:
+        volunteerId:
+          type: string
+        serviceDate:
+          type: string
+          format: date
+        hoursServed:
+          type: number
+        activityType:
+          type: string
+        notes:
+          type: string
+    MediaRequest:
+      type: object
+      required: [id, title, status]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        assetPath:
+          type: string
+        status:
+          type: string
+        submittedBy:
+          type: string
+        submittedOn:
+          type: string
+          format: date-time
+    MediaRequestInput:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        assetPath:
+          type: string
+    MediaDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string
+    MediaFeedItem:
+      type: object
+      required: [id, title, publishedOn]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        publishedOn:
+          type: string
+          format: date-time
+        approvedBy:
+          type: string
+    Council:
+      type: object
+      required: [id, department, status]
+      properties:
+        id:
+          type: string
+        department:
+          type: string
+        description:
+          type: string
+        chairId:
+          type: string
+        status:
+          type: string
+        establishedOn:
+          type: string
+          format: date
+    CouncilInput:
+      type: object
+      required: [department, chairId]
+      properties:
+        department:
+          type: string
+        description:
+          type: string
+        chairId:
+          type: string
+    CouncilPatch:
+      type: object
+      properties:
+        status:
+          type: string
+        chairId:
+          type: string
+    CouncilTerm:
+      type: object
+      required: [id, councilId, termStart, termEnd]
+      properties:
+        id:
+          type: string
+        councilId:
+          type: string
+        termStart:
+          type: string
+          format: date
+        termEnd:
+          type: string
+          format: date
+        traineeCount:
+          type: integer
+        focusArea:
+          type: string
+    CouncilTermInput:
+      type: object
+      required: [termStart, termEnd]
+      properties:
+        termStart:
+          type: string
+          format: date
+        termEnd:
+          type: string
+          format: date
+        traineeCount:
+          type: integer
+        focusArea:
+          type: string
+    ReportDefinition:
+      type: object
+      required: [id, domain, title]
+      properties:
+        id:
+          type: string
+        domain:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        supportsScheduling:
+          type: boolean
+    ReportResult:
+      type: object
+      required: [columns, rows]
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    ReportScheduleInput:
+      type: object
+      required: [cron, deliveryChannels]
+      properties:
+        cron:
+          type: string
+        deliveryChannels:
+          type: array
+          items:
+            type: string
+        recipients:
+          type: array
+          items:
+            type: string

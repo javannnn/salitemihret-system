@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Media Workflow API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /media/requests:
+    get:
+      summary: List media requests by status
+      operationId: listMediaRequests
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Media requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaRequest'
+    post:
+      summary: Submit media request
+      operationId: createMediaRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRequestInput'
+      responses:
+        '201':
+          description: Request submitted
+  /media/requests/{requestId}:
+    get:
+      summary: Retrieve media request
+      operationId: getMediaRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRequest'
+  /media/requests/{requestId}/decision:
+    post:
+      summary: Approve or reject media request
+      operationId: decideMediaRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaDecision'
+      responses:
+        '200':
+          description: Decision recorded
+  /media/public-feed:
+    get:
+      summary: Fetch approved media feed items
+      operationId: listMediaFeed
+      responses:
+        '200':
+          description: Approved feed entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaFeedItem'
+components:
+  schemas:
+    MediaRequest:
+      type: object
+      required:
+        - id
+        - title
+        - status
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        assetPath:
+          type: string
+        status:
+          type: string
+        submittedBy:
+          type: string
+        submittedOn:
+          type: string
+          format: date-time
+    MediaRequestInput:
+      type: object
+      required:
+        - title
+        - description
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        assetPath:
+          type: string
+    MediaDecision:
+      type: object
+      required:
+        - decision
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string
+    MediaFeedItem:
+      type: object
+      required:
+        - id
+        - title
+        - publishedOn
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        publishedOn:
+          type: string
+          format: date-time
+        approvedBy:
+          type: string

@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Members API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /members:
+    get:
+      summary: List members with filters
+      operationId: listMembers
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: Filter by member status
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Full-text search on name or code
+      responses:
+        '200':
+          description: Paginated member list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberPage'
+    post:
+      summary: Create member
+      operationId: createMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberInput'
+      responses:
+        '201':
+          description: Member created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+  /members/{memberId}:
+    get:
+      summary: Retrieve member
+      operationId: getMember
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      responses:
+        '200':
+          description: Member detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+    patch:
+      summary: Update member fields
+      operationId: updateMember
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberPatch'
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+  /members/{memberId}/status-suggestion:
+    get:
+      summary: Fetch suggested status for member
+      operationId: getStatusSuggestion
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      responses:
+        '200':
+          description: Suggestion payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusSuggestion'
+  /members/import:
+    post:
+      summary: Import member CSV file
+      operationId: importMembers
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Import accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportBatch'
+  /members/import/{batchId}/errors:
+    get:
+      summary: Download error CSV for import batch
+      operationId: downloadImportErrors
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      responses:
+        '200':
+          description: CSV content
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+components:
+  parameters:
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      schema:
+        type: string
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    MemberPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        nextCursor:
+          type: string
+          nullable: true
+    Member:
+      type: object
+      required:
+        - id
+        - fullName
+        - status
+        - joinedOn
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        memberCode:
+          type: string
+        status:
+          type: string
+        suggestedStatus:
+          type: string
+          nullable: true
+        statusReason:
+          type: string
+          nullable: true
+        joinedOn:
+          type: string
+          format: date
+        lastPaymentOn:
+          type: string
+          format: date
+          nullable: true
+    MemberInput:
+      type: object
+      required:
+        - fullName
+        - status
+      properties:
+        fullName:
+          type: string
+        memberCode:
+          type: string
+        status:
+          type: string
+        phone:
+          type: string
+    MemberPatch:
+      type: object
+      additionalProperties: true
+    StatusSuggestion:
+      type: object
+      properties:
+        suggestedStatus:
+          type: string
+        confidence:
+          type: number
+        rationale:
+          type: string
+    ImportBatch:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

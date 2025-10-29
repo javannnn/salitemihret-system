@@ -1,0 +1,213 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Payments API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /payments/ledger:
+    get:
+      summary: List payment ledger entries
+      operationId: listPayments
+      parameters:
+        - name: memberId
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment ledger page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentPage'
+    post:
+      summary: Record payment entry
+      operationId: createPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInput'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/ledger/{paymentId}:
+    get:
+      summary: Retrieve payment entry
+      operationId: getPayment
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/ledger/{paymentId}/corrections:
+    post:
+      summary: Request correction for payment
+      operationId: createCorrection
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionInput'
+      responses:
+        '202':
+          description: Correction submitted for approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Correction'
+  /payments/corrections/{correctionId}/decision:
+    post:
+      summary: Approve or reject correction
+      operationId: decideCorrection
+      parameters:
+        - name: correctionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionDecision'
+      responses:
+        '200':
+          description: Correction state updated
+components:
+  parameters:
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    PaymentPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        nextCursor:
+          type: string
+          nullable: true
+    Payment:
+      type: object
+      required:
+        - id
+        - memberId
+        - paymentType
+        - amount
+        - currency
+        - postedOn
+        - ledgerHash
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        paymentType:
+          type: string
+        amount:
+          type: number
+          format: float
+        currency:
+          type: string
+        source:
+          type: string
+        postedOn:
+          type: string
+          format: date
+        ledgerHash:
+          type: string
+    PaymentInput:
+      type: object
+      required:
+        - memberId
+        - paymentType
+        - amount
+        - currency
+      properties:
+        memberId:
+          type: string
+        paymentType:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        source:
+          type: string
+        referenceNo:
+          type: string
+    Correction:
+      type: object
+      required:
+        - id
+        - paymentId
+        - deltaAmount
+        - status
+      properties:
+        id:
+          type: string
+        paymentId:
+          type: string
+        deltaAmount:
+          type: number
+          format: float
+        reason:
+          type: string
+        status:
+          type: string
+    CorrectionInput:
+      type: object
+      required:
+        - deltaAmount
+        - reason
+      properties:
+        deltaAmount:
+          type: number
+        reason:
+          type: string
+        correctionType:
+          type: string
+    CorrectionDecision:
+      type: object
+      required:
+        - decision
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string

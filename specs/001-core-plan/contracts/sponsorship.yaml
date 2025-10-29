@@ -1,0 +1,214 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Sponsorship & Newcomer API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /sponsorships:
+    get:
+      summary: List active sponsorship pledges
+      operationId: listSponsorships
+      responses:
+        '200':
+          description: Sponsorship collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sponsorship'
+    post:
+      summary: Create sponsorship pledge
+      operationId: createSponsorship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorshipInput'
+      responses:
+        '201':
+          description: Sponsorship created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sponsorship'
+  /sponsorships/{sponsorshipId}:
+    patch:
+      summary: Update pledge details
+      operationId: updateSponsorship
+      parameters:
+        - $ref: '#/components/parameters/SponsorshipId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorshipPatch'
+      responses:
+        '200':
+          description: Sponsorship updated
+  /sponsorships/{sponsorshipId}/reminder:
+    post:
+      summary: Trigger manual reminder
+      operationId: triggerSponsorshipReminder
+      parameters:
+        - $ref: '#/components/parameters/SponsorshipId'
+      responses:
+        '202':
+          description: Reminder enqueued
+  /newcomers:
+    get:
+      summary: List newcomers by status
+      operationId: listNewcomers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Newcomer pipeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Newcomer'
+    post:
+      summary: Register newcomer
+      operationId: createNewcomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewcomerInput'
+      responses:
+        '201':
+          description: Newcomer registered
+  /newcomers/{newcomerId}/convert:
+    post:
+      summary: Convert newcomer to sponsor/member
+      operationId: convertNewcomer
+      parameters:
+        - name: newcomerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionInput'
+      responses:
+        '200':
+          description: Conversion recorded
+components:
+  parameters:
+    SponsorshipId:
+      name: sponsorshipId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    Sponsorship:
+      type: object
+      required:
+        - id
+        - sponsorMemberId
+        - beneficiaryMemberId
+        - pledgeAmount
+        - frequency
+        - status
+      properties:
+        id:
+          type: string
+        sponsorMemberId:
+          type: string
+        beneficiaryMemberId:
+          type: string
+        pledgeAmount:
+          type: number
+        frequency:
+          type: string
+        status:
+          type: string
+        nextReminderOn:
+          type: string
+          format: date
+    SponsorshipInput:
+      type: object
+      required:
+        - sponsorMemberId
+        - beneficiaryMemberId
+        - pledgeAmount
+        - frequency
+      properties:
+        sponsorMemberId:
+          type: string
+        beneficiaryMemberId:
+          type: string
+        pledgeAmount:
+          type: number
+        frequency:
+          type: string
+        startDate:
+          type: string
+          format: date
+    SponsorshipPatch:
+      type: object
+      properties:
+        pledgeAmount:
+          type: number
+        status:
+          type: string
+        reminderFrequency:
+          type: string
+    Newcomer:
+      type: object
+      required:
+        - id
+        - fullName
+        - conversionStatus
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        conversionStatus:
+          type: string
+        assignedTo:
+          type: string
+        followUpOn:
+          type: string
+          format: date
+    NewcomerInput:
+      type: object
+      required:
+        - fullName
+        - arrivalDate
+      properties:
+        fullName:
+          type: string
+        arrivalDate:
+          type: string
+          format: date
+        sponsorCandidate:
+          type: string
+        notes:
+          type: string
+    ConversionInput:
+      type: object
+      required:
+        - conversionStatus
+      properties:
+        conversionStatus:
+          type: string
+          enum: [Converted, Dropped]
+        sponsorshipId:
+          type: string

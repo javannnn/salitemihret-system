@@ -1,0 +1,177 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Schools API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /schools/enrollments:
+    get:
+      summary: List enrollments
+      operationId: listEnrollments
+      parameters:
+        - name: program
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Enrollment list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Enrollment'
+    post:
+      summary: Enroll student
+      operationId: createEnrollment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentInput'
+      responses:
+        '201':
+          description: Enrollment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Enrollment'
+  /schools/enrollments/{enrollmentId}/promotion:
+    post:
+      summary: Promote student to next level
+      operationId: promoteEnrollment
+      parameters:
+        - name: enrollmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Promotion recorded
+  /schools/rosters:
+    get:
+      summary: List class rosters
+      operationId: listRosters
+      responses:
+        '200':
+          description: Class rosters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Roster'
+    post:
+      summary: Create class roster
+      operationId: createRoster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RosterInput'
+      responses:
+        '201':
+          description: Roster created
+  /schools/billing/reminders:
+    post:
+      summary: Trigger monthly fee reminders
+      operationId: triggerFeeReminder
+      responses:
+        '202':
+          description: Reminder job enqueued
+components:
+  schemas:
+    Enrollment:
+      type: object
+      required:
+        - id
+        - studentId
+        - program
+        - classLevel
+        - status
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        program:
+          type: string
+        classLevel:
+          type: string
+        term:
+          type: string
+        status:
+          type: string
+        feeDueOn:
+          type: string
+          format: date
+        lastPaidOn:
+          type: string
+          format: date
+          nullable: true
+    EnrollmentInput:
+      type: object
+      required:
+        - studentId
+        - program
+        - classLevel
+        - term
+      properties:
+        studentId:
+          type: string
+        program:
+          type: string
+        classLevel:
+          type: string
+        term:
+          type: string
+        feeAmount:
+          type: number
+    Roster:
+      type: object
+      required:
+        - id
+        - program
+        - level
+        - term
+      properties:
+        id:
+          type: string
+        program:
+          type: string
+        level:
+          type: string
+        term:
+          type: string
+        leaderId:
+          type: string
+        capacity:
+          type: integer
+        schedule:
+          type: string
+    RosterInput:
+      type: object
+      required:
+        - program
+        - level
+        - term
+      properties:
+        program:
+          type: string
+        level:
+          type: string
+        term:
+          type: string
+        leaderId:
+          type: string
+        capacity:
+          type: integer

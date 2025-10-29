@@ -1,0 +1,179 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Councils API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /councils:
+    get:
+      summary: List councils
+      operationId: listCouncils
+      responses:
+        '200':
+          description: Council collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Council'
+    post:
+      summary: Create council
+      operationId: createCouncil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouncilInput'
+      responses:
+        '201':
+          description: Council created
+  /councils/{councilId}:
+    get:
+      summary: Retrieve council details
+      operationId: getCouncil
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Council detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Council'
+    patch:
+      summary: Update council status or chair
+      operationId: updateCouncil
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                chairId:
+                  type: string
+      responses:
+        '200':
+          description: Council updated
+  /councils/{councilId}/terms:
+    get:
+      summary: List terms for council
+      operationId: listCouncilTerms
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Terms collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CouncilTerm'
+    post:
+      summary: Create council term
+      operationId: createCouncilTerm
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouncilTermInput'
+      responses:
+        '201':
+          description: Term created
+components:
+  schemas:
+    Council:
+      type: object
+      required:
+        - id
+        - department
+        - status
+      properties:
+        id:
+          type: string
+        department:
+          type: string
+        description:
+          type: string
+        chairId:
+          type: string
+        status:
+          type: string
+        establishedOn:
+          type: string
+          format: date
+    CouncilInput:
+      type: object
+      required:
+        - department
+        - chairId
+      properties:
+        department:
+          type: string
+        description:
+          type: string
+        chairId:
+          type: string
+    CouncilTerm:
+      type: object
+      required:
+        - id
+        - councilId
+        - termStart
+        - termEnd
+      properties:
+        id:
+          type: string
+        councilId:
+          type: string
+        termStart:
+          type: string
+          format: date
+        termEnd:
+          type: string
+          format: date
+        traineeCount:
+          type: integer
+        focusArea:
+          type: string
+    CouncilTermInput:
+      type: object
+      required:
+        - termStart
+        - termEnd
+      properties:
+        termStart:
+          type: string
+          format: date
+        termEnd:
+          type: string
+          format: date
+        traineeCount:
+          type: integer

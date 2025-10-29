@@ -1,0 +1,115 @@
+openapi: 3.1.0
+info:
+  title: SaliteMihret Auth API
+  version: 1.0.0
+servers:
+  - url: https://salitemihret.local/api
+paths:
+  /auth/session:
+    post:
+      summary: Authenticate user and start session
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: Invalid credentials
+    delete:
+      summary: Revoke current session
+      operationId: revokeSession
+      responses:
+        '204':
+          description: Session revoked
+  /auth/roles:
+    get:
+      summary: List available roles with permissions
+      operationId: listRoles
+      responses:
+        '200':
+          description: Role collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    Session:
+      type: object
+      required:
+        - token
+        - expiresAt
+        - user
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    UserSummary:
+      type: object
+      required:
+        - id
+        - fullName
+        - roles
+      properties:
+        id:
+          type: string
+        fullName:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+    Role:
+      type: object
+      required:
+        - name
+        - permissions
+      properties:
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocPerm'
+    DocPerm:
+      type: object
+      required:
+        - doctype
+      properties:
+        doctype:
+          type: string
+        read:
+          type: boolean
+        write:
+          type: boolean
+        create:
+          type: boolean
+        delete:
+          type: boolean
+        submit:
+          type: boolean
