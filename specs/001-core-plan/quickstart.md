@@ -30,6 +30,7 @@
 - **US7 Media (SPEC-MED-001)**: Submit request, approve via media admin, validate `/media/public-feed` endpoint returns published item.
 - **US8 Councils (SPEC-COU-001)**: Create council, add term, open governance dashboard in React admin to ensure metrics resolve.
 - **US9 Reports (SPEC-REP-001)**: Run ad-hoc report through UI, configure schedule, check scheduler log for successful execution.
+- **RBAC Baseline**: After syncing fixtures (`bench --site salitemiret.local export-fixtures --app salitemiret`), reload the Role Permission Matrix DocTypes with `bench --site salitemiret.local reload-doc salitemiret --doctype role_permission_matrix` to ensure deny-by-default permissions are active.
 
 ## Observability & Operations
 1. Metrics: `curl http://localhost:8000/api/method/salitemiret.observability.metrics` to confirm Prometheus exposition.

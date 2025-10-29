@@ -39,6 +39,10 @@ scheduler_events = {
     ],
 }
 
+has_permission = {
+    "Role Permission Matrix": "salitemiret.permissions.role_permission_matrix_has_permission",
+    "Role Permission Matrix Entry": "salitemiret.permissions.role_permission_matrix_entry_has_permission",
+}
 before_request = [
     "salitemiret.jobs.ensure_session_policies",
 ]
