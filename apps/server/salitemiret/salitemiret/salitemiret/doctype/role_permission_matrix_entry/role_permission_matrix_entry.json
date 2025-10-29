@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "Role Permission Matrix Entry",
-  "module": "Salitemiret",
+  "module": "SaliteMiret",
   "custom": 0,
   "istable": 1,
   "track_changes": 0,

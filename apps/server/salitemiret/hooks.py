@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 app_name = "salitemiret"
-app_title = "Salitemiret"
+app_title = "SaliteMiret"
 app_publisher = "salitemihret-system"
 app_description = "RBAC baseline for the SaliteMihret system."
 app_email = "ops@salitemihret.org"
