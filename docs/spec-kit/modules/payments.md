@@ -73,3 +73,14 @@ maintaining immutable audit trails suitable for financial reconciliation.
 - Payment data restricted to Finance and Council roles.
 - Every insert/update triggers `Audit Event` with `trace_id`.
 - Corrections require justification captured in audit payload.
+
+## Implementation Plan
+- **Day 4**: Implement `apps/salitemiret/doctype/payment/` DocType with
+  correction validation and unique reference constraints; add fixtures for
+  allocation options.
+- **Day 4**: Expose payment APIs in `apps/salitemiret/api/payments.py`,
+  including correction workflow and ledger export, plus pytest coverage under
+  `apps/salitemiret/tests/payments/`.
+- **Day 4**: Build React payments table, drawer, and correction modal in
+  `frontend/src/features/payments/`, wiring TanStack Query caches and audit
+  surfaces.

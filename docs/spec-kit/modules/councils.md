@@ -70,3 +70,14 @@ and reporting on leadership activities.
 - Charter edits and trainee status changes emit `Audit Event` entries with
   payload details.
 - Access logs reviewed quarterly for governance compliance.
+
+## Implementation Plan
+- **Day 9**: Implement `apps/salitemiret/doctype/council_department/` and
+  `council_trainee/` DocTypes with mentorship milestone child tables and audit
+  hooks.
+- **Day 9**: Deliver council performance snapshot API in
+  `apps/salitemiret/api/councils.py` and scheduled notifications for at-risk
+  trainees.
+- **Day 9**: Build React council dashboards and trainee drawers within
+  `frontend/src/features/councils/`, integrating report widgets and audit
+  timelines.

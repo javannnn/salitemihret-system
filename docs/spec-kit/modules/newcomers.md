@@ -68,3 +68,13 @@ preserving intake history.
 - Newcomer PII visible only to registrar and PR Admin roles.
 - Every conversion logs `Audit Event` with reference to new member ID.
 - Intake notes redacted from exports unless Admin grants permission.
+
+## Implementation Plan
+- **Day 5**: Implement `apps/salitemiret/doctype/newcomer/` with conversion
+  constraints and duplication checks; export fixtures for referral source enums.
+- **Day 5**: Deliver conversion and digest APIs in
+  `apps/salitemiret/api/newcomers.py` and scheduled jobs within
+  `apps/salitemiret/background_jobs/stewardship.py`.
+- **Day 5**: Build React newcomer Kanban, drawer, and conversion modal at
+  `frontend/src/features/newcomers/`, with notification hooks and audit badge
+  surfaces.

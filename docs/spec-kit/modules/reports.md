@@ -67,3 +67,13 @@ ministries, and governance to support decision-making and compliance.
 - Exports containing PII require acknowledgement and produce `Audit Event` type
   `Report Exported`.
 - Generated files expire after 24 hours to minimize exposure.
+
+## Implementation Plan
+- **Day 9**: Build SQL views in `apps/salitemiret/reporting/sql/` and map Frappe
+  report definitions; ensure permissions align with RBAC roles.
+- **Day 9**: Implement execution and scheduling APIs in
+  `apps/salitemiret/api/reports.py`, plus scheduled delivery workers and email
+  templates.
+- **Day 9**: Deliver React report catalog, filter drawer, and scheduling UI in
+  `frontend/src/features/reports/`, wiring background job polling and audit
+  notations.

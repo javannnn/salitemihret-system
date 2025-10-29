@@ -70,3 +70,13 @@ about engagement and compliance with ministry commitments.
 - Volunteer PII restricted to coordinator and PR roles.
 - Each service log creation/edit records `Audit Event` (Service Logged).
 - Inactivity job logs summary audit entry with affected volunteers.
+
+## Implementation Plan
+- **Day 7**: Create DocTypes (`apps/salitemiret/doctype/volunteer_group/`,
+  `volunteer/`, `service_log/`) with validation hooks to enforce status and hour
+  constraints.
+- **Day 7**: Expose engagement APIs in `apps/salitemiret/api/volunteers.py`,
+  including report export and inactivity digest workers.
+- **Day 7**: Develop React volunteer group management UI, service log drawer, and
+  inactivity indicators within `frontend/src/features/volunteers/`, plus Cypress
+  smoke tests.

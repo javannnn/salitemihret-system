@@ -77,3 +77,14 @@ tracking enrollments, lessons, mezmur assignments, and age-based transitions.
 - Promotion and status changes emit `Audit Event` entries with before/after
   snapshot.
 - Attendance edits logged with actor and timestamp.
+
+## Implementation Plan
+- **Day 6**: Define DocTypes (`apps/salitemiret/doctype/abenet_enrollment/`,
+  `sunday_school_enrollment/`, `lesson/`, `mezmur/`) with validations for age,
+  capacity, and curriculum alignment.
+- **Day 6**: Implement promotion, attendance, and notification endpoints in
+  `apps/salitemiret/api/schools.py`, plus child-turns-18 automation job in
+  `apps/salitemiret/background_jobs/age_transitions.py`.
+- **Day 6**: Build React enrollment dashboards, attendance forms, and promotion
+  wizard under `frontend/src/features/schools/`, integrating TanStack Query and
+  translation strings.

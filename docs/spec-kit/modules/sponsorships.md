@@ -66,3 +66,13 @@ compliance, and stewardship notes for sponsors.
 - Finance notes classified as sensitive; hidden from non-finance roles.
 - All pledge lifecycle changes emit `Audit Event` with actor and reason.
 - Sponsor data included in audit exports for diocesan review.
+
+## Implementation Plan
+- **Day 5**: Create `apps/salitemiret/doctype/sponsorship/` DocType, child table
+  definitions, and pledge adjustment hooks; add fixtures for default programs.
+- **Day 5**: Implement sponsorship APIs (`apps/salitemiret/api/sponsorships.py`)
+  for adjustments, exports, and reminders; configure stewardship jobs in
+  `apps/salitemiret/background_jobs/stewardship.py`.
+- **Day 5**: Build React sponsorship dashboard and drawer components in
+  `frontend/src/features/sponsorships/`, including pledge adjustment wizard and
+  reporting panels.

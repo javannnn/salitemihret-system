@@ -88,3 +88,15 @@ based milestones.
 - Every import, suggestion, and approval emits `Audit Event` with payload storing
   evidence and uploader information.
 - Access logs reviewed monthly to detect unusual member lookups.
+
+## Implementation Plan
+- **Day 2**: Scaffold `apps/salitemiret/doctype/member/`, `family_member/`, and
+  `member_status_history/` DocTypes with validations and fixtures; create React
+  list/drawer components in `frontend/src/features/membership/`.
+- **Day 3**: Deliver import endpoints in
+  `apps/salitemiret/api/members_import.py`, background job handlers in
+  `apps/salitemiret/background_jobs/imports.py`, and the React import stepper at
+  `frontend/src/features/membership/MemberImportStepper.tsx`.
+- **Day 3**: Implement automated status suggestion jobs in
+  `apps/salitemiret/background_jobs/status_rules.py` plus drawer UI for reviewing
+  suggestions with audit event wiring.

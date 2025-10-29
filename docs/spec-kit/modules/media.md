@@ -70,3 +70,13 @@ curated publication on the public website feed.
 - Approval and publication actions emit `Audit Event` types `Media Approved` and
   `Media Published` with trace IDs.
 - Public feed method read-only and rate-limited to prevent abuse.
+
+## Implementation Plan
+- **Day 8**: Finalize DocTypes (`apps/salitemiret/doctype/media_request/`,
+  `public_post/`) with workflow states and validation hooks for bilingual fields.
+- **Day 8**: Implement media APIs in `apps/salitemiret/api/media.py`, including
+  approval logic, public feed response, and CDN invalidation integration under
+  `apps/salitemiret/integrations/cdn.py`.
+- **Day 8**: Build React media board, approval drawer, and public feed preview in
+  `frontend/src/features/media/`, ensuring audit trail visibility and Amharic
+  copy entry.
