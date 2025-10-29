@@ -1,20 +1,31 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: SaliteMiret Core Plan API
   version: 1.0.0
-  description: >
-    Aggregated contract mirroring `docs/spec-kit/04-api-contracts.md`.
+  license:
+    name: Proprietary
 servers:
   - url: https://salitemiret.local
 tags:
   - name: Members
+    description: Manage member profiles and lifecycle.
   - name: Payments
+    description: Record contributions, tithes, service and school fees.
   - name: Sponsorships
+    description: Manage pledges, budgets, and reminders.
   - name: Media
+    description: Media requests and public posts (system→public feed).
   - name: Schools
+    description: Abenet/Sunday School enrollments, fees, promotion.
   - name: Volunteers
+    description: Volunteer groups, rosters, and service logs.
   - name: Councils
+    description: Council departments, trainees, and terms.
   - name: Reports
+    description: Report execution and scheduling.
+security:
+  - CookieAuth: []
+  - TokenAuth: []
 paths:
   /api/resource/Member:
     get:
@@ -1061,3 +1072,12 @@ components:
           format: date
         mentor:
           type: string
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: sid
+    TokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
