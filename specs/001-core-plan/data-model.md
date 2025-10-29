@@ -1,160 +1,127 @@
 # Data Model — Core Plan
 
+Source of truth: `docs/spec-kit/03-domain-model.md`. All DocTypes live in the `salitemiret` Frappe app and inherit standard Frappe metadata (`name`, `owner`, `creation`, `modified`, `docstatus`). Soft-delete semantics rely on the documented `is_active` / `active` flags.
+
 ## Overview
 
-| Entity | Purpose | Primary Indexes |
-|--------|---------|-----------------|
-| Role | Canonical system and sub-admin roles | `name` (PK) |
-| Role Permission | DocType-level privilege matrix per role | Unique (`role`, `doctype`) |
-| Audit Event | Immutable audit trail for semantic actions | (`doctype`, `docname`, `created_at`), `created_at` |
-| Member | Core person record powering workflows | Unique `member_code`, (`status`, `parish_unit`), (`last_payment_on`) |
-| Member Family Link | Family/guardian relationships | Unique (`member`, `relative`) |
-| Member Import Batch | Bulk import lifecycle tracking | `status`, `uploaded_on` |
-| Payment Entry | Immutable ledger entries | (`member`, `posted_on`), (`payment_type`, `posted_on`), unique `ledger_hash` |
-| Payment Correction | Append-only correction approvals | `payment_entry`, (`approval_status`, `created_at`) |
-| Sponsorship | Sponsor-to-beneficiary pledges | `sponsor_member`, (`status`, `next_reminder_on`) |
-| Newcomer | Settlement and conversion pipeline | `conversion_status`, `assigned_to`, `follow_up_on` |
-| School Enrollment | Sunday School enrollment lifecycle | (`student`, `status`), (`program`, `term`) |
-| Class Roster | Instructional group metadata | (`program`, `level`, `term`), `leader` |
-| Volunteer | Volunteer roster metadata | `group_name`, (`status`, `group_name`) |
-| Volunteer Log | Service activity tracking | (`volunteer`, `service_date`), (`service_date`, `activity_type`) |
-| Media Request | Media approval workflow | `status`, `submitted_on` |
-| Council | Governance structures | `department`, `status` |
-| Council Term | Council term lifecycle | (`council`, `term_start`), `term_end` |
-| Report Definition | Reporting catalog entries | `domain`, `schedule_cron` |
-| Notification Digest | Scheduled digest definitions | (`digest_type`, `target_role`), `schedule_cron` |
+| Entity | Purpose | Key Custom Fields / Notes |
+|--------|---------|---------------------------|
+| Member | Core person record with bilingual names, status linkage, and household metadata | `member_id`, `first_name`, `last_name`, `first_name_am`, `last_name_am`, `status`, `preferred_language`, `household_id`, `is_active` |
+| Family Member | Household relationship record | `member`, `relationship`, `head_of_household`, `household_code` |
+| Member Status History | Tracks status suggestions/approvals | `status`, `effective_date`, `reason`, `approved_by`, `suggestion_source` |
+| Payment | Immutable ledger entry with correction linkage | `payment_reference`, `member`, `payment_date`, `amount`, `method`, `allocation`, `correction_of`, `created_by_import` |
+| Sponsorship | Sponsor commitments | `sponsorship_id`, `member`, `beneficiary_name`, `monthly_amount`, `program`, `status` |
+| Newcomer | Settlement pipeline | `newcomer_id`, `first_name`, `last_name`, `preferred_language`, `visit_date`, `followup_owner`, `converted_member` |
+| Abenet Enrollment | Adult formation enrollment | `member`, `cohort`, `enrollment_date`, `status`, `mentor` |
+| Sunday School Enrollment | Youth enrollment tracking | `child`, `guardian`, `class_level`, `enrollment_date`, `expected_graduation`, `status`, `mezmur_group` |
+| Lesson | Curriculum definition | `lesson_code`, bilingual titles, `level`, `duration_minutes` |
+| Mezmur | Choir group metadata | `mezmur_code`, `title`, `language`, `category`, `rehearsal_day`, `conductor` |
+| Volunteer Group | Ministry grouping | `group_id`, `name`, `ministry_area`, `coordinator`, `meeting_schedule` |
+| Volunteer | Volunteer participation record | `member`, `group`, `joined_on`, `role`, `status` |
+| Service Log | Logged volunteer service | `volunteer`, `service_date`, `hours`, `description`, `verified_by` |
+| Media Request | Media workflow | `request_id`, `title`, `requester`, `ministry_area`, `status`, `public_post` |
+| Public Post | Published content generated from media requests | `slug`, `title`, `body`, `language`, `published_on`, `source_media_request` |
+| Council Department | Governance departments | `department_id`, `name`, `chair`, `charter`, `active` |
+| Council Trainee | Department trainees | `trainee_id`, `member`, `department`, `start_date`, `expected_completion`, `mentor`, `status` |
+| Audit Event | Immutable audit log | `event_type`, `source_doctype`, `source_name`, `actor`, `payload`, `trace_id`, `occurred_on` |
 
 ## Entity Details
 
-### Role
-- **Fields**: `name` (PK), `description`, `is_system`, `priority`
-- **Relationships**: One-to-many with Role Permission (`role`)
-- **Validation**: `name` unique; `is_system` roles cannot be archived
-- **State Transitions**: Active ↔ Archived (non-system roles)
-- **Indexes**: Primary key `name`
-
-### Role Permission
-- **Fields**: `name` (PK), `role` (FK), `doctype`, `read`, `write`, `create`, `delete`, `submit`, `cancel`
-- **Relationships**: Belongs to Role
-- **Validation**: At least one permission flag true; deny-by-default when absent
-- **State Transitions**: Configuration-only
-- **Indexes**: Unique composite (`role`, `doctype`)
-
-### Audit Event
-- **Fields**: `name` (PK), `doctype`, `docname`, `actor`, `action`, `payload`, `ip_address`, `created_at`
-- **Relationships**: References any DocType via `doctype`/`docname`
-- **Validation**: Immutable payload JSON; `actor` required
-- **State Transitions**: Append-only
-- **Indexes**: Composite (`doctype`, `docname`, `created_at`), secondary on `created_at`
-
 ### Member
-- **Fields**: `name` (PK), `full_name`, `member_code`, `status`, `suggested_status`, `status_reason`, `import_batch`, `birth_date`, `gender`, `phone`, `email`, `address`, `parish_unit`, `joined_on`, `last_payment_on`
-- **Relationships**: Many-to-many via Member Family Link; one-to-many with Payment Entry; optional Sponsorship links
-- **Validation**: `member_code` required/unique; status transitions gated by PR approval
-- **State Transitions**: Draft → Active → Suspended → Archived; suggestions promoted post-approval
-- **Indexes**: Unique `member_code`; composite (`status`, `parish_unit`); single `last_payment_on`
+- **Fields**: `member_id` (unique), English + Amharic names, demographics (birth_date, gender, marital_status), contact info, `household_id`, `preferred_language`, sacramental dates, notes, `is_active`.
+- **Relationships**: Linked from Family Member, Member Status History, Payment, Sponsorship, Newcomer (conversion), Volunteer, Service Log, Enrollments.
+- **Validation**: `member_id` unique; phone validated (E.164); soft delete toggles `is_active`.
+- **Indexes**: Unique `member_id`, composite (`last_name`, `first_name`), index on `phone`.
 
-### Member Family Link
-- **Fields**: `name` (PK), `member` (FK), `relative` (FK), `relationship`, `is_guardian`
-- **Relationships**: Bi-directional Member associations
-- **Validation**: Prevent reciprocal duplicates; guardian requires adult relative flag
-- **State Transitions**: Active ↔ Archived
-- **Indexes**: Unique composite (`member`, `relative`)
+### Family Member
+- **Fields**: `member`, `relationship`, `head_of_household`, `household_code`, `start_date`, `end_date`.
+- **Relationships**: References `Member`.
+- **Validation**: Prevent duplicate household rows; enforce one head_of_household per `household_code`.
+- **Indexes**: Composite (`household_code`, `member`).
 
-### Member Import Batch
-- **Fields**: `name` (PK), `uploaded_by`, `uploaded_on`, `file_path`, `processed_on`, `status`, `error_csv`, `row_count`, `success_count`, `failure_count`
-- **Relationships**: One-to-many with Member through `import_batch`
-- **Validation**: Error CSV mandatory when failures exist; status controlled by background job
-- **State Transitions**: Uploaded → Processing → Completed | Failed | Cancelled
-- **Indexes**: Single on `status`; single on `uploaded_on`
+### Member Status History
+- **Fields**: `member`, `status`, `effective_date`, `reason`, `notes`, `approved_by`, `suggestion_source`.
+- **Relationships**: Updates `Member.status`.
+- **Validation**: Only the most recent entry may set `member.status`; `approved_by` required for non-automated transitions.
+- **Indexes**: Composite (`member`, `effective_date DESC`).
 
-### Payment Entry
-- **Fields**: `name` (PK), `member` (FK), `payment_type`, `amount`, `currency`, `source`, `reference_no`, `posted_on`, `received_on`, `ledger_hash`, `created_by`, `created_at`
-- **Relationships**: One-to-many with Payment Correction; belongs to Member
-- **Validation**: Immutable after creation; `ledger_hash` chained for tamper detection
-- **State Transitions**: Posted only (no updates)
-- **Indexes**: Composite (`member`, `posted_on`); composite (`payment_type`, `posted_on`); unique `ledger_hash`
-
-### Payment Correction
-- **Fields**: `name` (PK), `payment_entry` (FK), `correction_type`, `delta_amount`, `reason`, `approval_status`, `approved_by`, `approved_on`, `audit_reference`
-- **Relationships**: Belongs to Payment Entry; pushes Audit Event
-- **Validation**: Delta non-zero; workflow Pending → Approved/Rejected; approval requires role-based permission
-- **State Transitions**: Draft → Pending Approval → Approved | Rejected
-- **Indexes**: Single on `payment_entry`; composite (`approval_status`, `created_at`)
+### Payment
+- **Fields**: `payment_reference` (unique), `member`, `payment_date`, `amount`, `method`, `allocation`, `correction_of`, `created_by_import`, `memo`.
+- **Relationships**: References `Member`; `correction_of` self-links for adjustments.
+- **Validation**: Prevent editing existing rows; enforce correction linkage and reconciled amounts.
+- **Indexes**: Unique `payment_reference`; composite (`member`, `payment_date`).
 
 ### Sponsorship
-- **Fields**: `name` (PK), `sponsor_member` (FK), `beneficiary_member` (FK), `pledge_amount`, `currency`, `frequency`, `budget_code`, `start_date`, `end_date`, `status`, `reminder_frequency`, `next_reminder_on`
-- **Relationships**: Links sponsor and beneficiary Members; ties to Newcomer after conversion
-- **Validation**: Active sponsorship requires future `next_reminder_on`; frequency enumerations enforced
-- **State Transitions**: Draft → Active → Paused → Completed → Archived
-- **Indexes**: Single on `sponsor_member`; composite (`status`, `next_reminder_on`)
+- **Fields**: `sponsorship_id`, `member` (sponsor), `beneficiary_name`, bilingual notes, `start_date`, `end_date`, `monthly_amount`, `status`, `program`.
+- **Relationships**: Links to members and newcomer conversions.
+- **Validation**: active status requires ongoing commitment; monthly_amount > 0.
+- **Indexes**: Composite (`member`, `status`).
 
 ### Newcomer
-- **Fields**: `name` (PK), `full_name`, `arrival_date`, `sponsor_candidate` (FK Member), `conversion_status`, `assigned_to`, `follow_up_on`, `notes`
-- **Relationships**: Optional Sponsorship link; assigned to admin user
-- **Validation**: Conversion requires sponsor or reason; follow-up date required while in Integration
-- **State Transitions**: Registered → In Integration → Converted | Dropped
-- **Indexes**: Singles on `conversion_status`, `assigned_to`, `follow_up_on`
+- **Fields**: `newcomer_id`, bilingual names, `preferred_language`, `visit_date`, `referred_by`, `followup_owner`, `notes`, `converted_member`.
+- **Relationships**: Provides source for membership conversion.
+- **Validation**: Converted state requires `converted_member`.
+- **Indexes**: Index on `visit_date`; composite (`last_name`, `first_name`).
 
-### School Enrollment
-- **Fields**: `name` (PK), `student` (FK Member), `program`, `class_level`, `term`, `status`, `fee_amount`, `fee_due_on`, `last_paid_on`, `promotion_candidate`
-- **Relationships**: Belongs to Class Roster; interacts with Payment Entry for billing
-- **Validation**: `fee_due_on` required for billing; promotion requires Active state
-- **State Transitions**: Applied → Enrolled → Graduated | Withdrawn
-- **Indexes**: Composite (`student`, `status`); composite (`program`, `term`)
+### Abenet Enrollment
+- **Fields**: `member`, `cohort`, `enrollment_date`, `completion_date`, `status`, `mentor`.
+- **Relationships**: Extends adult formation flows.
+- **Validation**: Completed status requires `completion_date`.
+- **Indexes**: Composite (`cohort`, `member`).
 
-### Class Roster
-- **Fields**: `name` (PK), `program`, `level`, `term`, `leader` (FK Volunteer), `capacity`, `schedule`, `location`
-- **Relationships**: One-to-many with School Enrollment
-- **Validation**: Capacity ≥ enrolled count; leader must have Volunteer privileges
-- **State Transitions**: Planned → Active → Completed → Archived
-- **Indexes**: Composite (`program`, `level`, `term`); single on `leader`
+### Sunday School Enrollment
+- **Fields**: `child`, `guardian`, `class_level`, `enrollment_date`, `expected_graduation`, `status`, `mezmur_group`.
+- **Relationships**: Connects to Mezmur for choir placement; surfaces in school dashboards.
+- **Validation**: Guardian required; status transitions trigger mezmur updates.
+- **Indexes**: Composite (`class_level`, `status`).
+
+### Lesson
+- **Fields**: `lesson_code` (unique), bilingual titles, `description`, `level`, `duration_minutes`, `resources`.
+- **Validation**: `duration_minutes` > 0.
+- **Indexes**: Unique `lesson_code`.
+
+### Mezmur
+- **Fields**: `mezmur_code`, `title`, `language`, `category`, `rehearsal_day`, `conductor`.
+- **Validation**: `rehearsal_day` enumerated; conductor requires Volunteer / User link.
+- **Indexes**: Composite (`category`, `language`).
+
+### Volunteer Group
+- **Fields**: `group_id`, `name`, `ministry_area`, `coordinator`, `meeting_schedule`.
+- **Validation**: `group_id` unique; coordinator must have Volunteer Coordinator role.
+- **Indexes**: Unique `group_id`.
 
 ### Volunteer
-- **Fields**: `name` (PK), `member` (FK), `group_name`, `role`, `status`, `joined_on`, `contact_phone`, `notes`
-- **Relationships**: One-to-many with Volunteer Log
-- **Validation**: Member link required unless external flag; inactivity digest uses `status`
-- **State Transitions**: Applicant → Active → On Hold → Inactive
-- **Indexes**: Single on `group_name`; composite (`status`, `group_name`)
+- **Fields**: `member`, `group`, `joined_on`, `role`, `status`.
+- **Relationships**: Primary group referencing Volunteer Group.
+- **Validation**: One active volunteer record per member/group pair.
+- **Indexes**: Composite (`group`, `status`).
 
-### Volunteer Log
-- **Fields**: `name` (PK), `volunteer` (FK), `service_date`, `hours_served`, `activity_type`, `location`, `notes`, `logged_by`
-- **Relationships**: Belongs to Volunteer
-- **Validation**: `hours_served` > 0; prevent duplicates per volunteer/service_date slot
-- **State Transitions**: Draft → Submitted → Amended (new copy)
-- **Indexes**: Composite (`volunteer`, `service_date`); composite (`service_date`, `activity_type`)
+### Service Log
+- **Fields**: `volunteer`, `service_date`, `hours`, `description`, `verified_by`.
+- **Validation**: `hours` > 0; `verified_by` required to mark as complete.
+- **Indexes**: Index (`volunteer`, `service_date`).
 
 ### Media Request
-- **Fields**: `name` (PK), `submitted_by` (FK Member), `title`, `description`, `asset_path`, `status`, `decision_reason`, `approved_by`, `approved_on`, `publish_target`, `published_on`
-- **Relationships**: Links to public feed publishing pipeline; triggers notifications
-- **Validation**: Approved requests require asset; rejection needs `decision_reason`
-- **State Transitions**: Submitted → In Review → Approved → Published | Rejected
-- **Indexes**: Single on `status`; single on `submitted_on`
+- **Fields**: `request_id`, `title`, `requester`, `ministry_area`, `description`, `submission_date`, `due_date`, `status`, `approved_by`, `public_post`.
+- **Validation**: Status transitions enforce required fields (assets when approving, decision rationale when rejecting).
+- **Indexes**: Composite (`status`, `due_date`).
 
-### Council
-- **Fields**: `name` (PK), `department`, `description`, `chair` (FK Member), `status`, `established_on`
-- **Relationships**: One-to-many with Council Term
-- **Validation**: Chair must hold Council permissions; status drives dashboard visibility
-- **State Transitions**: Forming → Active → Suspended → Disbanded
-- **Indexes**: Singles on `department`, `status`
+### Public Post
+- **Fields**: `slug`, `title`, `body`, `language`, `published_on`, `hero_image`, `source_media_request`, `tags`.
+- **Validation**: Unique `slug`; `published_on` set on publish workflow.
+- **Indexes**: Unique `slug`; index on `published_on`.
 
-### Council Term
-- **Fields**: `name` (PK), `council` (FK), `term_start`, `term_end`, `trainee_count`, `focus_area`, `reports_path`
-- **Relationships**: Belongs to Council
-- **Validation**: `term_end` > `term_start`; `reports_path` required before completion
-- **State Transitions**: Planned → In Progress → Completed → Archived
-- **Indexes**: Composite (`council`, `term_start`); single on `term_end`
+### Council Department
+- **Fields**: `department_id`, `name`, `chair`, `charter`, `active`.
+- **Validation**: `department_id` unique; `chair` must hold Council role.
+- **Indexes**: Unique `department_id`.
 
-### Report Definition
-- **Fields**: `name` (PK), `domain`, `description`, `filters_schema`, `schedule_cron`, `owner`, `last_run_on`
-- **Relationships**: Consumed by reporting engine and scheduler jobs
-- **Validation**: Cron expression validated; `filters_schema` JSON schema enforced
-- **State Transitions**: Draft → Active → Paused → Retired
-- **Indexes**: Singles on `domain` and `schedule_cron`
+### Council Trainee
+- **Fields**: `trainee_id`, `member`, `department`, `start_date`, `expected_completion`, `mentor`, `status`.
+- **Validation**: Active status requires `mentor`; completion requires `expected_completion`.
+- **Indexes**: Composite (`department`, `status`).
 
-### Notification Digest
-- **Fields**: `name` (PK), `digest_type`, `target_role`, `schedule_cron`, `payload_template`, `last_sent_on`
-- **Relationships**: Feeds background jobs for reminders/digests
-- **Validation**: Valid cron required; digest type enumerated (volunteer inactivity, newcomer follow-up, sponsorship reminders)
-- **State Transitions**: Draft → Active → Paused → Archived
-- **Indexes**: Composite (`digest_type`, `target_role`); single on `schedule_cron`
+### Audit Event
+- **Fields**: `event_type`, `source_doctype`, `source_name`, `actor`, `payload`, `trace_id`, `occurred_on`.
+- **Validation**: Immutable; `payload` stored as JSON; `trace_id` required for observability correlation.
+- **Indexes**: Composite (`source_doctype`, `source_name`, `occurred_on`); index on `trace_id`.

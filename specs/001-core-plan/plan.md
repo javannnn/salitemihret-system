@@ -56,7 +56,7 @@ specs/001-core-plan/
 ```text
 server/
 ├── apps/
-│   └── salitemihret/
+│   └── salitemiret/
 │       ├── api/
 │       ├── audit/
 │       ├── config/
@@ -82,7 +82,7 @@ contracts/
 └── ...
 ```
 
-**Structure Decision**: Web application split between `server/` (Frappe bench app `salitemihret`) and `web/` (React admin). OpenAPI specs live under `contracts/` to align with tasks and ensure backend/frontend parity.
+**Structure Decision**: Web application split between `server/` (Frappe bench app `salitemiret`) and `web/` (React admin). OpenAPI specs live under `contracts/` to align with tasks and ensure backend/frontend parity.
 
 ## Complexity Tracking
 
@@ -100,9 +100,9 @@ contracts/
 - **Exit Criteria**: Research.md approved with open questions resolved, bench app builds locally, lint/test tooling executes, constitution gate reaffirmed.
 
 ### Phase 1 — Data Model & Contracts
-- **Objectives**: Translate feature spec stories into DocTypes, indexes, and OpenAPI contracts covering members, payments, sponsorships/newcomers, schools, volunteers, media, councils, and reports.
-- **Key Activities**: Author `data-model.md`, publish aggregated OpenAPI spec, seed fixtures/DocPerm templates, and produce quickstart covering validation flows.
-- **Exit Criteria**: Data model reviewed with indexes defined, contracts lint clean via Redocly, quickstart walkthrough validated, tasks backlog ready for `/speckit.tasks`.
+- **Objectives**: Translate feature spec stories into DocTypes (Member, Family Member, Member Status History, Payment, Sponsorship, Newcomer, Sunday School Enrollment, Volunteer Group, Volunteer, Service Log, Media Request, Public Post, Council Department, Council Trainee) and publish aligned OpenAPI contracts.
+- **Key Activities**: Author `data-model.md`, generate consolidated OpenAPI (`specs/001-core-plan/contracts/openapi.yaml`), seed DocPerm fixtures, and build a validated quickstart walkthrough.
+- **Exit Criteria**: Data model matches Spec Kit definitions, OpenAPI passes linting, quickstart checklist executed successfully, and `/speckit.tasks` backlog reflects the approved structure.
 
 ### Phase 2 — UX Shells
 - **Objectives**: Deliver admin shell, navigation, role guard, i18n scaffolding, and members/payments core UI slices enabling MVP story coverage.

@@ -3,7 +3,7 @@ info:
   title: SaliteMihret Councils API
   version: 1.0.0
 servers:
-  - url: https://salitemihret.local/api
+  - url: https://salitemiret.local/api
 paths:
   /councils:
     get:

@@ -3,7 +3,7 @@ info:
   title: SaliteMihret Reporting API
   version: 1.0.0
 servers:
-  - url: https://salitemihret.local/api
+  - url: https://salitemiret.local/api
 paths:
   /reports:
     get:

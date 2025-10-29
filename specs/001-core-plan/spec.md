@@ -21,16 +21,16 @@ Deliver SaliteMihret System Phase 1 (system-only) per BRD: Members, Payments, Sp
 Super Admin, Office Admin (RO), PR Admin, Finance Admin, School Admin, Sponsorship Admin, Volunteer Coordinator, Media Admin (Kahen).
 
 ## Acceptance Criteria (high level)
-- **Auth/RBAC**: deny-by-default; per-module permissions; audit for all semantic actions.
-- **Members**: import stepper with error CSV; family linking; status suggestion after 6 paid months; PR approval flow.
-- **Payments**: append-only ledger; correction workflow with audit; reports by date/type/source.
-- **Sponsorship/Newcomers**: pledges with frequency/budget; newcomer register + conversion; reminder jobs.
-- **Schools**: enrollments, class rosters, monthly fee reminders; promotion helpers.
-- **Volunteers**: 12 groups, leaders, rosters; service logs; inactivity digest.
-- **Media**: request inbox, approve/reject with reason; approved → public feed; rejection notif.
-- **Councils**: departments, trainee pipeline; term reports.
-- **Reporting**: per-module reports + global dashboards.
-- **NFRs**: i18n (EN/Am), perf budgets, backups, logs/metrics/traces.
+- **Auth/RBAC**: deny-by-default; per-module permissions; audit events emitted for every semantic action with trace IDs visible in the admin drawer.
+- **Members**: import 500-row spreadsheets with downloadable error CSV in <3 minutes; maintain bilingual member profiles; household relationships propagate instantly; status suggestions trigger after six consecutive contributions and age milestones with approval workflow logged in audit events.
+- **Payments**: append-only ledger leveraging `correction_of` linkage; finance clerks record adjustments without editing originals; ledger-backed reports reconcile by date/type/source within two minutes.
+- **Sponsorship/Newcomers**: pledges track monthly_amount, status, and outstanding balance; newcomer register supports conversion to member with reminder jobs for follow-up ownership.
+- **Schools**: Sunday School enrollment ties mezmur assignments and promotion helpers; monthly fee reminders fire automatically; attendance and lesson completion reports export per cohort.
+- **Volunteers**: manage volunteer groups, rosters, and service logs with coordinator verification; dashboards flag volunteers approaching inactivity thresholds.
+- **Media**: request inbox supports attachments and review workflow; approval auto-creates Public Post within 60 seconds and logs audit events; public preview stays in sync.
+- **Councils**: departments manage trainee mentorship history; quarterly governance reports summarize trainee status, audit events, and departmental updates.
+- **Reporting**: per-module and cross-module dashboards leverage documented report engine, support scheduling, and reconcile with ledger totals.
+- **NFRs**: enforce EN/Am localization, WCAG AA accessibility, performance budgets, daily encrypted backups, and observability (logs/metrics/traces) per Spec Kit.
 
 ## Links
 - Project spec set: `docs/spec-kit/`

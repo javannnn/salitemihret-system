@@ -3,7 +3,7 @@ info:
   title: SaliteMihret Sponsorship & Newcomer API
   version: 1.0.0
 servers:
-  - url: https://salitemihret.local/api
+  - url: https://salitemiret.local/api
 paths:
   /sponsorships:
     get:
