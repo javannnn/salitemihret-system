@@ -11,7 +11,7 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story so each increment is independently implementable and testable.
 
-**Branch Naming**: Use `feat/SPEC-<ID>-<slug>` for each spec deliverable (e.g., `feat/SPEC-AUTH-001-rbac-baseline`).
+**Branch Naming**: Use `feat/SPEC-<ID>-<slug>` for each spec deliverable (e.g., `001-auth-rbac-baseline`).
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -62,7 +62,7 @@ description: "Task list template for feature implementation"
 ## Phase 3: User Story 1 - SPEC-AUTH-001 & SPEC-AUTH-002 Secure RBAC & Audit Trail (Priority: P1) 🎯 MVP
 
 **Spec Coverage**: SPEC-AUTH-001 Harden RBAC permissions; SPEC-AUTH-002 Implement audit event ingestion pipeline.  
-**Suggested Branches**: `feat/SPEC-AUTH-001-rbac-baseline`, `feat/SPEC-AUTH-002-audit-events`.
+**Suggested Branches**: `001-auth-rbac-baseline`, `feat/SPEC-AUTH-002-audit-events`.
 
 **Goal**: Deliver authenticated access with deny-by-default RBAC and immutable audit trails for all privileged actions.
 
@@ -418,7 +418,7 @@ run-task T087 &
 ### MVP First (User Story 1 Only)
 1. Complete Phase 1 (Setup).
 2. Complete Phase 2 (Foundational).
-3. Execute Phase 3 (SPEC-AUTH-001 / SPEC-AUTH-002) on branch `feat/SPEC-AUTH-001-rbac-baseline` or `feat/SPEC-AUTH-002-audit-events`.
+3. Execute Phase 3 (SPEC-AUTH-001 / SPEC-AUTH-002) on branch `001-auth-rbac-baseline` or `feat/SPEC-AUTH-002-audit-events`.
 4. Demonstrate secure access as the initial MVP.
 
 ### Incremental Delivery

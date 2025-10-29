@@ -24,6 +24,7 @@ tests/
 : Follow standard conventions
 
 ## Recent Changes
+- 001-auth-rbac-baseline: Added Python 3.11 (Frappe 15), TypeScript 5.x with React 18 + Frappe framework, MariaDB connector, Redis workers, React, TanStack Query, Tailwind CSS, shadcn/ui, i18next
 - 001-core-plan: Added Python 3.11 (Frappe 15), TypeScript 5.x with React 18 + Frappe framework, MariaDB connector, Redis workers, React, TanStack Query, Tailwind CSS, shadcn/ui, i18next
 
 - 001-core-plan: Added
