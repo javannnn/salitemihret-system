@@ -1,0 +1,94 @@
+{
+  "doctype": "DocType",
+  "name": "Member",
+  "module": "Salitemiret",
+  "custom": 0,
+  "istable": 0,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "allow_rename": 0,
+  "autoname": "field:member_name",
+  "engine": "InnoDB",
+  "field_order": [
+    "member_name",
+    "first_name",
+    "last_name",
+    "sex",
+    "birth_date",
+    "household",
+    "phone",
+    "email"
+  ],
+  "fields": [
+    {
+      "fieldname": "member_name",
+      "fieldtype": "Data",
+      "label": "Member Name",
+      "read_only": 1,
+      "in_list_view": 1,
+      "fetch_from": "first_name"
+    },
+    {
+      "fieldname": "first_name",
+      "fieldtype": "Data",
+      "label": "First Name",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "last_name",
+      "fieldtype": "Data",
+      "label": "Last Name",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "sex",
+      "fieldtype": "Select",
+      "label": "Sex",
+      "options": "\nMale\nFemale"
+    },
+    {
+      "fieldname": "birth_date",
+      "fieldtype": "Date",
+      "label": "Birth Date"
+    },
+    {
+      "fieldname": "household",
+      "fieldtype": "Link",
+      "label": "Household",
+      "options": "Household"
+    },
+    {
+      "fieldname": "phone",
+      "fieldtype": "Data",
+      "label": "Phone"
+    },
+    {
+      "fieldname": "email",
+      "fieldtype": "Data",
+      "label": "Email"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "permlevel": 0,
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "share": 1,
+      "export": 1
+    },
+    {
+      "role": "PR Administrator",
+      "permlevel": 0,
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "index_web_routes": 0,
+  "show_name_in_global_search": 1
+}

@@ -26,6 +26,24 @@ curl -s 'https://<site>/api/method/salitemiret.api.auth.whoami'
 The endpoint returns a JSON payload containing the current frappe user, their full name, roles, and derived personas.
 Use this from the admin UI's bootstrap (TanStack Query) to hydrate the RBAC context.
 
+### Core Entities
+
+| DocType   | Purpose                         | Key Fields                               |
+|-----------|---------------------------------|-------------------------------------------|
+| Household | Canonical family record         | household_name (unique), address, phone  |
+| Member    | Individual linked to household  | first_name, last_name, household, contact |
+
+Roles:
+- System Manager: full CRUD
+- PR Administrator: read-only
+
+Reload after deploy:
+```bash
+bench --site salitemiret.local reload-doc salitemiret salitemiret Household
+bench --site salitemiret.local reload-doc salitemiret salitemiret Member
+bench --site salitemiret.local execute frappe.utils.fixtures.sync_fixtures --args '["salitemiret"]'
+```
+
 
 ### Testing
 

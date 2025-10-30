@@ -46,3 +46,9 @@
 1. Mount `RBACProvider` inside a `QueryClientProvider` so the whoami query hydrates roles on load.
 2. Use `ProtectedRoute` / `RoleGate` (see `PRAdminDemoRoute`) to gate routes or components; both expose loading fallbacks while the whoami request is in-flight.
 3. The RBAC context exposes `roles`, `personas`, and helpers (`useRBAC`) for local overrides during tests or storybook scenarios.
+
+## Core Entities Bootstrap
+1. `bench --site salitemiret.local migrate`
+2. `bench --site salitemiret.local reload-doc salitemiret salitemiret household`
+3. `bench --site salitemiret.local reload-doc salitemiret salitemiret member`
+4. `bench --site salitemiret.local execute frappe.utils.fixtures.sync_fixtures --args '["salitemiret"]'`
