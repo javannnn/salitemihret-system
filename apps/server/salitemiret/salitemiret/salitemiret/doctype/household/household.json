@@ -1,0 +1,57 @@
+{
+  "doctype": "DocType",
+  "name": "Household",
+  "module": "Salitemiret",
+  "custom": 0,
+  "istable": 0,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "allow_rename": 0,
+  "autoname": "field:household_name",
+  "engine": "InnoDB",
+  "field_order": [
+    "household_name",
+    "address",
+    "phone"
+  ],
+  "fields": [
+    {
+      "fieldname": "household_name",
+      "fieldtype": "Data",
+      "label": "Household Name",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "address",
+      "fieldtype": "Small Text",
+      "label": "Address"
+    },
+    {
+      "fieldname": "phone",
+      "fieldtype": "Data",
+      "label": "Phone"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "permlevel": 0,
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "share": 1,
+      "export": 1
+    },
+    {
+      "role": "PR Administrator",
+      "permlevel": 0,
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "index_web_routes": 0,
+  "show_name_in_global_search": 1
+}

@@ -59,3 +59,8 @@
 - **Decision**: Adopt GitHub Actions workflows mirroring Spec Kit guidance: lint → test → build per story, plus nightly full-stack run with bench migrations and Playwright suites in headless Chromium.
 - **Rationale**: Ensures plan-first artifacts gate code changes and keeps feedback loops fast for distributed contributors.
 - **Alternatives considered**: Self-hosted Jenkins (rejected: higher ops overhead), GitLab CI (rejected: project currently centralized on GitHub).
+
+## RBAC Baseline
+- **Decision**: Implement Role Permission Matrix DocTypes with deny-by-default hooks and fixtures mirroring security personas; expose a whoami session endpoint for frontend guard hydration.
+- **Rationale**: Keeps persona mapping declarative, satisfies constitution traceability, and supports frontend TanStack Query bootstrapping.
+- **Alternatives considered**: Hard-coded role checks in controllers (rejected: brittle, difficult to audit); client-side role assumptions (rejected: violates security guidelines).

@@ -6,6 +6,7 @@ import { useRBAC } from "../hooks/useRBAC";
 
 export interface RoleGateProps {
   allow?: Role[];
+  roles?: Role[];
   forbid?: Role[];
   check?: RoleCheck;
   fallback?: ReactNode;
@@ -13,7 +14,7 @@ export interface RoleGateProps {
   children: ReactNode;
 }
 
-export const RoleGate: React.FC<RoleGateProps> = ({ allow, forbid, check, fallback = null, loadingFallback = null, children }) => {
+export const RoleGate: React.FC<RoleGateProps> = ({ allow, roles, forbid, check, fallback = null, loadingFallback = null, children }) => {
   const { isAuthorized, hasRole, isLoading } = useRBAC();
 
   if (isLoading) {
@@ -24,8 +25,10 @@ export const RoleGate: React.FC<RoleGateProps> = ({ allow, forbid, check, fallba
     return <>{fallback}</>;
   }
 
-  if (allow && allow.length > 0) {
-    const ok = isAuthorized({ anyOf: allow });
+  const whitelist = allow ?? roles;
+
+  if (whitelist && whitelist.length > 0) {
+    const ok = isAuthorized({ anyOf: whitelist });
     if (!ok) {
       return <>{fallback}</>;
     }
