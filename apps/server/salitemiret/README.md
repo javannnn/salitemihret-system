@@ -12,10 +12,20 @@ Administrators have read-only visibility for governance.
 bench --site salitemihret.local export-fixtures --app salitemiret
 ```
 
-The fixtures live under `fixtures/roles.json` and `fixtures/custom_docperm.json`.
+The fixtures live under `fixtures/role.json` and `fixtures/custom_docperm.json`.
 The former mirrors the personas defined in the security specification; the
 latter captures the allowed CRUD actions for the `Role Permission Matrix` and
 its child entries.
+
+### Whoami API
+
+```bash
+curl -s 'https://<site>/api/method/salitemiret.api.auth.whoami' 
+```
+
+The endpoint returns a JSON payload containing the current frappe user, their full name, roles, and derived personas.
+Use this from the admin UI's bootstrap (TanStack Query) to hydrate the RBAC context.
+
 
 ### Testing
 

@@ -30,6 +30,9 @@ fixtures = [
     "Custom DocPerm",
 ]
 
+override_whitelisted_methods = {
+    "salitemiret.api.auth.whoami": "salitemiret.api.auth.whoami",
+}
 scheduler_events = {
     "daily": [
         "salitemiret.jobs.sync_role_permission_fixtures",

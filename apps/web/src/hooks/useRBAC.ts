@@ -4,7 +4,7 @@ import type { Role, RoleCheck } from "../types/rbac";
 import { useRBACContext } from "../context/RBACContext";
 
 export const useRBAC = () => {
-  const { roles, setRoles, hasRole, isAuthorized } = useRBACContext();
+  const { roles, personas, isLoading, setRoles, resetRoles, hasRole, isAuthorized } = useRBACContext();
 
   const grantRole = useCallback(
     (role: Role) => {
@@ -22,11 +22,14 @@ export const useRBAC = () => {
 
   return {
     roles,
+    personas,
+    isLoading,
     hasRole,
     isAuthorized,
     grantRole,
     revokeRole,
     setRoles,
+    resetRoles,
   };
 };
 

@@ -18,12 +18,13 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   fallbackPath = "/login",
   loadingFallback = null,
   children,
-  isLoading = false,
+  isLoading,
 }) => {
-  const { isAuthorized } = useRBAC();
+  const { isAuthorized, isLoading: contextLoading } = useRBAC();
   const location = useLocation();
+  const pending = isLoading ?? contextLoading;
 
-  if (isLoading) {
+  if (pending) {
     return <>{loadingFallback}</>;
   }
 

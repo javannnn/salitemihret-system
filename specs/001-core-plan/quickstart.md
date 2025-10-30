@@ -42,3 +42,7 @@
 - Seed baseline roles/permissions: `bench --site salitemiret.local execute salitemiret.setup.install_fixtures`.
 - Reset demo data: `bench --site salitemiret.local execute salitemiret.scripts.demo.reset`.
 - Clear frontend caches: `cd web && pnpm exec vite --clearScreen false --force`.
+## Frontend RBAC wiring
+1. Mount `RBACProvider` inside a `QueryClientProvider` so the whoami query hydrates roles on load.
+2. Use `ProtectedRoute` / `RoleGate` (see `PRAdminDemoRoute`) to gate routes or components; both expose loading fallbacks while the whoami request is in-flight.
+3. The RBAC context exposes `roles`, `personas`, and helpers (`useRBAC`) for local overrides during tests or storybook scenarios.

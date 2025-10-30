@@ -9,10 +9,11 @@ from typing import Callable, Iterable, Set
 import pytest
 
 from salitemiret import permissions as perms
+from salitemiret.api import auth
 
 APP_ROOT = Path(__file__).resolve().parents[1].parent
 FIXTURES_ROOT = APP_ROOT / "fixtures"
-ROLES_FIXTURE = FIXTURES_ROOT / "roles.json"
+ROLES_FIXTURE = FIXTURES_ROOT / "role.json"
 DOCPERM_FIXTURE = FIXTURES_ROOT / "custom_docperm.json"
 
 EXPECTED_ROLES = {
@@ -109,3 +110,31 @@ def test_role_permission_matrix_entry_has_permission(role_patch: Callable[[Set[s
 
     role_patch(set())
     assert not perms.role_permission_matrix_entry_has_permission(permtype="read")
+
+class _StubFrappe:
+    """Minimal frappe shim for tests."""
+
+    class _Session:
+        user = "pr.admin@example.com"
+
+    session = _Session()
+
+    @staticmethod
+    def get_roles(user):
+        assert user == "pr.admin@example.com"
+        return ["PR Administrator", "Parish Registrar"]
+
+    @staticmethod
+    def get_value(doctype, name, field):
+        assert doctype == "User"
+        assert field == "full_name"
+        return "PR Admin"
+
+
+def test_whoami_returns_expected_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(auth, "frappe", _StubFrappe)
+    payload = auth.whoami()
+    assert payload["user"] == "pr.admin@example.com"
+    assert payload["full_name"] == "PR Admin"
+    assert payload["roles"] == ["PR Administrator", "Parish Registrar"]
+    assert payload["personas"] == payload["roles"]

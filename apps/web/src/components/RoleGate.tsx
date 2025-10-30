@@ -9,11 +9,16 @@ export interface RoleGateProps {
   forbid?: Role[];
   check?: RoleCheck;
   fallback?: ReactNode;
+  loadingFallback?: ReactNode;
   children: ReactNode;
 }
 
-export const RoleGate: React.FC<RoleGateProps> = ({ allow, forbid, check, fallback = null, children }) => {
-  const { isAuthorized, hasRole } = useRBAC();
+export const RoleGate: React.FC<RoleGateProps> = ({ allow, forbid, check, fallback = null, loadingFallback = null, children }) => {
+  const { isAuthorized, hasRole, isLoading } = useRBAC();
+
+  if (isLoading) {
+    return <>{loadingFallback}</>;
+  }
 
   if (forbid && forbid.some((role) => hasRole(role))) {
     return <>{fallback}</>;
