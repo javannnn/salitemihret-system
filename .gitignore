@@ -16,3 +16,10 @@ coverage/
 .codex/**/secrets/
 .codex/state.json
 .codex/sessions/
+frontend/node_modules/
+frontend/dist/
+apps/web/node_modules/
+apps/web/dist/
+server/uploads/
+server/static/avatars/
+*.csv
