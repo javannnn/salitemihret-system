@@ -1,0 +1,1 @@
+"""SaliteMihret FastAPI application package."""

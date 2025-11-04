@@ -4,9 +4,11 @@ import { Card, Button, Input } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 
 const DEMO_ACCOUNTS = [
+  { label: "Super Admin", email: "superadmin@example.com", password: "Demo123!" },
   { label: "PR Admin", email: "pradmin@example.com", password: "Demo123!" },
   { label: "Registrar", email: "registrar@example.com", password: "Demo123!" },
-  { label: "Clerk", email: "clerk@example.com", password: "Demo123!" }
+  { label: "Clerk", email: "clerk@example.com", password: "Demo123!" },
+  { label: "Finance Admin", email: "finance@example.com", password: "Demo123!" },
 ];
 
 export default function LoginPage() {

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useState } from "react";
 
 interface ToastItem {
-  id: number;
+  id: string;
   message: string;
 }
 
@@ -14,13 +14,20 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
+  const createId = useCallback(() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }, []);
+
   const push = useCallback((message: string) => {
-    const id = Date.now();
+    const id = createId();
     setToasts((prev) => [...prev, { id, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 3000);
-  }, []);
+  }, [createId]);
 
   return (
     <ToastContext.Provider value={{ push }}>

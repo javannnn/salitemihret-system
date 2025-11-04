@@ -6,6 +6,7 @@ import App from "./App";
 import "./index.css";
 import { ToastProvider } from "@/components/Toast";
 import { AuthProvider } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -15,11 +16,13 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <BrowserRouter>
-      <ToastProvider>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </ToastProvider>
+      <ThemeProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>
 );

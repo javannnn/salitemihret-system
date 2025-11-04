@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from fastapi import HTTPException, status
 from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Query, Session
 
-from app.models.member import Member
+from app.models.member import Child, Member
 from app.models.ministry import Ministry
 from app.models.tag import Tag
 from app.schemas.member import ALLOWED_MEMBER_GENDERS, ALLOWED_MEMBER_STATUSES
@@ -17,17 +19,25 @@ SORTABLE_FIELDS = {
 }
 
 
+from sqlalchemy.orm import Query, Session
+
+
 def build_members_query(
     db: Session,
     *,
+    base_query: Query | None = None,
     status_filter: str | None,
     q: str | None,
     tag: str | None,
     ministry: str | None,
     gender: str | None,
     district: str | None,
+    has_children: bool | None = None,
+    missing_phone: bool | None = None,
+    new_this_month: bool | None = None,
+    member_ids: list[int] | None = None,
 ) -> Query:
-    query: Query = db.query(Member)
+    query: Query = base_query if base_query is not None else db.query(Member)
 
     if status_filter == "Archived":
         query = query.filter(Member.deleted_at.isnot(None))
@@ -80,6 +90,20 @@ def build_members_query(
 
     if district:
         query = query.filter(func.lower(Member.district) == district.lower())
+
+    if has_children:
+        query = query.filter(Member.children_all.any(Child.promoted_at.is_(None)))
+
+    if missing_phone:
+        query = query.filter(or_(Member.phone.is_(None), func.trim(Member.phone) == ""))
+
+    if new_this_month:
+        today = date.today()
+        month_start = datetime(today.year, today.month, 1)
+        query = query.filter(Member.created_at >= month_start)
+
+    if member_ids:
+        query = query.filter(Member.id.in_(member_ids))
 
     if distinct_needed:
         query = query.distinct()

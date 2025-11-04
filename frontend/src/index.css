@@ -4,12 +4,32 @@
 
 :root {
   color-scheme: light;
+  --color-bg: #f5f5f7;
+  --color-card: #ffffff;
+  --color-ink: #0f172a;
+  --color-muted: #6b7280;
+  --color-border: rgba(15, 23, 42, 0.08);
+  --color-accent: #111827;
+  --color-accent-foreground: #ffffff;
 }
 
-html, body, #root {
+.dark {
+  color-scheme: dark;
+  --color-bg: #0f172a;
+  --color-card: #111c35;
+  --color-ink: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-border: rgba(148, 163, 184, 0.3);
+  --color-accent: #2563eb;
+  --color-accent-foreground: #f8fafc;
+}
+
+html,
+body,
+#root {
   height: 100%;
 }
 
 body {
-  @apply bg-bg text-ink antialiased;
+  @apply bg-bg text-ink antialiased transition-colors duration-300;
 }

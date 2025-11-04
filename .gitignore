@@ -23,3 +23,7 @@ apps/web/dist/
 server/uploads/
 server/static/avatars/
 *.csv
+.venv
+server/uploads
+frontend/node_modules
+frontend/dist

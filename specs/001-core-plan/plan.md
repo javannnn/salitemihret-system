@@ -1,79 +1,98 @@
-# Implementation Plan: Core Plan RBAC Baseline
+# Implementation Plan: Core Platform Pivot
 
-**Branch**: `001-auth-rbac-baseline` | **Date**: 2025-10-30 | **Spec**: specs/001-core-plan/spec.md
+**Branch**: `010-fastapi-pivot` | **Date**: 2025-10-30 | **Spec**: specs/001-core-plan/spec.md  
 **Input**: Feature specification from `/specs/001-core-plan/spec.md`
 
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
 
 ## Summary
 
-Bootstrap the SaliteMihret RBAC foundation by codifying deny-by-default permissions, exposing persona-aware session metadata, and wiring frontend route guards so P1 slices can ship independently with auditable access controls.
+Pivot the SaliteMihret platform from Frappe to a composable FastAPI + Postgres backend and a modern React (Vite + MUI) frontend. Stand up shared auth/role infrastructure, refactor Spec-Kit artifacts for module delivery, and prepare the Membership slice as the first independently shippable increment.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11 (Frappe v14), TypeScript 5.x with React 18
-**Primary Dependencies**: Frappe framework, MariaDB, Redis background workers, TanStack Query, Vite, Tailwind CSS, i18next
-**Storage**: MariaDB 10.6 (DocTypes), Redis queues
-**Testing**: pytest via Frappe test runner, Vitest + React Testing Library, Playwright for E2E
-**Target Platform**: Linux server (Frappe bench), modern evergreen browsers for admin UI
-**Project Type**: Web application (Frappe backend + React admin frontend)
-**Performance Goals**: REST p95 ≤400 ms, background jobs ≤5 min, whoami bootstrap ≤200 ms
-**Constraints**: Deny-by-default RBAC, WCAG AA baseline, EN/Amharic parity, audit events for all privileged actions
-**Scale/Scope**: Up to 150 concurrent admin sessions; persona list per spec (8 roles)
+**Language/Version**: Python 3.11 (FastAPI), TypeScript 5.x with React 18  
+**Primary Dependencies**: FastAPI, SQLAlchemy, Alembic, python-jose, Passlib, PostgreSQL 16, TanStack Query, React Router, Material UI, i18next  
+**Storage**: PostgreSQL via SQLAlchemy ORM (AWS RDS target), object storage for media (future modules)  
+**Testing**: pytest (API + models), React Testing Library + Vitest, Playwright roadmap for E2E  
+**Target Platform**: Containerised services (Docker Compose locally, GitHub Actions + staging cluster for CI/CD)  
+**Project Type**: Modular web platform (FastAPI backend + Vite/React admin frontend)  
+**Performance Goals**: REST p95 ≤ 250 ms, list endpoints paginated ≤ 1 s for 10k rows, login bootstrap ≤ 150 ms  
+**Constraints**: JWT auth with deny-by-default guards, WCAG AA compliance, EN/Amharic localisation, auditable actions, Spec-Kit governance  
+**Scale/Scope**: ~150 concurrent admin sessions, module-by-module delivery (Membership, Payments, Sponsorship, etc.)
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [x] **P1: Independent Slice Delivery** — Every user story listed in the spec is independently deliverable, has a unique ID, and acceptance criteria cover isolated validation.
-- [x] **P2: Documented Plan-First Execution** — All upstream artifacts (research, spec, plan skeleton) have zero placeholders and received approval prior to implementation planning.
-- [x] **P3: Test-First Proof** — Planned tasks include pre-implementation automated tests and identify the CI suites that must fail before coding begins.
-- [x] **P4: Observable Operations Discipline** — Observability/operations documents list the instrumentation, runbooks, and validation steps this feature updates.
-- [x] **P5: Governance Traceability** — Each artifact records feature identifier, authorship, and amendment date; any missing data has an assigned TODO with owner/due date.
+- [x] **P1: Independent Slice Delivery** — Updated module specs map to standalone increments (Membership first).  
+- [x] **P2: Documented Plan-First Execution** — Research + plan capture pivot rationale; Frappe artefacts archived but retained for traceability.  
+- [x] **P3: Test-First Proof** — Pytest and Vitest baselines defined; CI will block merges until unit/API specs exist per module.  
+- [x] **P4: Observable Operations Discipline** — Postgres/uvicorn metrics hooks planned, container observability docs updated.  
+- [x] **P5: Governance Traceability** — Each module spec records BRD citations and acceptance criteria; plan references Spec-Kit IDs.
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/001-core-plan/
-├── plan.md
-├── research.md
-├── data-model.md
-├── quickstart.md
-├── contracts/
-└── tasks.md
+specs/
+├── 001-core-plan/
+│   ├── plan.md
+│   ├── research.md
+│   ├── data-model.md
+│   ├── quickstart.md
+│   ├── contracts/
+│   ├── spec.md
+│   └── tasks.md
+├── membership.md
+├── user-management.md
+├── payments.md
+├── sponsorships.md
+├── newcomers.md
+├── schools.md
+├── volunteers.md
+├── media.md
+├── councils.md
+└── reports.md
 ```
 
 ### Source Code (repository root)
 
 ```text
-apps/
-├── server/
-│   └── salitemiret/
-│       ├── salitemiret/
-│       │   ├── api/
-│       │   ├── config/
-│       │   ├── doctype/
-│       │   ├── jobs/
-│       │   └── tests/
-│       └── fixtures/
-└── web/
-    └── src/
-        ├── api/
-        ├── components/
-        ├── context/
-        ├── hooks/
-        ├── routes/
-        └── types/
+server/
+├── app/
+│   ├── core/
+│   ├── auth/
+│   ├── models/
+│   ├── schemas/
+│   ├── routers/
+│   └── main.py
+├── alembic/
+│   ├── versions/
+│   └── env.py
+└── scripts/
+    └── seed_demo.py
+frontend/
+├── src/
+│   ├── api/
+│   ├── auth/
+│   ├── components/
+│   ├── layouts/
+│   ├── pages/
+│   ├── styles/
+│   └── i18n/
+└── vite.config.ts
+infra/
+└── compose.yml
 ```
 
-**Structure Decision**: Dual-app monorepo (Frappe backend under `apps/server/salitemiret`, Vite/React frontend under `apps/web/src`) with shared Spec Kit documentation in `specs/001-core-plan`.
+**Structure Decision**: Monorepo with FastAPI backend (`server/`), Vite/React frontend (`frontend/`), and shared infrastructure (`infra/`). Legacy Frappe code under `apps/` remains for reference until fully retired.
 
 ## Complexity Tracking
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
+|-----------|------------|--------------------------------------|
 | None | - | - |

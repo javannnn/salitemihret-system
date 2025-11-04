@@ -1,14 +1,39 @@
 # Members Module Blueprint
 
+## Feature Catalogue (Work Item #4)
+
+| ID | Feature | Notes |
+| --- | --- | --- |
+| 2.2.4.1 | Member username | Auto-generate `first_name.last_name` (slugified, unique) |
+| 2.2.4.2 | Baptismal name | Optional text on member profile |
+| 2.2.4.3 | Date of birth | Optional; already present, keep validation |
+| 2.2.4.4 | Number of family | Track household size (derived + override) |
+| 2.2.4.5 | Child records | Capture first/last, gender, DOB, country of birth; link to household |
+| 2.2.4.6 | Marital status | Dropdown; if “Married” require spouse record |
+| 2.2.4.6.1 | Spouse record | First/last, gender, country of birth (plus phone/email) |
+| 2.2.4.7 | Membership date | Already captured as join date; expose in UI/export |
+| 2.2.4.8 | Home address | Full address detail (street, city, region, postal) |
+| 2.2.4.9 | Phone number | Required field |
+| 2.2.4.10 | Email | Optional |
+| 2.2.4.11 | Father Confessor | Yes/No toggle + priest lookup list |
+| 2.2.4.12 | Gives tithe | Yes/No |
+| 2.2.4.12.1 | Pays membership contribution | Yes/No |
+| 2.2.4.12.1.1 | Contribution amount | Decimal value |
+| 2.2.4.12.1.2 | Method of payment | Cash / Direct Deposit / e-Transfer / Credit |
+| Notifications | Child turns 18 | Email Admin/PR; tie into promotion job |
+| Access control | Office Admin vs Public Relations | Office Admin read-only; PR full control |
+
 ## Phase 0 – Backlog Overview
 
 - Extend the membership domain with households, tags, ministries, audit history, avatars.
 - Support CSV import/export, bulk updates, and rich filtering/sorting.
 - Deliver a modern monochrome UI (dark/light mode, motion) covering login → dashboard → members CRUD.
-- Enforce role matrix:
-  - **Read**: PublicRelations, OfficeAdmin, Registrar, Admin
-  - **Write**: Registrar, Admin
-  - **Bulk/Destructive**: Admin
+- Enforce role matrix (per November 2025 mandate):
+  - **Super Admin** – full system control (all features, impersonation, audit maintenance).
+  - **PR Admin** – full membership lifecycle (create/update, approve transitions, manage family records, reports) but no system config or audit tampering.
+  - **Registrar** – validate member identities and official records; may edit personal details and approve documents; finance fields read-only.
+  - **Clerk** – data entry for contact info and attachments; read-only for finance/Father Confessor; no approvals or destructive actions.
+  - **Finance Admin** – manage tithe/contribution confirmations and financial reports only; no household/spiritual edits.
 
 ---
 
@@ -39,8 +64,10 @@
 
 2. **Services**
    - `members_import.py`: CSV ingestion (preview/report), reuse audit hooks.
+   - Guard duplicate tag/ministry names during import (slug + name collisions resolve via upsert).
    - Export helper to stream CSV.
    - Broadcast stub returning recipient count.
+   - Normalize spouse/child payload helpers so UI can reuse validation.
 
 3. **Access Control**
    - Enforce Admin on bulk/destructive routes; Registrar/Admin on uploads.
@@ -48,10 +75,37 @@
 
 4. **Tooling**
    - Extend `Makefile` with `export`, `import file=...`, refresh existing targets.
+   - Startup hook ensures optional `children.promoted_at` column exists when migrations lag behind.
 
 ---
 
-## Phase 3 – Frontend Reskin & Core Features
+## Phase 3 – Domain Enhancements (Membership Requirements)
+
+1. **Schema & Migrations**
+   - Add fields: `baptismal_name`, `marital_status`, `household_size_override`, `father_confessor_id`, `gives_tithe`, `pays_contribution`, `contribution_amount`, `contribution_method`, expanded address segments (street, city, region, postal, country), `phone` required (non-null).
+   - Update spouse table → first/last name, gender, country_of_birth; enforce presence when member marital status is Married.
+   - Replace child `full_name` with discrete fields + gender/country_of_birth; keep computed name for backward compatibility.
+   - Introduce `priests` lookup table; seed demo priests for Father Confessor dropdown.
+
+2. **Services & API**
+   - Member CRUD endpoints validate new fields, enforce conditional spouse logic, and persist household size override.
+   - Household service recalculates size on change; expose `family_count` (derived) + override in API responses and CSV export/import.
+   - Import/Export schemas updated to include new columns (spouse, children, contributions, priest).
+   - Lightweight `/members/meta` returned without heavy joins; filters accept quick flags (`has_children`, `missing_phone`, `new_this_month`) and explicit `ids` lists for targeted exports. **Status 2025‑11‑04:** python-side sorting fixes the prior Postgres `SELECT DISTINCT … ORDER BY` crash that broke CORS.
+   - Priests API (`GET /priests`, `POST /priests`) feeds the creatable selector; children endpoints (`GET /children?eligible=`, `POST /children/{id}/promote`) support the promotions drawer and daily digest.
+   - Adjust permissions: OfficeAdmin `require_roles` read-only; PublicRelations inherits write + destructive; update seeds accordingly.
+
+3. **Notifications & Automation**
+   - Extend child promotion scheduler to email Admin/PR when a child hits 18 (use templated email + background task queue).
+   - Hook membership status transitions (e.g., toggling tithe/contribution) into an approval workflow stub for future Finance integration.
+
+4. **Documentation & Tests**
+   - Update OpenAPI examples, curl smoke scripts, and seed data to reflect new fields.
+   - Add regression tests for spouse/child validation and household size calculations.
+
+---
+
+## Phase 4 – Frontend Experience (Reskin + Membership Flows)
 
 1. **Infrastructure**
    - Tailwind dark mode (`darkMode: 'class'`) with theme context (localStorage + prefers-color-scheme).
@@ -61,24 +115,25 @@
    - AppShell header with theme toggle, user dropdown, animated content area.
    - Dashboard summary cards (Recharts mini metrics).
 
-3. **Members Table**
-   - Multi-select bulk actions (archive, update status, export selection).
-   - Filter drawer (tag, ministry, gender, district, status).
-   - Search, sort, skeleton loaders, role-based button visibility.
-   - Import/Export buttons.
+3. **Members Module UI**
+   - Members table with bulk actions, filter drawer, search/sort, import/export buttons (Admin vs PR gating).
+   - Member form sections for contact info, Father Confessor select, tithe/contribution toggles, household metrics.
+   - Child editor (grid with gender/DOB/country) + spouse form tied to marital status.
+   - Household drawer to add/remove family members inline; surface derived family count.
 
 4. **Import Wizard**
-   - Dropzone (react-dropzone), parsed preview, column mapping, submit to API, response summary.
+   - Dropzone (react-dropzone) with column mapping for new fields, preview of spouse/child rows, submission summary with validation hints.
+
 
 ---
 
-## Phase 4 – Member Profile & Audit Experience
+## Phase 5 – Member Profile & Audit Experience
 
 1. **Profile Page**
-   - Avatar upload card, contact details, household linkage, tags, ministries.
+   - Avatar upload card, contact details, household linkage, tags, ministries, Father Confessor, contribution summary.
    - Tag chip add/remove, ministry assignment modals.
-   - Audit timeline (fades) from `/members/{id}/audit`.
-   - Restore action for Admin.
+   - Audit timeline (fades) from `/members/{id}/audit` including spouse/child/family count changes.
+   - Restore action for Admin; inline approvals for tithe/contribution updates.
 
 2. **UI Components**
    - StatusChip, TagChip, FilterBadge, confirmation dialogs.
@@ -91,7 +146,7 @@
 
 ---
 
-## Phase 5 – QA & Polish
+## Phase 6 – QA & Polish
 
 - End-to-end smoke scripts (curl + UI).
 - pytest coverage for bulk/import/export & audit flows.

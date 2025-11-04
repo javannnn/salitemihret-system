@@ -1,54 +1,107 @@
-# Quickstart — Core Plan
+# Quickstart — FastAPI Pivot
 
 ## Prerequisites
-- Python 3.11 with Frappe Bench 15.x (`pipx install frappe-bench`)
-- Node.js 20 LTS with pnpm 9.x (`corepack enable`)
-- MariaDB 10.6, Redis 6.x, and MinIO (or S3-compatible) reachable locally
-- Access to `docs/spec-kit/` for architecture, UX, and operations guidelines
+- Python 3.11 with `venv`
+- Node.js 20 LTS (npm or pnpm)
+- Docker (Compose v2) for Postgres
+- Access to `docs/spec-kit/` (architecture, UX, operations)
+- `make` (optional) for convenience targets
 
-## Environment Setup
-1. Clone repository and checkout branch `001-core-plan`.
-2. `bench init server --python python3.11 && cd server && bench new-app salitemiret`.
-3. Copy `.env.example` to `.env`; configure MariaDB, Redis, MinIO, and localization settings as documented in `docs/spec-kit/01-architecture.md`.
-4. `bench get-app payments https://github.com/frappe/payments` (optional dependency per spec kit), then `bench start` to launch site, workers, and scheduler.
-5. In another terminal: `cd web && pnpm install && pnpm dev` to boot the React admin shell with hot reload.
+## Environment Setup (Backend)
+1. `git checkout 010-fastapi-pivot`
+2. Bootstrap Postgres:
+   ```bash
+   docker compose -f infra/compose.yml up -d
+   ```
+3. Create backend environment:
+   ```bash
+   cd server
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -U pip
+   pip install -r requirements.txt  # generated in this branch
+   ```
+4. Configure environment variables:
+   ```bash
+   cp .env.example .env
+   # adjust DATABASE_URL, JWT_SECRET, etc.
+   ```
+5. Apply migrations and seed demo data:
+   ```bash
+   alembic upgrade head
+   python -m app.scripts.seed_demo
+   ```
+6. Run API locally:
+   ```bash
+   uvicorn app.main:app --reload --port 8001
+   ```
+7. Smoke test:
+   ```bash
+   curl -s http://localhost:8001/health
+  curl -s -X POST http://localhost:8001/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"pradmin@example.com","password":"Demo123!"}'
+   ```
+
+## Environment Setup (Frontend)
+1. `cd frontend`
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Copy environment file:
+   ```bash
+   cp .env.example .env.local  # contains VITE_API_BASE
+   ```
+4. Run dev server:
+   ```bash
+   npm run dev
+   ```
+5. Open `http://localhost:5173` and sign in with seeded credentials (e.g. `pradmin@example.com` / `Demo123!`).
 
 ## Test-First Workflow
-1. Backend unit/integration: `cd server && bench --site salitemiret.local test --app salitemiret` (pytest).
-2. Frontend unit: `cd web && pnpm test` (Vitest + React Testing Library).
-3. Frontend e2e: `cd web && pnpm test:e2e` (Playwright headless Chromium).
-4. Contract validation: `pnpm lint:openapi --file ../../specs/001-core-plan/contracts/openapi.yaml`.
-5. Constitution gate: verify `specs/001-core-plan/tasks.md` test tasks fail prior to implementation.
+1. Backend unit/API tests:
+   ```bash
+   cd server && source .venv/bin/activate
+   pytest
+   ```
+2. Frontend unit tests:
+   ```bash
+   cd frontend
+   npm run test
+   ```
+3. Contract checks (OpenAPI soon):
+   ```bash
+   cd server
+   python -m scripts.generate_openapi  # placeholder until implemented
+   ```
+4. Constitution gate: ensure failing tests exist for new modules before writing implementation.
 
-## Story Validation Matrix
-- **US1 Auth & Audit (SPEC-AUTH-001/002)**: Run `test_auth_rbac.py`, log in via admin UI, confirm unauthorized menus hidden, inspect `Audit Event` DocType for session entries.
-- **US2 Members (SPEC-MBR-001/002)**: Upload `scripts/samples/members.csv`, download error CSV for invalid rows, approve suggested statuses through PR queue.
-- **US3 Payments (SPEC-PAY-001)**: Create ledger entry, submit correction, approve via finance role, verify ledger hash continuity and audit emission.
-- **US4 Sponsorship/Newcomers (SPEC-SPN-001/SPEC-NEW-001)**: Register newcomer, convert to sponsorship, monitor `bench worker --queue long` for reminder job.
-- **US5 Schools (SPEC-SCH-001)**: Enroll student, trigger monthly reminders with `bench execute salitemiret.schools.billing_jobs.run_now`, confirm notification stub.
-- **US6 Volunteers (SPEC-VOL-001)**: Log service hours, schedule inactivity digest, confirm digest payload in notification queue.
-- **US7 Media (SPEC-MED-001)**: Submit request, approve via media admin, validate `/media/public-feed` endpoint returns published item.
-- **US8 Councils (SPEC-COU-001)**: Create council, add term, open governance dashboard in React admin to ensure metrics resolve.
-- **US9 Reports (SPEC-REP-001)**: Run ad-hoc report through UI, configure schedule, check scheduler log for successful execution.
-- **RBAC Baseline**: After syncing fixtures (`bench --site salitemiret.local export-fixtures --app salitemiret`), reload the Role Permission Matrix DocTypes with `bench --site salitemiret.local reload-doc salitemiret --doctype role_permission_matrix` to ensure deny-by-default permissions are active.
+## Story Validation Matrix (Pivot)
+- **Auth & RBAC (SPEC-AUTH-001/002)**: Verify JWT login, refresh, whoami, and role guards via API + protected routes.
+- **Members (SPEC-MEMBERSHIP)**: CRUD flows via FastAPI endpoints, soft delete email stubs, list pagination and filters.
+- **Payments (SPEC-PAY-001)**: Ledger endpoints + invariants (coming after membership).
+- **Sponsorship/Newcomers (SPEC-SPN-001 / SPEC-NEW-001)**: Pledge + settlement flows (post-membership).
+- **Schools / Volunteers / Media / Councils / Reports**: Each maps to dedicated module spec with acceptance tests.
 
 ## Observability & Operations
-1. Metrics: `curl http://localhost:8000/api/method/salitemiret.observability.metrics` to confirm Prometheus exposition.
-2. Traces: Inspect worker logs (`bench worker --queue default`) for JSON entries with `trace_id`/`span_id`.
-3. Backups: Execute `bench --site salitemiret.local execute salitemiret.scripts.backup.run_now` and verify artifact in configured S3 bucket.
-4. Accessibility/i18n: Run `pnpm lint:a11y` and toggle `/i18n` switch in UI to confirm EN/Am parity per `docs/spec-kit/02-ux-principles.md`.
+1. Metrics: enable FastAPI instrumentor (OpenTelemetry) and expose `/metrics` (planned Phase 2).
+2. Logs: structured JSON with request IDs via `app.core.logging` (to be wired).
+3. Migrations: Alembic revision per module, run via CI/CD before deploy.
+4. Backups: Postgres dump + S3 upload script tracked in `docs/spec-kit/10-operations-and-backups.md`.
 
 ## Data Reset & Fixtures
-- Seed baseline roles/permissions: `bench --site salitemiret.local execute salitemiret.setup.install_fixtures`.
-- Reset demo data: `bench --site salitemiret.local execute salitemiret.scripts.demo.reset`.
-- Clear frontend caches: `cd web && pnpm exec vite --clearScreen false --force`.
-## Frontend RBAC wiring
-1. Mount `RBACProvider` inside a `QueryClientProvider` so the whoami query hydrates roles on load.
-2. Use `ProtectedRoute` / `RoleGate` (see `PRAdminDemoRoute`) to gate routes or components; both expose loading fallbacks while the whoami request is in-flight.
-3. The RBAC context exposes `roles`, `personas`, and helpers (`useRBAC`) for local overrides during tests or storybook scenarios.
+- `python -m app.scripts.seed_demo --reset` (drops and recreates demo data; idempotent)
+- `alembic downgrade base && alembic upgrade head` (clean migrations)
 
-## Core Entities Bootstrap
-1. `bench --site salitemiret.local migrate`
-2. `bench --site salitemiret.local reload-doc salitemiret salitemiret household`
-3. `bench --site salitemiret.local reload-doc salitemiret salitemiret member`
-4. `bench --site salitemiret.local execute frappe.utils.fixtures.sync_fixtures --args '["salitemiret"]'`
+## Frontend RBAC Wiring
+1. `AuthProvider` boots, calls `/auth/whoami`, stores roles in context.
+2. `ProtectedRoute` enforces role lists (`PublicRelations` vs `OfficeAdmin`).
+3. `AppShell` displays persona badges, localisation toggle (EN/Am) using i18next.
+
+## UAT Smoke Script (Membership MVP)
+1. Login as `pradmin@example.com` (PublicRelations).
+2. Create member with spouse + two children; verify username `first.last`.
+3. Toggle tithe + contribution metadata; save and re-open detail.
+4. Login as `registrar@example.com` (OfficeAdmin); confirm read-only detail view.
+5. Soft-delete member; confirm audit/email stub logged in backend.
