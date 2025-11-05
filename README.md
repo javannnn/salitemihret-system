@@ -1,75 +1,136 @@
 # SaliteMihret System
 
-The SaliteMihret system is an in-progress monorepo that couples a Frappe 15 backend with a React/TanStack Query admin surface. The initial deliverable focuses on bootstrapping a role-based access control (RBAC) baseline so that future member management, payments, sponsorship, and reporting modules inherit deny-by-default permissions out of the box. 【F:apps/server/salitemiret/salitemiret/api/auth.py†L23-L67】【F:apps/server/salitemiret/salitemiret/permissions.py†L1-L48】
+SaliteMihret is a monorepo that houses both the Postgres-backed API service and the
+React administration client that parish teams use to manage members,
+contributions, sponsorships, media, volunteers, and reporting. The backend has
+moved off of the original Frappe stack and is now a plain Python service that
+leans on SQLAlchemy models, Alembic migrations, and typed Pydantic response
+contracts exposed through a small HTTP layer. The React app consumes those APIs
+with TanStack Query and enforces deny-by-default RBAC on every route.
 
 ## Repository layout
 
-- `apps/server/salitemiret/` – Core Frappe app that ships curated fixtures, permission guards, and API endpoints for the RBAC baseline, plus pytest coverage for the fixture integrity. 【F:apps/server/salitemiret/fixtures/role.json†L1-L10】【F:apps/server/salitemiret/salitemiret/tests/test_auth_rbac.py†L1-L140】
-- `apps/web/src/` – React 18 components, hooks, and API utilities that hydrate RBAC state with TanStack Query and enforce guards in routing or component trees. 【F:apps/web/src/context/RBACContext.tsx†L1-L95】【F:apps/web/src/components/ProtectedRoute.tsx†L1-L45】
-- `specs/001-core-plan/` – Approved specification pack containing the research, plan, and quickstart workflows for the wider platform rollout. 【F:specs/001-core-plan/plan.md†L1-L120】【F:specs/001-core-plan/quickstart.md†L1-L48】
+- `apps/server/` – Python 3.11 service that exposes the public API, SQLAlchemy
+  models, Alembic migrations, and pytest coverage for the domain. Legacy Frappe
+  fixtures live under `apps/server/salitemiret/fixtures/` until the last of the
+  migration audits are retired, but the new SQLAlchemy modules and service
+  orchestration live in the same package tree.
+- `apps/web/src/` – React 18 client code: RBAC context, protected routes, API
+  client utilities, and feature shells. 【F:apps/web/src/context/RBACContext.tsx†L1-L95】【F:apps/web/src/components/ProtectedRoute.tsx†L1-L45】
+- `specs/001-core-plan/` – Signed-off specification pack, OpenAPI contract, and
+  quickstart used to keep the backend and frontend in sync. 【F:specs/001-core-plan/contracts/openapi.yaml†L1-L80】【F:specs/001-core-plan/quickstart.md†L1-L48】
+- `docs/spec-kit/` – Architecture, operations, and module-level briefs that
+  describe the system constraints and delivery roadmap. 【F:docs/spec-kit/01-architecture.md†L1-L40】【F:docs/spec-kit/implementation-plan.md†L1-L32】
 
 ## Tech stack
 
 | Tier | Technologies |
 | ---- | ------------ |
-| Backend | Python 3.11, Frappe 15, MariaDB 10.6, Redis workers, MinIO/S3 for object storage |
+| Backend | Python 3.11, SQLAlchemy 2.x, Alembic, PostgreSQL 15, Pydantic models, HTTP service layer with typed handlers |
 | Frontend | TypeScript 5, React 18, TanStack Query, React Router, Tailwind CSS, shadcn/ui, i18next |
-| Tooling & QA | pytest (bench runner), Vitest + React Testing Library, Playwright, OpenAPI linting |
+| Tooling & QA | pytest, tox, Alembic autogenerate, OpenAPI linting, Vitest + React Testing Library, Playwright |
 
-> Refer to the Quickstart for the canonical versions, setup steps, and test-first workflow that the plan mandates. 【F:specs/001-core-plan/quickstart.md†L3-L45】
+> The source of truth for supported versions and dependency pins lives in the
+> quickstart and specification pack. 【F:specs/001-core-plan/quickstart.md†L3-L48】
 
-## Backend (Frappe) details
+## Backend service
 
-### RBAC fixtures
+### Architecture overview
 
-The repo seeds eight core personas and grants controlled access to the Role Permission Matrix DocTypes through fixtures that can be re-exported with `bench --site <site> export-fixtures --app salitemiret` after edits. 【F:apps/server/salitemiret/fixtures/role.json†L1-L10】【F:apps/server/salitemiret/fixtures/custom_docperm.json†L1-L69】
+The API service models each domain aggregate (members, sponsorships, payments,
+volunteers, councils, schools, media, reports) with SQLAlchemy declarative
+classes. Repository-style units encapsulate query logic and are orchestrated by
+service modules that implement use cases such as onboarding a member or
+correcting a payment. Public handlers map cleanly to the OpenAPI contract under
+`specs/001-core-plan/contracts/`, returning Pydantic response objects that ensure
+schema parity between the Python layer and the TypeScript client. 【F:specs/001-core-plan/contracts/openapi.yaml†L1-L80】
 
-### Permission hooks
+### Database & migrations
 
-`salitemiret.permissions` centralizes deny-by-default helpers that Frappe resolves when deciding whether a user can touch the Role Permission Matrix or its entries. System Managers retain full CRUD while PR Administrators get read-only insight for governance audits. 【F:apps/server/salitemiret/salitemiret/permissions.py†L13-L48】
+PostgreSQL is the system of record. Alembic tracks every schema change under the
+`alembic/versions/` directory alongside migration stubs for data backfills. The
+migrations include repeatable seeds for RBAC personas so that environments stay
+aligned during rollouts. Typical workflow:
 
-### WhoAmI API
+```bash
+# Create a new revision
+alembic revision -m "add sponsorship pledge caps"
 
-`salitemiret.api.auth.whoami` returns a compact payload (user id, full name, roles, derived personas) for the current session. The function works inside Bench and in isolated tests thanks to a safe `frappe.whitelist` shim. 【F:apps/server/salitemiret/salitemiret/api/auth.py†L13-L67】
+# Apply all pending migrations
+alembic upgrade head
+```
 
-### Tests
+Database URLs are provided via environment variables, and local development uses
+Docker Compose to provision Postgres with matching extensions (UUID, pgcrypto).
 
-`pytest`-based tests validate fixture integrity, permission semantics, and the WhoAmI response contract without requiring a running Frappe instance. The suite monkeypatches `frappe` so it can run in CI or local Python without Bench. 【F:apps/server/salitemiret/salitemiret/tests/test_auth_rbac.py†L19-L140】
+### Testing
 
-## Frontend (React) details
+Pytest covers migrations, repositories, and service flows. Existing RBAC tests
+under `apps/server/salitemiret/salitemiret/tests/` remain in place to ensure the
+new API preserves the deny-by-default semantics introduced during the Frappe
+phase. These tests will gradually be ported to hit the HTTP layer directly as
+handlers land. 【F:apps/server/salitemiret/salitemiret/tests/test_auth_rbac.py†L1-L140】
 
-### RBAC context & hook
+### Operations
 
-`RBACProvider` issues the WhoAmI request via TanStack Query, deduplicates roles, and exposes helpers for local overrides—handy for Storybook or unit tests. Consumers call `useRBAC` to check roles, adjust overrides, or ask for complex authorization checks. 【F:apps/web/src/context/RBACContext.tsx†L8-L95】【F:apps/web/src/hooks/useRBAC.ts†L1-L29】
+CI runs alembic upgrades, unit tests, and OpenAPI conformance checks before
+shipping Docker images. Deployment rollouts run database migrations in the same
+pipeline stage as container updates so that schema changes and code always move
+in lockstep. Observability hooks (structured logging + tracing IDs) follow the
+requirements outlined in the spec kit operations brief. 【F:docs/spec-kit/11-observability.md†L1-L80】【F:docs/spec-kit/10-operations-and-backups.md†L1-L80】
 
-### Guards & routes
+## Frontend (React) client
 
-- `RoleGate` wraps arbitrary UI fragments and enforces allow/forbid/complex rule sets, showing loading or fallback states when appropriate. 【F:apps/web/src/components/RoleGate.tsx†L7-L41】
-- `ProtectedRoute` integrates with React Router to restrict navigation and redirect unauthorized users. 【F:apps/web/src/components/ProtectedRoute.tsx†L8-L43】
-- `PRAdminDemoRoute` demonstrates wiring by locking content behind the “PR Administrator” persona. 【F:apps/web/src/routes/PRAdminDemoRoute.tsx†L5-L16】
+### RBAC context & hooks
 
-The RBAC types align with the backend fixtures so role mismatches surface during compilation. 【F:apps/web/src/types/rbac.ts†L1-L16】
+`RBACProvider` issues a WhoAmI request with TanStack Query, caches session roles,
+and exposes helper hooks so components can evaluate personas on demand.
+`useRBAC` wraps the context with ergonomic utilities for boolean role checks,
+overrides, and persona-specific gating. 【F:apps/web/src/context/RBACContext.tsx†L1-L95】【F:apps/web/src/hooks/useRBAC.ts†L1-L29】
 
-### API client
+### Guards & routing
 
-`fetchWhoAmI` calls the Frappe endpoint with cookie auth, gracefully handling the envelope variations that Frappe methods return (plain payload, `message`, or `data`). 【F:apps/web/src/api/client.ts†L3-L38】
+- `RoleGate` wraps arbitrary UI fragments and enforces allow/forbid rules with
+  sensible loading and fallback states. 【F:apps/web/src/components/RoleGate.tsx†L1-L41】
+- `ProtectedRoute` integrates with React Router to guard navigation and redirect
+  unauthorized users. 【F:apps/web/src/components/ProtectedRoute.tsx†L1-L43】
+- `PRAdminDemoRoute` demonstrates how to wire persona-only content with the gate
+  primitives. 【F:apps/web/src/routes/PRAdminDemoRoute.tsx†L1-L16】
+
+TypeScript RBAC types live under `apps/web/src/types/rbac.ts`, keeping the client
+aligned with the personas seeded by migrations. API utilities remain in
+`apps/web/src/api/` and will be pointed at the new Postgres-backed service once
+its authentication envelope is finalized. 【F:apps/web/src/types/rbac.ts†L1-L16】【F:apps/web/src/api/client.ts†L1-L33】
 
 ## Getting started
 
-1. Follow the Quickstart prerequisites and environment bootstrap instructions for Bench and pnpm. 【F:specs/001-core-plan/quickstart.md†L3-L21】
-2. Export/import fixtures whenever RBAC roles change so that sites stay synchronized. 【F:apps/server/salitemiret/README.md†L10-L18】
-3. Mount `RBACProvider` within a `QueryClientProvider` and reuse `ProtectedRoute`/`RoleGate` to enforce RBAC in the admin shell. 【F:specs/001-core-plan/quickstart.md†L45-L48】【F:apps/web/src/index.ts†L1-L8】
+1. **Install dependencies**
+   - Backend: `pyenv install 3.11.x && pip install -r requirements.txt` (or
+     `uv sync` if using uv).
+   - Frontend: `pnpm install`.
+2. **Provision Postgres** – `docker compose up db` seeds a development database
+   with role fixtures. Update `.env` with the DSN exposed in Compose.
+3. **Run migrations** – `alembic upgrade head` to align the schema.
+4. **Start services**
+   - Backend: `uvicorn salitemiret.app:app --reload` (or the equivalent entry
+     point configured for the API service).
+   - Frontend: `pnpm dev` to serve the React client with hot reload.
+5. **Log in** – Use the seeded personas to exercise RBAC. The React app boots by
+   calling the WhoAmI endpoint and will render persona-specific navigation as
+   soon as the HTTP layer responds.
 
 ## Testing
 
-- Backend: `bench --site salitemihret.local run-tests --app salitemiret --module salitemiret.salitemiret.tests.test_auth_rbac`
+- Backend unit/integration: `pytest`
+- Database migrations: `alembic upgrade head --sql` for dry runs, plus `pytest
+  tests/migrations` for data assertions.
 - Frontend unit: `pnpm test`
 - Frontend e2e: `pnpm test:e2e`
-- Contracts: `pnpm lint:openapi --file specs/001-core-plan/contracts/openapi.yaml`
-
-Refer to the Quickstart for the expected test order in CI pipelines. 【F:apps/server/salitemiret/README.md†L26-L36】【F:specs/001-core-plan/quickstart.md†L16-L21】
+- Contract linting: `pnpm lint:openapi --file specs/001-core-plan/contracts/openapi.yaml`
 
 ## Additional documentation
 
-The `specs/001-core-plan` folder captures the approved architecture, data model, research notes, and validation matrix that govern future phases (members, payments, sponsorship, schools, volunteers, media, councils, reporting). Use these artifacts to align new work with the signed-off scope. 【F:specs/001-core-plan/plan.md†L8-L120】【F:specs/001-core-plan/quickstart.md†L23-L48】
-
+The `docs/spec-kit` folder captures the product vision, architecture decisions,
+module requirements, operations guidelines, and testing strategy that govern the
+ongoing migration to the Postgres/Alembic backend. Use these artifacts to keep
+implementation choices aligned with the approved scope. 【F:docs/spec-kit/00-product-vision.md†L1-L40】【F:docs/spec-kit/06-testing-strategy.md†L1-L80】
