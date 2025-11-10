@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CheckSquare,
@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   MoreVertical,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
@@ -47,6 +48,13 @@ type Filters = {
   newThisMonth: boolean;
 };
 
+type QuickCreateForm = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  status: MemberStatus;
+};
+
 const PAGE_SIZE = 15;
 
 const SORT_OPTIONS = [
@@ -67,6 +75,13 @@ const INITIAL_FILTERS: Filters = {
   hasChildren: false,
   missingPhone: false,
   newThisMonth: false,
+};
+
+const QUICK_CREATE_DEFAULT: QuickCreateForm = {
+  first_name: "",
+  last_name: "",
+  phone: "",
+  status: "Active",
 };
 
 function avatarUrl(path?: string | null) {
@@ -106,6 +121,7 @@ export default function MembersList() {
   const canImport = permissions.importMembers;
   const canExport = permissions.exportMembers;
 
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [priestSearch, setPriestSearch] = useState("");
   const [priests, setPriests] = useState<Priest[]>([]);
   const filteredPriests = useMemo(() => {
@@ -140,6 +156,9 @@ export default function MembersList() {
   const [newPriest, setNewPriest] = useState({ fullName: "", phone: "", email: "" });
   const [creatingPriest, setCreatingPriest] = useState(false);
   const [autoOpenedPriest, setAutoOpenedPriest] = useState(false);
+  const [newMemberModalOpen, setNewMemberModalOpen] = useState(false);
+  const [newMemberSaving, setNewMemberSaving] = useState(false);
+  const [newMemberForm, setNewMemberForm] = useState<QuickCreateForm>({ ...QUICK_CREATE_DEFAULT });
 
   const syncSearchParams = useCallback(
     ({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage }: {
@@ -589,6 +608,86 @@ const downloadCsv = async (
     navigate(`/members/${memberId}/edit`);
   };
 
+  const closeNewMemberModal = () => {
+    setNewMemberModalOpen(false);
+    setNewMemberSaving(false);
+    setNewMemberForm({ ...QUICK_CREATE_DEFAULT });
+  };
+
+  const handleNewMemberChange = (field: keyof QuickCreateForm) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value = event.target.value;
+      setNewMemberForm((prev) => ({ ...prev, [field]: field === "status" ? (value as MemberStatus) : value }));
+    };
+
+  const handleQuickCreateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (newMemberSaving) return;
+    if (!newMemberForm.first_name.trim() || !newMemberForm.last_name.trim() || !newMemberForm.phone.trim()) {
+      toast.push("First name, last name, and phone are required");
+      return;
+    }
+    setNewMemberSaving(true);
+    try {
+      const payload = {
+        first_name: newMemberForm.first_name.trim(),
+        middle_name: null,
+        last_name: newMemberForm.last_name.trim(),
+        baptismal_name: null,
+        email: null,
+        phone: newMemberForm.phone.trim(),
+        status: newMemberForm.status,
+        gender: null,
+        marital_status: null,
+        birth_date: null,
+        join_date: null,
+        district: null,
+        address: null,
+        address_street: null,
+        address_city: null,
+        address_region: null,
+        address_postal_code: null,
+        address_country: null,
+        is_tither: false,
+        pays_contribution: true,
+        contribution_method: null,
+        contribution_amount: 75,
+        contribution_exception_reason: null,
+        notes: null,
+        has_father_confessor: false,
+        household_size_override: null,
+        household_id: null,
+        household_name: null,
+        tag_ids: [] as number[],
+        ministry_ids: [] as number[],
+        spouse: null,
+        children: [],
+      };
+      const created = await api<MemberDetail>("/members", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      toast.push("Member created");
+      closeNewMemberModal();
+      loadMembers(1);
+      navigate(`/members/${created.id}/edit`);
+    } catch (error) {
+      console.error(error);
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Failed to create member");
+      } else {
+        toast.push("Failed to create member");
+      }
+    } finally {
+      setNewMemberSaving(false);
+    }
+  };
+
+  const handleOpenFullForm = () => {
+    closeNewMemberModal();
+    navigate("/members/new");
+  };
+
   const closeAssignModal = () => {
     setAssignModalOpen(false);
     setAssignContext(null);
@@ -689,6 +788,29 @@ const downloadCsv = async (
   }, [location.pathname]);
 
   useEffect(() => {
+    const handler = (event: MouseEvent | PointerEvent) => {
+      if (!actionsMenuOpen) return;
+      const target = event.target as Node;
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(target)) {
+        setActionsMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [actionsMenuOpen]);
+
+  useEffect(() => {
+    if (!actionsMenuOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActionsMenuOpen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [actionsMenuOpen]);
+
+  useEffect(() => {
     if (!assignModalOpen) {
       setAutoOpenedPriest(false);
       return;
@@ -728,9 +850,11 @@ const downloadCsv = async (
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {(canExport || canImport) && (
-              <div className="relative" onMouseLeave={() => setActionsMenuOpen(false)}>
+              <div className="relative" ref={actionsMenuRef}>
                 <Button
                   variant="ghost"
+                  aria-haspopup="menu"
+                  aria-expanded={actionsMenuOpen}
                   onClick={(event) => {
                     event.stopPropagation();
                     setActionsMenuOpen((prev) => !prev);
@@ -741,12 +865,21 @@ const downloadCsv = async (
                     className={`h-4 w-4 transition-transform ${actionsMenuOpen ? "rotate-180" : ""}`}
                   />
                 </Button>
-                {actionsMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 space-y-1 rounded-xl border border-border bg-card shadow-lg z-30 p-2">
-                    {canExport && (
-                      <button
-                        type="button"
-                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                <AnimatePresence>
+                  {actionsMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute right-0 mt-2 w-48 space-y-1 rounded-xl border border-border bg-card shadow-lg z-30 p-2"
+                      role="menu"
+                    >
+                      {canExport && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
                         onClick={(event) => {
                           event.stopPropagation();
                           event.preventDefault();
@@ -765,10 +898,11 @@ const downloadCsv = async (
                         </span>
                       </button>
                     )}
-                    {canImport && (
-                      <button
-                        type="button"
-                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                      {canImport && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
                         onClick={(event) => {
                           event.stopPropagation();
                           event.preventDefault();
@@ -782,12 +916,24 @@ const downloadCsv = async (
                         </span>
                       </button>
                     )}
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
             {canCreate && (
-              <Button onClick={() => navigate("/members/new")}>New Member</Button>
+              <motion.button
+                type="button"
+                onClick={() => setNewMemberModalOpen(true)}
+                whileHover={{ scale: 1.05, rotate: 5 }}
+                whileTap={{ scale: 0.95 }}
+                className="group relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-accent/60 bg-card shadow-soft transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2"
+                aria-label="Quick add member"
+              >
+                <span className="absolute inset-0 rounded-full bg-accent/10 opacity-0 transition group-hover:opacity-100" />
+                <Plus className="h-5 w-5 text-accent transition-transform duration-300 group-hover:rotate-90" />
+                <span className="absolute -bottom-6 text-[11px] uppercase tracking-wide text-mute">Quick add</span>
+              </motion.button>
             )}
           </div>
         </div>
@@ -1443,6 +1589,96 @@ const downloadCsv = async (
           </>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {newMemberModalOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeNewMemberModal}
+            />
+            <motion.div
+              className="fixed inset-0 z-50 flex items-center justify-center px-4"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <Card className="w-full max-w-lg p-6 space-y-4">
+                <form className="space-y-4" onSubmit={handleQuickCreateSubmit}>
+                  <div>
+                    <h2 className="text-lg font-semibold">Quick add member</h2>
+                    <p className="text-sm text-mute">
+                      Capture the required fields now. Switch to the full form for additional details.
+                    </p>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">First name *</label>
+                      <Input
+                        value={newMemberForm.first_name}
+                        onChange={handleNewMemberChange("first_name")}
+                        autoFocus
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Last name *</label>
+                      <Input
+                        value={newMemberForm.last_name}
+                        onChange={handleNewMemberChange("last_name")}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Phone *</label>
+                      <Input
+                        value={newMemberForm.phone}
+                        onChange={handleNewMemberChange("phone")}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Status</label>
+                      <Select
+                        value={newMemberForm.status}
+                        onChange={handleNewMemberChange("status")}
+                      >
+                        {(meta?.statuses ?? ["Active", "Inactive", "Pending", "Archived"]).map((statusOption) => (
+                          <option key={statusOption} value={statusOption}>
+                            {statusOption}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                  <Card className="p-3 bg-accent/5 border-dashed">
+                    <p className="text-xs text-mute">
+                      New members start with the standard 75 CAD contribution. Finance roles can adjust exceptions later.
+                    </p>
+                  </Card>
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <Button type="button" variant="ghost" onClick={handleOpenFullForm}>
+                      View full form
+                    </Button>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="ghost" onClick={closeNewMemberModal}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={newMemberSaving}>
+                        {newMemberSaving ? "Saving…" : "Create & open"}
+                      </Button>
+                    </div>
+                  </div>
+                </form>
+              </Card>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {assignModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div

@@ -4,6 +4,8 @@ import logging
 from typing import Any
 
 from app.models.member import Child, Member
+from app.models.payment import Payment
+from app.models.payment_day_lock import PaymentDayLock
 
 logger = logging.getLogger(__name__)
 
@@ -33,5 +35,39 @@ def notify_contribution_change(member: Member, field: str, previous: Any, curren
             "field": field,
             "old_value": previous,
             "new_value": current,
+        },
+    )
+
+
+def notify_payment_overdue(payment: Payment) -> None:
+    logger.warning(
+        "payment_overdue",
+        extra={
+            "payment_id": payment.id,
+            "member_id": payment.member_id,
+            "service_type": payment.service_type.code if payment.service_type else None,
+            "due_date": payment.due_date,
+            "status": payment.status,
+        },
+    )
+
+
+def notify_payment_day_locked(lock: PaymentDayLock) -> None:
+    logger.info(
+        "payment_day_locked",
+        extra={
+            "day": lock.day.isoformat(),
+            "locked_by": lock.locked_by_id,
+        },
+    )
+
+
+def notify_payment_day_unlocked(lock: PaymentDayLock) -> None:
+    logger.info(
+        "payment_day_unlocked",
+        extra={
+            "day": lock.day.isoformat(),
+            "unlocked_by": lock.unlocked_by_id,
+            "reason": lock.unlock_reason,
         },
     )

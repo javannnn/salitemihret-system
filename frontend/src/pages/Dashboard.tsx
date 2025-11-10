@@ -13,6 +13,8 @@ import {
   api,
   getPromotionPreview,
   runChildPromotions,
+  getPaymentSummary,
+  PaymentSummaryResponse,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -47,6 +49,8 @@ export default function Dashboard() {
   const [promotions, setPromotions] = useState<ChildPromotionPreview | null>(null);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [financeSummary, setFinanceSummary] = useState<PaymentSummaryResponse | null>(null);
+  const [financeLoading, setFinanceLoading] = useState(false);
   const toast = useToast();
   const permissions = usePermissions();
 
@@ -119,6 +123,37 @@ export default function Dashboard() {
     };
   }, [permissions.viewPromotions, toast]);
 
+  useEffect(() => {
+    if (!permissions.viewPayments) {
+      setFinanceSummary(null);
+      setFinanceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setFinanceLoading(true);
+    getPaymentSummary()
+      .then((data) => {
+        if (!cancelled) {
+          setFinanceSummary(data);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          return;
+        }
+        toast.push("Failed to load finance summary");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setFinanceLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.viewPayments, toast]);
+
   const handleRunPromotions = async () => {
     if (!permissions.runPromotions) {
       return;
@@ -164,9 +199,26 @@ export default function Dashboard() {
     }));
   }, [summary]);
 
+  const topServices = useMemo(() => {
+    if (!financeSummary) return [];
+    return [...financeSummary.items]
+      .sort((a, b) => Number(b.total_amount) - Number(a.total_amount))
+      .slice(0, 3);
+  }, [financeSummary]);
+
+  const financeSpark = useMemo(() => {
+    if (!financeSummary || financeSummary.items.length < 2) return [];
+    const values = financeSummary.items.map((item) => Number(item.total_amount));
+    const max = Math.max(...values) || 1;
+    return values.map((value, index) => ({
+      x: (index / (values.length - 1 || 1)) * 100,
+      y: 100 - (value / max) * 100,
+    }));
+  }, [financeSummary]);
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -265,6 +317,62 @@ export default function Dashboard() {
           ) : (
             <div className="text-sm text-mute leading-relaxed">
               Status breakdown is limited to teams that oversee membership approvals.
+            </div>
+          )}
+        </Card>
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-mute">Financial snapshot</div>
+              <div className="text-3xl font-semibold">
+                {permissions.viewPayments && financeSummary
+                  ? `${financeSummary.grand_total.toLocaleString(undefined, { minimumFractionDigits: 2 })} CAD`
+                  : "—"}
+              </div>
+            </div>
+            <div className="text-xs text-mute text-right">
+              Top service
+              <div className="text-lg font-semibold text-accent">
+                {permissions.viewPayments && topServices[0]?.service_type_label
+                  ? topServices[0].service_type_label
+                  : "—"}
+              </div>
+            </div>
+          </div>
+          {permissions.viewPayments ? (
+            financeSummary && financeSummary.items.length > 0 ? (
+              <>
+                {financeSpark.length > 0 && (
+                  <div className="h-24 w-full">
+                    <motion.svg viewBox="0 0 100 100" className="h-full w-full text-accent/60">
+                      <polyline
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        points={financeSpark.map((point) => `${point.x},${point.y}`).join(" ")}
+                      />
+                    </motion.svg>
+                  </div>
+                )}
+                <div className="space-y-2 text-sm">
+                  {topServices.map((item) => (
+                    <div key={item.service_type_code} className="flex items-center justify-between">
+                      <span>{item.service_type_label}</span>
+                      <span className="font-semibold">
+                        {item.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {item.currency}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : financeLoading ? (
+              <div className="text-sm text-mute">Loading finance data…</div>
+            ) : (
+              <div className="text-sm text-mute">No payments recorded yet.</div>
+            )
+          ) : (
+            <div className="text-sm text-mute leading-relaxed">
+              Finance metrics are available to Finance/Admin roles only.
             </div>
           )}
         </Card>

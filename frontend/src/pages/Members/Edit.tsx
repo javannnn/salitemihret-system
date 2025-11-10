@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
 import {
@@ -8,10 +8,14 @@ import {
   MemberDetail,
   MemberStatus,
   MembersMeta,
+  Payment,
+  PaymentServiceType,
   api,
-  createContributionPayment,
+  createPaymentEntry,
   getMemberAudit,
   getMembersMeta,
+  getPaymentServiceTypes,
+  listPayments,
   uploadAvatar,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
@@ -39,6 +43,14 @@ type ChildFormState = {
   birth_date: string;
   country_of_birth: string;
   notes: string;
+};
+
+type MemberPaymentForm = {
+  amount: string;
+  paid_at: string;
+  method: string;
+  note: string;
+  service_type_code: string;
 };
 
 const makeChildKey = () =>
@@ -92,13 +104,41 @@ function EditMemberInner() {
   const [fatherConfessorId, setFatherConfessorId] = useState<string>("");
   const [spouseForm, setSpouseForm] = useState<SpouseFormState | null>(null);
   const [childrenForm, setChildrenForm] = useState<ChildFormState[]>([]);
-  const [newPayment, setNewPayment] = useState(() => ({
+  const [newPayment, setNewPayment] = useState<MemberPaymentForm>(() => ({
     amount: "75.00",
     paid_at: new Date().toISOString().slice(0, 10),
     method: "",
     note: "",
+    service_type_code: "",
   }));
   const [savingPayment, setSavingPayment] = useState(false);
+  const [memberPayments, setMemberPayments] = useState<Payment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [serviceTypes, setServiceTypes] = useState<PaymentServiceType[]>([]);
+  const defaultContributionCode = useMemo(() => {
+    if (!serviceTypes.length) return "";
+    return serviceTypes.find((type) => type.code === "CONTRIBUTION")?.code || serviceTypes[0].code;
+  }, [serviceTypes]);
+
+  const loadMemberPayments = useCallback(
+    async (memberId: number) => {
+      if (!permissions.viewPayments) {
+        setMemberPayments([]);
+        return;
+      }
+      setPaymentsLoading(true);
+      try {
+        const response = await listPayments({ member_id: memberId, page_size: 25 });
+        setMemberPayments(response.items);
+      } catch (error) {
+        console.error(error);
+        toast.push("Failed to load payment history");
+      } finally {
+        setPaymentsLoading(false);
+      }
+    },
+    [permissions.viewPayments, toast]
+  );
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const initializeFormsFromMember = useCallback((details: MemberDetail) => {
@@ -177,14 +217,52 @@ function EditMemberInner() {
     load();
   }, [id, toast, initializeFormsFromMember]);
 
-  useEffect(() => {
-    if (!member) return;
-    setNewPayment((prev) => ({
-      ...prev,
-      amount: (member.contribution_amount ?? 75).toFixed(2),
-      paid_at: new Date().toISOString().slice(0, 10),
-    }));
-  }, [member?.id]);
+useEffect(() => {
+  if (!member) return;
+  setNewPayment((prev) => ({
+    ...prev,
+    amount: (member.contribution_amount ?? 75).toFixed(2),
+    paid_at: new Date().toISOString().slice(0, 10),
+  }));
+}, [member?.id]);
+
+useEffect(() => {
+  if (!member?.id) {
+    setMemberPayments([]);
+    return;
+  }
+  loadMemberPayments(member.id);
+}, [member?.id, loadMemberPayments]);
+
+useEffect(() => {
+  if (!permissions.managePayments) {
+    setServiceTypes([]);
+    return;
+  }
+  let cancelled = false;
+  getPaymentServiceTypes()
+    .then((types) => {
+      if (!cancelled) {
+        setServiceTypes(types);
+      }
+    })
+    .catch((error) => {
+      console.error(error);
+      toast.push("Failed to load service types");
+    });
+  return () => {
+    cancelled = true;
+  };
+}, [permissions.managePayments, toast]);
+
+useEffect(() => {
+  if (!defaultContributionCode) {
+    return;
+  }
+  setNewPayment((prev) =>
+    prev.service_type_code ? prev : { ...prev, service_type_code: defaultContributionCode }
+  );
+}, [defaultContributionCode]);
 
   const refreshAudit = async (memberId: number) => {
     if (!canViewAudit) {
@@ -372,9 +450,8 @@ function EditMemberInner() {
     });
   };
 
-  const handleAddPayment = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!member || disableFinance) {
+  const handleRecordPayment = async () => {
+    if (!member || !permissions.managePayments) {
       return;
     }
     const amountNumber = Number(newPayment.amount);
@@ -382,28 +459,28 @@ function EditMemberInner() {
       toast.push("Payment amount must be greater than zero");
       return;
     }
+    if (!newPayment.service_type_code) {
+      toast.push("Select a service type");
+      return;
+    }
     setSavingPayment(true);
     try {
-      const created = await createContributionPayment(member.id, {
+      const created = await createPaymentEntry({
         amount: Math.round(amountNumber * 100) / 100,
-        paid_at: newPayment.paid_at || undefined,
-        method: newPayment.method.trim() || undefined,
-        note: newPayment.note.trim() || undefined,
+        service_type_code: newPayment.service_type_code,
+        member_id: member.id,
+        method: newPayment.method || undefined,
+        memo: newPayment.note.trim() || undefined,
+        posted_at: newPayment.paid_at ? new Date(newPayment.paid_at).toISOString() : undefined,
       });
-      setMember((prev) =>
-        prev
-          ? {
-              ...prev,
-              contribution_history: [created, ...prev.contribution_history],
-            }
-          : prev,
-      );
-      toast.push("Contribution payment recorded");
+      setMemberPayments((prev) => [created, ...prev]);
+      toast.push("Payment recorded");
       setNewPayment({
         amount: (member.contribution_amount ?? 75).toFixed(2),
         paid_at: new Date().toISOString().slice(0, 10),
         method: "",
         note: "",
+        service_type_code: defaultContributionCode || newPayment.service_type_code,
       });
     } catch (error) {
       console.error(error);
@@ -1044,38 +1121,68 @@ function EditMemberInner() {
 
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold uppercase tracking-wide">Contribution History</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-wide">Financial Activity</h3>
+              {permissions.viewPayments && member?.id && (
+                <Button type="button" variant="ghost" onClick={() => navigate(`/payments/members/${member.id}`)}>
+                  View payment timeline
+                </Button>
+              )}
             </div>
-            {member.contribution_history.length === 0 ? (
-              <p className="text-sm text-mute">No contribution payments recorded yet.</p>
+            {!permissions.viewPayments ? (
+              <p className="text-sm text-mute">Finance Admin permissions are required to view ledger payments.</p>
+            ) : paymentsLoading ? (
+              <p className="text-sm text-mute">Loading payment history…</p>
+            ) : memberPayments.length === 0 ? (
+              <p className="text-sm text-mute">No payments recorded in the ledger yet.</p>
             ) : (
               <div className="overflow-x-auto border border-border rounded-lg">
                 <table className="min-w-full text-sm">
                   <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute">
                     <tr>
                       <th className="px-4 py-2 text-left">Date</th>
+                      <th className="px-4 py-2 text-left">Service</th>
                       <th className="px-4 py-2 text-left">Amount</th>
                       <th className="px-4 py-2 text-left">Method</th>
-                      <th className="px-4 py-2 text-left">Note</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2 text-left">Memo</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {member.contribution_history.map((payment) => (
+                    {memberPayments.map((payment) => (
                       <tr key={payment.id} className="border-t border-border/60">
-                        <td className="px-4 py-2">{payment.paid_at}</td>
+                        <td className="px-4 py-2">{new Date(payment.posted_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-2">{payment.service_type.label}</td>
                         <td className="px-4 py-2">
-                          {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className="px-4 py-2">{payment.method || "—"}</td>
-                        <td className="px-4 py-2">{payment.note || "—"}</td>
+                        <td className="px-4 py-2">
+                          <Badge className="normal-case">{payment.status}</Badge>
+                        </td>
+                        <td className="px-4 py-2">{payment.memo || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-            {!disableFinance && (
-              <form className="grid md:grid-cols-5 gap-3" onSubmit={handleAddPayment}>
+            {permissions.managePayments && (
+              <div className="grid md:grid-cols-6 gap-3">
+                <div>
+                  <label className="text-xs uppercase text-mute">Service type</label>
+                  <Select
+                    value={newPayment.service_type_code}
+                    onChange={(event) => setNewPayment((prev) => ({ ...prev, service_type_code: event.target.value }))}
+                    disabled={savingPayment || serviceTypes.length === 0}
+                  >
+                    {serviceTypes.length === 0 && <option value="">Loading…</option>}
+                    {serviceTypes.map((type) => (
+                      <option key={type.code} value={type.code}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
                 <div>
                   <label className="text-xs uppercase text-mute">Amount</label>
                   <Input
@@ -1095,26 +1202,32 @@ function EditMemberInner() {
                 </div>
                 <div>
                   <label className="text-xs uppercase text-mute">Method</label>
-                  <Input
+                  <Select
                     value={newPayment.method}
                     onChange={(event) => setNewPayment((prev) => ({ ...prev, method: event.target.value }))}
-                    placeholder="Optional"
-                  />
+                  >
+                    <option value="">Select method</option>
+                    {(meta?.payment_methods ?? []).map((method) => (
+                      <option key={method} value={method}>
+                        {method}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs uppercase text-mute">Note</label>
+                <div>
+                  <label className="text-xs uppercase text-mute">Memo</label>
                   <Input
                     value={newPayment.note}
                     onChange={(event) => setNewPayment((prev) => ({ ...prev, note: event.target.value }))}
                     placeholder="Optional"
                   />
                 </div>
-                <div className="md:col-span-5 flex justify-end">
-                  <Button type="submit" disabled={savingPayment}>
-                    {savingPayment ? "Saving…" : "Record payment"}
+                <div className="flex items-end">
+                  <Button type="button" onClick={handleRecordPayment} disabled={savingPayment || !newPayment.service_type_code}>
+                    {savingPayment ? "Recording…" : "Record payment"}
                   </Button>
                 </div>
-              </form>
+              </div>
             )}
           </section>
 

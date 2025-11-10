@@ -157,6 +157,9 @@
 
 ## Execution Notes
 
+- Phases 1 through 5 are complete in the current codebase. The membership module is ready for handoff; future work should focus on the next roadmap module (per client priorities) and any cross-cutting QA discovered during integrated testing.
+- Final Phase-5 polish (Nov 2025) introduced the hover-animated quick-add button, floating required-fields modal, and a stabilized Actions dropdown to address stakeholder feedback about workflow friction.
+
 - Work sequentially by phase; ensure migrations/tests succeed before advancing.
 - Track progress in `docs/members-module-progress.md`.
 - Coordinate frontend work only after Phase 1 backend endpoints stabilize.

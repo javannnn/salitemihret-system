@@ -20,8 +20,10 @@ from app.routers import members as members_router
 from app.routers import members_bulk as members_bulk_router
 from app.routers import members_files as members_files_router
 from app.routers import priests as priests_router
+from app.routers import payments as payments_router
 from app.routers import whoami as whoami_router
 from app.services.child_promotion import get_children_ready_for_promotion
+from app.services import payments as payments_service
 
 app = FastAPI(title="SaliteMihret API", version="0.1.0")
 
@@ -61,6 +63,7 @@ app.include_router(children_router.router)
 app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
+app.include_router(payments_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
 
 @app.on_event("startup")
@@ -350,6 +353,19 @@ def _send_promotion_digest() -> None:
             },
         )
 
+def _run_overdue_payment_check() -> None:
+    with SessionLocal() as session:
+        updated = payments_service.check_overdue_payments(session)
+        if updated:
+            logger.info("payment_overdue_job", extra={"updated": updated})
+
+
+def _run_daily_close_job() -> None:
+    with SessionLocal() as session:
+        lock = payments_service.auto_close_previous_day(session)
+        if lock:
+            logger.info("payment_daily_close", extra={"day": lock.day.isoformat()})
+
 
 @app.on_event("startup")
 def start_scheduled_jobs() -> None:
@@ -361,6 +377,22 @@ def start_scheduled_jobs() -> None:
         hour=2,
         minute=0,
         id="promotion_digest",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_overdue_payment_check,
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id="payment_overdue_check",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_daily_close_job,
+        trigger="cron",
+        hour=2,
+        minute=5,
+        id="payment_daily_close",
         replace_existing=True,
     )
 

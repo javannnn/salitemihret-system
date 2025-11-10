@@ -335,11 +335,11 @@ class MemberDetailOut(MemberListOut):
     household_size_override: Optional[int]
     father_confessor: Optional[PriestOut]
     spouse: Optional[SpouseOut]
-    children: List[ChildOut]
+    children: List[ChildOut] = Field(default_factory=list)
     household: Optional[HouseholdOut]
-    tags: List[TagOut]
-    ministries: List[MinistryOut]
-    contribution_history: List[ContributionPaymentOut]
+    tags: List[TagOut] = Field(default_factory=list)
+    ministries: List[MinistryOut] = Field(default_factory=list)
+    contribution_history: List[ContributionPaymentOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     created_by_id: Optional[int]

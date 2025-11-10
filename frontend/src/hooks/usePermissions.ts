@@ -15,6 +15,8 @@ export type PermissionMap = {
   viewAudit: boolean;
   viewPromotions: boolean;
   runPromotions: boolean;
+  viewPayments: boolean;
+  managePayments: boolean;
 };
 
 const BASE_PERMISSIONS: PermissionMap = {
@@ -30,6 +32,8 @@ const BASE_PERMISSIONS: PermissionMap = {
   viewAudit: false,
   viewPromotions: false,
   runPromotions: false,
+  viewPayments: false,
+  managePayments: false,
 };
 
 const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
@@ -46,6 +50,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewAudit: true,
     viewPromotions: true,
     runPromotions: true,
+    viewPayments: true,
+    managePayments: true,
   },
   PublicRelations: {
     viewMembers: true,
@@ -78,11 +84,14 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewMembers: true,
     createMembers: true,
     editCore: true,
+    viewPayments: true,
   },
   FinanceAdmin: {
     viewMembers: true,
     editFinance: true,
     exportMembers: true,
+    viewPayments: true,
+    managePayments: true,
   },
 };
 

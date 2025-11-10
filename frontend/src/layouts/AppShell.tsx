@@ -7,20 +7,23 @@ import { logout } from "@/lib/auth";
 import { Card, Button, Badge } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export default function AppShell() {
   const { user, loading } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const permissions = usePermissions();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
-  const navItems = useMemo(
-    () => [
-      { label: "Dashboard", to: "/dashboard" },
-      { label: "Members", to: "/members" },
-    ],
-    []
-  );
+  const navItems = useMemo(() => {
+    const items = [
+      { label: "Dashboard", to: "/dashboard", visible: true },
+      { label: "Members", to: "/members", visible: permissions.viewMembers },
+      { label: "Payments", to: "/payments", visible: permissions.viewPayments },
+    ];
+    return items.filter((item) => item.visible);
+  }, [permissions.viewMembers, permissions.viewPayments]);
 
   if (loading) {
     return <div className="p-6 text-sm text-mute">Loading…</div>;

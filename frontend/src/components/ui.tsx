@@ -17,6 +17,7 @@ type ButtonVariant = "solid" | "ghost" | "soft";
 export function Button({
   variant = "solid",
   className = "",
+  type = "button",
   ...props
 }: { variant?: ButtonVariant } & ComponentProps<"button">) {
   const base =
@@ -33,6 +34,7 @@ export function Button({
 
   return (
     <button
+      type={type}
       {...props}
       className={`${base} ${variantClass} ${disabled} ${className}`}
     />
