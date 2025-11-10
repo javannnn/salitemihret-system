@@ -84,6 +84,68 @@ export type ContributionPayment = {
   created_at: string;
 };
 
+export type PaymentServiceType = {
+  id: number;
+  code: string;
+  label: string;
+  description?: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PaymentMember = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+};
+
+export type PaymentHousehold = {
+  id: number;
+  name: string;
+};
+
+export type Payment = {
+  id: number;
+  amount: number;
+  currency: string;
+  method?: string | null;
+  memo?: string | null;
+  posted_at: string;
+  due_date?: string | null;
+  status: "Pending" | "Completed" | "Overdue";
+  member_id?: number | null;
+  household_id?: number | null;
+  recorded_by_id?: number | null;
+  correction_of_id?: number | null;
+  correction_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+  service_type: PaymentServiceType;
+  member?: PaymentMember | null;
+  household?: PaymentHousehold | null;
+};
+
+export type PaymentListResponse = {
+  items: Payment[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type PaymentSummaryItem = {
+  service_type_code: string;
+  service_type_label: string;
+  total_amount: number;
+  currency: string;
+};
+
+export type PaymentSummaryResponse = {
+  items: PaymentSummaryItem[];
+  grand_total: number;
+};
+
 export type Page<T> = {
   items: T[];
   total: number;
@@ -203,6 +265,31 @@ export async function exportMembers(params: Record<string, string | number | und
     throw new ApiError(res.status, message || "Export failed");
   }
 
+  return res.blob();
+}
+
+export async function exportPaymentsReport(params: PaymentFilters = {}): Promise<Blob> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const url = `${API_BASE}/payments/export.csv${query ? `?${query}` : ""}`;
+  const res = await authFetch(url, { headers: { Accept: "text/csv" } });
+
+  if (res.status === 401) {
+    setToken(null);
+    throw new ApiError(401, "Unauthorized");
+  }
+  if (res.status === 403) {
+    const message = await res.text();
+    throw new ApiError(403, message || "Forbidden");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Export failed");
+  }
   return res.blob();
 }
 
@@ -348,6 +435,15 @@ export async function getMembersMeta(): Promise<MembersMeta> {
   return api<MembersMeta>("/members/meta");
 }
 
+export async function searchMembers(query: string, limit = 5): Promise<Member[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  params.set("page_size", String(limit));
+  params.set("sort", "-updated_at");
+  const response = await api<Page<Member>>(`/members?${params.toString()}`);
+  return response.items;
+}
+
 export async function getPromotionPreview(withinDays = 30): Promise<ChildPromotionPreview> {
   return api<ChildPromotionPreview>(`/members/promotions?within_days=${withinDays}`);
 }
@@ -383,4 +479,83 @@ export async function getEligibleChildren(withinDays = 60): Promise<ChildPromoti
 
 export async function promoteChild(childId: number): Promise<ChildPromotionResultItem> {
   return api<ChildPromotionResultItem>(`/children/${childId}/promote`, { method: "POST" });
+}
+
+export type PaymentFilters = {
+  page?: number;
+  page_size?: number;
+  member_id?: number;
+  service_type?: string;
+  method?: string;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+};
+
+export async function listPayments(params: PaymentFilters = {}): Promise<PaymentListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const response = await api<PaymentListResponse>(`/payments${query ? `?${query}` : ""}`);
+  return {
+    ...response,
+    items: response.items.map((item) => ({
+      ...item,
+      amount: Number(item.amount),
+    })),
+  };
+}
+
+type PaymentCreatePayload = {
+  amount: number;
+  currency?: string;
+  method?: string;
+  memo?: string;
+  service_type_code: string;
+  member_id?: number | null;
+  household_id?: number | null;
+  posted_at?: string;
+  due_date?: string;
+  status?: string;
+};
+
+export async function createPaymentEntry(payload: PaymentCreatePayload): Promise<Payment> {
+  const result = await api<Payment>("/payments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { ...result, amount: Number(result.amount) };
+}
+
+export async function correctPayment(paymentId: number, payload: { correction_reason: string }): Promise<Payment> {
+  const result = await api<Payment>(`/payments/${paymentId}/correct`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { ...result, amount: Number(result.amount) };
+}
+
+export async function getPaymentSummary(filters: { start_date?: string; end_date?: string } = {}): Promise<PaymentSummaryResponse> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) search.set(key, value);
+  });
+  const query = search.toString();
+  const response = await api<PaymentSummaryResponse>(`/payments/reports/summary${query ? `?${query}` : ""}`);
+  return {
+    ...response,
+    items: response.items.map((item) => ({
+      ...item,
+      total_amount: Number(item.total_amount),
+    })),
+    grand_total: Number(response.grand_total),
+  };
+}
+
+export async function getPaymentServiceTypes(includeInactive = false): Promise<PaymentServiceType[]> {
+  const query = includeInactive ? "?include_inactive=true" : "";
+  return api<PaymentServiceType[]>(`/payments/service-types${query}`);
 }
