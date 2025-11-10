@@ -31,7 +31,7 @@ def upgrade() -> None:
     )
 
     # Drop unused/legacy index if it exists
-    op.drop_index("ix_payments_posted_at", table_name="payments")
+    #op.drop_index("ix_payments_posted_at", table_name="payments")
 
     # Align priests.created_at to naive DateTime if that’s what the model uses
     op.alter_column(
