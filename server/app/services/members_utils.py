@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from slugify import slugify
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.household import Household
@@ -119,3 +119,64 @@ def apply_children(member: Member, children_payload: Optional[Iterable[dict]]) -
             notes=child_data.get("notes"),
         )
         member.children_all.append(child)
+
+
+def find_member_duplicates(
+    db: Session,
+    *,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    exclude_member_id: Optional[int] = None,
+    limit: int = 5,
+) -> list[tuple[Member, list[str]]]:
+    """Return potential duplicates with the reason(s) they matched."""
+
+    email_lower = email.lower().strip() if email else None
+    first_lower = first_name.lower().strip() if first_name else None
+    last_lower = last_name.lower().strip() if last_name else None
+    phone_normalized = phone.strip() if phone else None
+
+    name_clause = None
+    if first_lower and last_lower:
+        name_clause = func.lower(Member.first_name) == first_lower
+        name_clause = name_clause & (func.lower(Member.last_name) == last_lower)
+
+    if not any([email_lower, phone_normalized, name_clause]):
+        return []
+
+    query = db.query(Member).filter(Member.deleted_at.is_(None))
+    if exclude_member_id:
+        query = query.filter(Member.id != exclude_member_id)
+
+    # combine email/phone OR, but names require both first and last match
+    or_clauses: list = []
+    if email_lower:
+        or_clauses.append(func.lower(Member.email) == email_lower)
+    if phone_normalized:
+        or_clauses.append(Member.phone == phone_normalized)
+    if name_clause is not None:
+        or_clauses.append(name_clause)
+    query = query.filter(or_(*or_clauses))
+
+    matches: list[tuple[Member, list[str]]] = []
+    for candidate in query.limit(limit * 2).all():
+        reasons: list[str] = []
+        if email_lower and candidate.email and candidate.email.lower() == email_lower:
+            reasons.append("email")
+        if phone_normalized and candidate.phone == phone_normalized:
+            reasons.append("phone")
+        if first_lower and last_lower:
+            if (
+                candidate.first_name
+                and candidate.first_name.lower().strip() == first_lower
+                and candidate.last_name
+                and candidate.last_name.lower().strip() == last_lower
+            ):
+                reasons.append("name")
+        if reasons:
+            matches.append((candidate, reasons))
+        if len(matches) >= limit:
+            break
+    return matches

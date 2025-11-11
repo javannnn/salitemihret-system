@@ -50,6 +50,7 @@ Welcome to the hosted demonstration of the SaliteMihret membership platform. Thi
 - **Quick filters** – Toggle buttons for `Archived`, `Active`, `Has children`, `Missing phone`, `New this month`.
 - **Filter drawer** – Click *Filters* → refine by status, gender, district, tags, ministries.
 - **URL persistence** – Search, filters, and pagination sync to the query string (bookmark/share the link).
+- **Duplicate detector** – As you type email/phone/name, the form shows potential duplicates (with links) so clerks don’t create redundant records; the backend rejects exact email/phone conflicts.
 
 ### 4.2 Table Essentials
 

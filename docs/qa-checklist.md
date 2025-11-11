@@ -26,6 +26,7 @@ This checklist captures the regression pass completed for Phase 5 (QA & polish).
 | Audit feed               | `curl -s /members/{id}/audit`                                                                             | JSON array of audit entries                         |
 | Contribution history     | `curl -s /members/{id}/contributions`                                                                     | JSON array (empty/non-empty)                        |
 | Contribution payment add | `curl -s -X POST /members/{id}/contributions -d '{"amount":75,"paid_at":"YYYY-MM-DD"}'` (Finance/Admin) | `201` + payment record                              |
+| Duplicate check          | `curl -s -H "Authorization: Bearer TOKEN" "/members/duplicates?email=admin@example.com"`                 | JSON response listing the existing admin member     |
 | Payments list            | `curl -s -H "Authorization: Bearer TOKEN" "/payments?page=1"`                                             | JSON list with service_type/member details          |
 | Payments report export   | `curl -s -H "Authorization: Bearer TOKEN" "/payments/export.csv?status=Pending" | head`                    | CSV header with member/service columns              |
 | Close previous day       | `curl -s -X POST /payments/locks -H "Authorization: Bearer TOKEN" -H 'Content-Type: application/json' -d '{}'` | JSON lock object showing `locked=true`               |
@@ -48,6 +49,7 @@ This checklist captures the regression pass completed for Phase 5 (QA & polish).
 11. **Payments ledger** – Login as Finance Admin; verify summary cards, status/due badges, export report, member auto-suggest (select + clear), record payment/correction. Login as Office Admin to confirm read-only banner and hidden Record button.
 12. **Member payment timeline** – From the ledger, open a member link; confirm the timeline shows chronological cards, status chips, due dates, memo, and shortcut to the full member profile.
 13. **Daily close** – Lock yesterday via `/payments/locks`, verify ledger prevents new payments dated that day, unlock with a justification, and ensure creation works again.
+14. **Duplicate guard** – On the Create Member form, enter an email/phone that already exists; confirm the warning appears and Save returns a duplicate error if you proceed.
 
 ---
 

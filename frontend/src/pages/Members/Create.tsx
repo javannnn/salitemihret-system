@@ -1,11 +1,13 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button } from "@/components/ui";
 import {
   ApiError,
+  MemberDuplicateMatch,
   MemberStatus,
   MembersMeta,
   api,
+  findMemberDuplicates,
   getMembersMeta,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
@@ -104,6 +106,8 @@ function CreateMemberInner() {
   const [spouseForm, setSpouseForm] = useState<SpouseFormState | null>(null);
   const [childrenForm, setChildrenForm] = useState<ChildFormState[]>([]);
   const exceptionReasons = meta?.contribution_exception_reasons ?? [];
+  const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
 
   useEffect(() => {
     if (!permissions.createMembers) {
@@ -152,6 +156,50 @@ function CreateMemberInner() {
       setSpouseForm(null);
     }
   }, [form.marital_status, spouseForm]);
+
+  useEffect(() => {
+    const email = form.email.trim();
+    const phone = form.phone.trim();
+    const first = form.first_name.trim();
+    const last = form.last_name.trim();
+    const shouldCheck = !!email || !!phone || (!!first && !!last);
+    if (!shouldCheck) {
+      setDuplicateMatches([]);
+      setDuplicateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDuplicateLoading(true);
+    const timer = setTimeout(() => {
+      findMemberDuplicates({
+        email: email || undefined,
+        phone: phone || undefined,
+        first_name: first || undefined,
+        last_name: last || undefined,
+      })
+        .then((items) => {
+          if (!cancelled) {
+            setDuplicateMatches(items);
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+          if (!cancelled) {
+            toast.push("Failed to check duplicates");
+            setDuplicateMatches([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setDuplicateLoading(false);
+          }
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.email, form.phone, form.first_name, form.last_name, toast]);
 
   const handleChange = (field: keyof typeof form) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -504,6 +552,33 @@ function CreateMemberInner() {
               <label className="text-xs uppercase text-mute">Country</label>
               <Input value={form.address_country} onChange={handleChange("address_country")} />
             </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs uppercase text-mute">Potential duplicates</label>
+            {duplicateLoading ? (
+              <Card className="p-3 text-sm text-mute">Checking for duplicates…</Card>
+            ) : duplicateMatches.length === 0 ? (
+              <Card className="p-3 text-sm text-mute">No duplicates detected with the current email/phone/name.</Card>
+            ) : (
+              <Card className="p-3 space-y-3 border border-amber-200 bg-amber-50/80">
+                {duplicateMatches.map((match) => (
+                  <div key={match.id} className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">
+                        {match.first_name} {match.last_name}
+                      </div>
+                      <div className="text-xs text-mute">
+                        {match.email || "No email"} • {match.phone || "No phone"}
+                      </div>
+                      <div className="text-xs text-amber-800">Match on {match.reason}</div>
+                    </div>
+                    <Link to={`/members/${match.id}/edit`} className="text-sm text-accent underline">
+                      Open
+                    </Link>
+                  </div>
+                ))}
+              </Card>
+            )}
           </div>
         </section>
 

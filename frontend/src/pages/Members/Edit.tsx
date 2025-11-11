@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
 import {
   API_BASE,
   ApiError,
+  MemberDuplicateMatch,
   MemberAuditEntry,
   MemberDetail,
   MemberStatus,
@@ -11,6 +12,7 @@ import {
   Payment,
   PaymentServiceType,
   api,
+  findMemberDuplicates,
   createPaymentEntry,
   getMemberAudit,
   getMembersMeta,
@@ -119,6 +121,8 @@ function EditMemberInner() {
     if (!serviceTypes.length) return "";
     return serviceTypes.find((type) => type.code === "CONTRIBUTION")?.code || serviceTypes[0].code;
   }, [serviceTypes]);
+  const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
 
   const loadMemberPayments = useCallback(
     async (memberId: number) => {
@@ -263,6 +267,55 @@ useEffect(() => {
     prev.service_type_code ? prev : { ...prev, service_type_code: defaultContributionCode }
   );
 }, [defaultContributionCode]);
+
+useEffect(() => {
+  if (!member) {
+    setDuplicateMatches([]);
+    return;
+  }
+  const email = (member.email || "").trim();
+  const phone = (member.phone || "").trim();
+  const first = (member.first_name || "").trim();
+  const last = (member.last_name || "").trim();
+  const shouldCheck = !!email || !!phone || (!!first && !!last);
+  if (!shouldCheck) {
+    setDuplicateMatches([]);
+    setDuplicateLoading(false);
+    return;
+  }
+  let cancelled = false;
+  setDuplicateLoading(true);
+  const timer = setTimeout(() => {
+    findMemberDuplicates({
+      email: email || undefined,
+      phone: phone || undefined,
+      first_name: first || undefined,
+      last_name: last || undefined,
+      exclude_member_id: member.id,
+    })
+      .then((items) => {
+        if (!cancelled) {
+          setDuplicateMatches(items);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) {
+          toast.push("Failed to check duplicates");
+          setDuplicateMatches([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDuplicateLoading(false);
+        }
+      });
+  }, 400);
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}, [member?.id, member?.email, member?.phone, member?.first_name, member?.last_name, toast]);
 
   const refreshAudit = async (memberId: number) => {
     if (!canViewAudit) {
@@ -925,6 +978,35 @@ useEffect(() => {
                 <label className="text-xs uppercase text-mute">Country</label>
                 <Input value={member.address_country ?? ""} onChange={handleChange("address_country")} disabled={disableCore} />
               </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs uppercase text-mute">Potential duplicates</label>
+              {!permissions.viewMembers ? (
+                <Card className="p-3 text-sm text-mute">Duplicate checks require member directory access.</Card>
+              ) : duplicateLoading ? (
+                <Card className="p-3 text-sm text-mute">Checking for duplicates…</Card>
+              ) : duplicateMatches.length === 0 ? (
+                <Card className="p-3 text-sm text-mute">No duplicates detected with the current contact info.</Card>
+              ) : (
+                <Card className="p-3 space-y-3 border border-amber-200 bg-amber-50/80">
+                  {duplicateMatches.map((match) => (
+                    <div key={match.id} className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium">
+                          {match.first_name} {match.last_name}
+                        </div>
+                        <div className="text-xs text-mute">
+                          {match.email || "No email"} • {match.phone || "No phone"}
+                        </div>
+                        <div className="text-xs text-amber-800">Match on {match.reason}</div>
+                      </div>
+                      <Link to={`/members/${match.id}/edit`} className="text-sm text-accent underline">
+                        Open
+                      </Link>
+                    </div>
+                  ))}
+                </Card>
+              )}
             </div>
           </section>
 

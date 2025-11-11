@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.deps import get_current_user, require_roles
@@ -20,6 +21,8 @@ from app.schemas.member import (
     ALLOWED_CONTRIBUTION_EXCEPTION_REASONS,
     MemberCreate,
     MemberDetailOut,
+    MemberDuplicateMatch,
+    MemberDuplicateResponse,
     MemberListResponse,
     MemberUpdate,
     ContributionPaymentCreate,
@@ -27,7 +30,13 @@ from app.schemas.member import (
 )
 from app.services.audit import record_member_changes, snapshot_member
 from app.services.members_query import apply_member_sort, build_members_query
-from app.services.members_utils import apply_children, apply_spouse, ensure_household, generate_username
+from app.services.members_utils import (
+    apply_children,
+    apply_spouse,
+    ensure_household,
+    find_member_duplicates,
+    generate_username,
+)
 from app.services.notifications import notify_contribution_change
 
 logger = logging.getLogger(__name__)
@@ -41,6 +50,43 @@ FINANCE_ROLES = ("Admin", "FinanceAdmin")
 
 DEFAULT_CONTRIBUTION_AMOUNT = Decimal("75.00")
 DEFAULT_CONTRIBUTION_CURRENCY = "CAD"
+
+
+def _ensure_unique_contacts(
+    db: Session,
+    *,
+    email: str | None,
+    phone: str | None,
+    exclude_member_id: int | None = None,
+) -> None:
+    if email:
+        existing = (
+            db.query(Member)
+            .filter(Member.deleted_at.is_(None))
+            .filter(func.lower(Member.email) == email.lower().strip())
+        )
+        if exclude_member_id:
+            existing = existing.filter(Member.id != exclude_member_id)
+        conflict = existing.first()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A member with this email already exists (ID {conflict.id}).",
+            )
+
+    if phone:
+        existing = (
+            db.query(Member)
+            .filter(Member.deleted_at.is_(None), Member.phone == phone.strip())
+        )
+        if exclude_member_id:
+            existing = existing.filter(Member.id != exclude_member_id)
+        conflict = existing.first()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A member with this phone already exists (ID {conflict.id}).",
+            )
 
 def _set_tags(db: Session, member: Member, tag_ids: list[int]) -> None:
     if tag_ids:
@@ -166,6 +212,44 @@ def list_members(
     return MemberListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
+@router.get("/duplicates", response_model=MemberDuplicateResponse)
+def check_member_duplicates(
+    *,
+    email: str | None = Query(default=None),
+    phone: str | None = Query(default=None),
+    first_name: str | None = Query(default=None),
+    last_name: str | None = Query(default=None),
+    exclude_member_id: int | None = Query(default=None),
+    limit: int = Query(default=5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> MemberDuplicateResponse:
+    if not any([email, phone, first_name and last_name]):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide email, phone, or full name to check duplicates")
+
+    matches = find_member_duplicates(
+        db,
+        email=email,
+        phone=phone,
+        first_name=first_name,
+        last_name=last_name,
+        exclude_member_id=exclude_member_id,
+        limit=limit,
+    )
+    items = [
+        MemberDuplicateMatch(
+            id=member.id,
+            first_name=member.first_name,
+            last_name=member.last_name,
+            email=member.email,
+            phone=member.phone,
+            reason=", ".join(reasons),
+        )
+        for member, reasons in matches
+    ]
+    return MemberDuplicateResponse(items=items)
+
+
 @router.post("", response_model=MemberDetailOut, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=MemberDetailOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_member(
@@ -184,6 +268,12 @@ def create_member(
     contribution_amount, contribution_exception = _resolve_contribution_inputs(
         payload.contribution_amount,
         payload.contribution_exception_reason,
+    )
+
+    _ensure_unique_contacts(
+        db,
+        email=payload.email,
+        phone=payload.phone,
     )
 
     username = generate_username(db, payload.first_name, payload.last_name)
@@ -434,6 +524,13 @@ def update_member(
     member.pays_contribution = _enforce_contribution_flag(updated_pays_flag)
 
     member.updated_by_id = current_user.id
+
+    _ensure_unique_contacts(
+        db,
+        email=member.email,
+        phone=member.phone,
+        exclude_member_id=member.id,
+    )
 
     db.flush()
     record_member_changes(db, member, old_snapshot, current_user.id)

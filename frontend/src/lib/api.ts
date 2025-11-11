@@ -73,6 +73,15 @@ export type MemberDetail = Member & {
   contribution_history: ContributionPayment[];
 };
 
+export type MemberDuplicateMatch = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  phone?: string | null;
+  reason: string;
+};
+
 export type ContributionPayment = {
   id: number;
   amount: number;
@@ -433,6 +442,23 @@ export type ChildPromotionRunResponse = {
 
 export async function getMembersMeta(): Promise<MembersMeta> {
   return api<MembersMeta>("/members/meta");
+}
+
+export async function findMemberDuplicates(params: {
+  email?: string;
+  phone?: string;
+  first_name?: string;
+  last_name?: string;
+  exclude_member_id?: number;
+}): Promise<MemberDuplicateMatch[]> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const response = await api<{ items: MemberDuplicateMatch[] }>(`/members/duplicates${query ? `?${query}` : ""}`);
+  return response.items;
 }
 
 export async function searchMembers(query: string, limit = 5): Promise<Member[]> {

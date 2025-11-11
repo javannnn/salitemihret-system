@@ -401,6 +401,22 @@ class MemberAuditFeedItem(BaseModel):
     new_value: Optional[str]
 
 
+class MemberDuplicateMatch(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+    email: Optional[EmailStr]
+    phone: Optional[str]
+    reason: str
+
+    class Config:
+        from_attributes = True
+
+
+class MemberDuplicateResponse(BaseModel):
+    items: List[MemberDuplicateMatch]
+
+
 class MemberMetaResponse(BaseModel):
     statuses: List[str]
     genders: List[str]
