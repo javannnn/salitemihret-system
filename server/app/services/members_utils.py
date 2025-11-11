@@ -138,12 +138,13 @@ def find_member_duplicates(
     last_lower = last_name.lower().strip() if last_name else None
     phone_normalized = phone.strip() if phone else None
 
+    has_name_clause = bool(first_lower and last_lower)
     name_clause = None
-    if first_lower and last_lower:
+    if has_name_clause:
         name_clause = func.lower(Member.first_name) == first_lower
         name_clause = name_clause & (func.lower(Member.last_name) == last_lower)
 
-    if not any([email_lower, phone_normalized, name_clause]):
+    if not any([bool(email_lower), bool(phone_normalized), has_name_clause]):
         return []
 
     query = db.query(Member).filter(Member.deleted_at.is_(None))
@@ -156,7 +157,7 @@ def find_member_duplicates(
         or_clauses.append(func.lower(Member.email) == email_lower)
     if phone_normalized:
         or_clauses.append(Member.phone == phone_normalized)
-    if name_clause is not None:
+    if has_name_clause and name_clause is not None:
         or_clauses.append(name_clause)
     query = query.filter(or_(*or_clauses))
 
