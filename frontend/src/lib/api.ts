@@ -585,3 +585,23 @@ export async function getPaymentServiceTypes(includeInactive = false): Promise<P
   const query = includeInactive ? "?include_inactive=true" : "";
   return api<PaymentServiceType[]>(`/payments/service-types${query}`);
 }
+
+export type LicenseStatusResponse = {
+  state: "trial" | "active" | "expired" | "invalid";
+  message: string;
+  expires_at?: string | null;
+  trial_expires_at: string;
+  days_remaining: number;
+  customer?: string | null;
+};
+
+export async function getLicenseStatus(): Promise<LicenseStatusResponse> {
+  return api<LicenseStatusResponse>("/license/status");
+}
+
+export async function activateLicense(token: string): Promise<LicenseStatusResponse> {
+  return api<LicenseStatusResponse>("/license/activate", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}

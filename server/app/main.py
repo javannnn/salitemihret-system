@@ -1,12 +1,13 @@
-import app.models
 import logging
 
+import app.models
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
 except ImportError:  # pragma: no cover - optional dependency fallback
     BackgroundScheduler = None  # type: ignore[assignment]
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -14,8 +15,10 @@ from sqlalchemy import text
 from app.config import UPLOAD_DIR
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
+from app.core.license import get_license_status
 from app.routers import auth as auth_router
 from app.routers import children as children_router
+from app.routers import license as license_router
 from app.routers import members as members_router
 from app.routers import members_bulk as members_bulk_router
 from app.routers import members_files as members_files_router
@@ -64,7 +67,30 @@ app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
 app.include_router(payments_router.router)
+app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
+
+LICENSE_EXEMPT_PATHS = {"/health", "/license/status", "/license/activate", "/auth/login"}
+LICENSE_EXEMPT_PREFIXES = ("/static", "/docs", "/redoc", "/openapi")
+
+
+@app.middleware("http")
+async def enforce_license(request: Request, call_next):
+    path = request.url.path
+    if path in LICENSE_EXEMPT_PATHS or any(path.startswith(prefix) for prefix in LICENSE_EXEMPT_PREFIXES):
+        return await call_next(request)
+    status_obj = get_license_status()
+    if status_obj.is_enforced:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "detail": status_obj.message,
+                "code": "license_inactive",
+                "state": status_obj.state,
+                "days_remaining": status_obj.days_remaining,
+            },
+        )
+    return await call_next(request)
 
 @app.on_event("startup")
 def ensure_optional_columns() -> None:

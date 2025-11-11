@@ -3,6 +3,7 @@
 from app.routers import (
     auth,
     children,
+    license,
     members,
     members_bulk,
     members_files,

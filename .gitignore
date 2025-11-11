@@ -22,6 +22,7 @@ apps/web/node_modules/
 apps/web/dist/
 server/uploads/
 server/static/avatars/
+server/runtime/
 *.csv
 .venv
 server/uploads

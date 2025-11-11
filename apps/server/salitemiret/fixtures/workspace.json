@@ -1,0 +1,15 @@
+[
+  {
+    "doctype": "Workspace",
+    "name": "Membership",
+    "label": "Membership",
+    "title": "Membership",
+    "module": "Salitemiret",
+    "public": 1,
+    "is_hidden": 0,
+    "sequence_id": 100,
+    "parent_page": "Modules",
+    "icon": "users",
+    "content": "[{\"type\":\"shortcut\",\"label\":\"Members\",\"link_to\":\"List/Member\"},{\"type\":\"shortcut\",\"label\":\"Households\",\"link_to\":\"List/Household\"},{\"type\":\"link\",\"label\":\"Members Demo\",\"link_to\":\"/demo/members\"}]"
+  }
+]
