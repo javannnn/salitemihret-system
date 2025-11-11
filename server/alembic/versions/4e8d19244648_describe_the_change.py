@@ -1,7 +1,7 @@
 """Membership tweaks and constraints alignment.
 
 Revision ID: 4e8d19244648
-Revises: 718d5f0680b9
+Revises: 6e60d4009c53
 Create Date: 2025-11-10 00:00:00
 """
 from alembic import op
@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "4e8d19244648"
-down_revision = "718d5f0680b9"
+down_revision = "6e60d4009c53"
 branch_labels = None
 depends_on = None
 

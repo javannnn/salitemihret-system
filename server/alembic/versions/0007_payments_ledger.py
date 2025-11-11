@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "0007_payments_ledger"
-down_revision = "6e60d4009c53"
+down_revision = "4e8d19244648"
 branch_labels = None
 depends_on = None
 
