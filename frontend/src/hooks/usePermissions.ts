@@ -17,6 +17,10 @@ export type PermissionMap = {
   runPromotions: boolean;
   viewPayments: boolean;
   managePayments: boolean;
+  viewSponsorships: boolean;
+  manageSponsorships: boolean;
+  viewNewcomers: boolean;
+  manageNewcomers: boolean;
 };
 
 const BASE_PERMISSIONS: PermissionMap = {
@@ -34,6 +38,10 @@ const BASE_PERMISSIONS: PermissionMap = {
   runPromotions: false,
   viewPayments: false,
   managePayments: false,
+  viewSponsorships: false,
+  manageSponsorships: false,
+  viewNewcomers: false,
+  manageNewcomers: false,
 };
 
 const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
@@ -52,6 +60,10 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     runPromotions: true,
     viewPayments: true,
     managePayments: true,
+    viewSponsorships: true,
+    manageSponsorships: true,
+    viewNewcomers: true,
+    manageNewcomers: true,
   },
   PublicRelations: {
     viewMembers: true,
@@ -66,6 +78,9 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewAudit: true,
     viewPromotions: true,
     runPromotions: true,
+    viewSponsorships: true,
+    viewNewcomers: true,
+    manageNewcomers: true,
   },
   Registrar: {
     viewMembers: true,
@@ -74,6 +89,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     editSpiritual: true,
     viewAudit: true,
     exportMembers: true,
+    viewNewcomers: true,
+    manageNewcomers: true,
   },
   Clerk: {
     viewMembers: true,
@@ -85,6 +102,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     createMembers: true,
     editCore: true,
     viewPayments: true,
+    viewSponsorships: true,
+    viewNewcomers: true,
   },
   FinanceAdmin: {
     viewMembers: true,
@@ -92,6 +111,14 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     exportMembers: true,
     viewPayments: true,
     managePayments: true,
+    viewSponsorships: true,
+  },
+  SponsorshipCommittee: {
+    viewMembers: true,
+    viewSponsorships: true,
+    manageSponsorships: true,
+    viewNewcomers: true,
+    manageNewcomers: true,
   },
 };
 

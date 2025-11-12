@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -16,6 +16,8 @@ from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.ministry import Ministry
 from app.models.priest import Priest
 from app.models.role import Role
+from app.models.newcomer import Newcomer
+from app.models.sponsorship import Sponsorship
 from app.models.tag import Tag
 from app.models.user import User
 from app.services.members_utils import apply_children, apply_spouse
@@ -284,6 +286,64 @@ DEMO_MEMBERS = [
     },
 ]
 
+DEMO_NEWCOMERS = [
+    {
+        "first_name": "Mekdes",
+        "last_name": "Haile",
+        "preferred_language": "Amharic",
+        "contact_phone": "+251900777000",
+        "arrival_date": date(2025, 1, 12),
+        "service_type": "Family Settlement",
+        "status": "InProgress",
+        "notes": "Sponsored by PR, needs welcome visit.",
+        "sponsored_by": "abeba.tesfaye",
+        "country": "Ethiopia",
+        "temporary_address": "Guesthouse near Arat Kilo",
+    },
+    {
+        "first_name": "Samuel",
+        "last_name": "Girma",
+        "preferred_language": "English",
+        "contact_email": "samuel.girma@example.com",
+        "arrival_date": date(2024, 12, 2),
+        "service_type": "Student Support",
+        "status": "New",
+        "notes": "International student seeking sponsorship.",
+        "sponsored_by": "bekele.desta",
+        "country": "Ethiopia",
+        "temporary_address": "Unity Dorms",
+    },
+]
+
+DEMO_SPONSORSHIPS = [
+    {
+        "sponsor": "abeba.tesfaye",
+        "newcomer_key": ("Mekdes", "Haile"),
+        "monthly_amount": Decimal("150.00"),
+        "frequency": "Monthly",
+        "status": "Active",
+        "program": "Family Support",
+        "start_date": date(2025, 1, 1),
+        "notes": "Family sponsorship covering rent and groceries.",
+        "budget_month": 1,
+        "budget_year": 2025,
+        "budget_slots": 3,
+    },
+    {
+        "sponsor": "bekele.desta",
+        "beneficiary_username": "dawit.negash",
+        "monthly_amount": Decimal("90.00"),
+        "frequency": "Monthly",
+        "status": "Active",
+        "program": "Youth Scholarship",
+        "start_date": date(2024, 11, 1),
+        "notes": "Supporting youth choir stipend.",
+        "budget_month": 1,
+        "budget_year": 2025,
+        "budget_slots": 1,
+    },
+]
+
 
 def _ensure_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -507,6 +567,107 @@ def ensure_members(db: Session, households: dict[str, Household], tags: dict[str
     db.commit()
 
 
+def _newcomer_key(first_name: str, last_name: str) -> str:
+    return f"{first_name.strip().lower()}::{last_name.strip().lower()}"
+
+
+def ensure_newcomers(db: Session, members_by_username: dict[str, Member]) -> dict[str, Newcomer]:
+    records: dict[str, Newcomer] = {}
+    for data in DEMO_NEWCOMERS:
+        key = _newcomer_key(data["first_name"], data["last_name"])
+        existing = (
+            db.query(Newcomer)
+            .filter(
+                Newcomer.first_name == data["first_name"],
+                Newcomer.last_name == data["last_name"],
+                Newcomer.arrival_date == data["arrival_date"],
+            )
+            .first()
+        )
+        if existing:
+            records[key] = existing
+            continue
+
+        sponsor = members_by_username.get(data.get("sponsored_by", ""))
+        record = Newcomer(
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            preferred_language=data.get("preferred_language"),
+            contact_phone=data.get("contact_phone"),
+            contact_email=data.get("contact_email"),
+            family_size=data.get("family_size"),
+            service_type=data.get("service_type"),
+            arrival_date=data["arrival_date"],
+            country=data.get("country"),
+            temporary_address=data.get("temporary_address"),
+            referred_by=data.get("referred_by"),
+            notes=data.get("notes"),
+            status=data.get("status", "New"),
+            sponsored_by_member_id=sponsor.id if sponsor else None,
+            followup_due_date=data["arrival_date"] + timedelta(days=7),
+        )
+        db.add(record)
+        db.flush()
+        records[key] = record
+    db.commit()
+    return records
+
+
+def ensure_sponsorships(db: Session, members_by_username: dict[str, Member], newcomers_by_key: dict[str, Newcomer]) -> None:
+    for data in DEMO_SPONSORSHIPS:
+        sponsor = members_by_username.get(data["sponsor"])
+        if not sponsor:
+            continue
+
+        beneficiary = None
+        if data.get("beneficiary_username"):
+            beneficiary = members_by_username.get(data["beneficiary_username"])
+
+        newcomer = None
+        newcomer_info = data.get("newcomer_key")
+        if newcomer_info:
+            newcomer = newcomers_by_key.get(_newcomer_key(*newcomer_info))
+
+        query = db.query(Sponsorship).filter(
+            Sponsorship.sponsor_member_id == sponsor.id,
+            Sponsorship.program == data["program"],
+        )
+        if beneficiary:
+            query = query.filter(Sponsorship.beneficiary_member_id == beneficiary.id)
+        if newcomer:
+            query = query.filter(Sponsorship.newcomer_id == newcomer.id)
+        if query.first():
+            continue
+
+        beneficiary_name = data.get("beneficiary_name")
+        if beneficiary:
+            beneficiary_name = f"{beneficiary.first_name} {beneficiary.last_name}"
+        elif newcomer:
+            beneficiary_name = newcomer.full_name
+        if not beneficiary_name:
+            beneficiary_name = "Sponsored Family"
+
+        record = Sponsorship(
+            sponsor_member_id=sponsor.id,
+            beneficiary_member_id=beneficiary.id if beneficiary else None,
+            newcomer_id=newcomer.id if newcomer else None,
+            beneficiary_name=beneficiary_name,
+            monthly_amount=data["monthly_amount"],
+            frequency=data["frequency"],
+            status=data["status"],
+            program=data["program"],
+            start_date=data["start_date"],
+            notes=data.get("notes"),
+            budget_month=data.get("budget_month"),
+            budget_year=data.get("budget_year"),
+            budget_slots=data.get("budget_slots"),
+            used_slots=data.get("used_slots", 0),
+            last_sponsored_date=data.get("last_sponsored_date"),
+        )
+        db.add(record)
+    db.commit()
+
+
 def slugify_username(first_name: str, last_name: str) -> str:
     return f"{first_name.lower()}.{last_name.lower()}"
 
@@ -527,6 +688,9 @@ def main() -> None:
         ministries = ensure_ministries(db)
         admin_user = users.get("admin@example.com")
         ensure_members(db, households, tags, ministries, priests, admin_user)
+        members_by_username = {member.username: member for member in db.query(Member).all()}
+        newcomer_records = ensure_newcomers(db, members_by_username)
+        ensure_sponsorships(db, members_by_username, newcomer_records)
     finally:
         db.close()
 

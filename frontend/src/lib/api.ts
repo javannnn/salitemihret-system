@@ -73,6 +73,12 @@ export type MemberDetail = Member & {
   contribution_history: ContributionPayment[];
 };
 
+export type MemberSummary = {
+  id: number;
+  first_name: string;
+  last_name: string;
+};
+
 export type MemberDuplicateMatch = {
   id: number;
   first_name: string;
@@ -153,6 +159,128 @@ export type PaymentSummaryItem = {
 export type PaymentSummaryResponse = {
   items: PaymentSummaryItem[];
   grand_total: number;
+};
+
+export type Sponsorship = {
+  id: number;
+  sponsor: MemberSummary;
+  beneficiary_member?: MemberSummary | null;
+  newcomer?: { id: number; first_name: string; last_name: string; status: string } | null;
+  beneficiary_name: string;
+  father_of_repentance_id?: number | null;
+  volunteer_service?: string | null;
+  payment_information?: string | null;
+  last_sponsored_date?: string | null;
+  frequency: "OneTime" | "Monthly" | "Quarterly" | "Yearly";
+  status: "Draft" | "Active" | "Suspended" | "Completed" | "Closed";
+  monthly_amount: number;
+  program?: string | null;
+  start_date: string;
+  end_date?: string | null;
+  last_status?: "Approved" | "Rejected" | "Pending" | null;
+  last_status_reason?: string | null;
+  budget_month?: number | null;
+  budget_year?: number | null;
+  budget_amount?: number | null;
+  budget_slots?: number | null;
+  used_slots: number;
+  notes?: string | null;
+  reminder_last_sent?: string | null;
+  reminder_next_due?: string | null;
+  assigned_staff_id?: number | null;
+  amount_paid: number;
+  pledged_total: number;
+  outstanding_balance: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SponsorshipFilters = {
+  status?: string;
+  program?: string;
+  sponsor_id?: number;
+  frequency?: string;
+  page?: number;
+  page_size?: number;
+  q?: string;
+};
+
+export type SponsorshipPayload = {
+  sponsor_member_id: number;
+  beneficiary_member_id?: number;
+  newcomer_id?: number;
+  beneficiary_name?: string;
+  monthly_amount: number;
+  start_date: string;
+  frequency: Sponsorship["frequency"];
+  status: Sponsorship["status"];
+  program?: string;
+  notes?: string;
+};
+
+export type SponsorshipListResponse = Page<Sponsorship>;
+
+export type Newcomer = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  preferred_language?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  family_size?: number | null;
+  service_type?: string | null;
+  arrival_date: string;
+  country?: string | null;
+  temporary_address?: string | null;
+  referred_by?: string | null;
+  notes?: string | null;
+  status: "New" | "InProgress" | "Sponsored" | "Converted" | "Closed";
+  sponsored_by_member_id?: number | null;
+  father_of_repentance_id?: number | null;
+  assigned_owner_id?: number | null;
+  followup_due_date?: string | null;
+  converted_member_id?: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NewcomerListResponse = Page<Newcomer>;
+
+export type NewcomerFilters = {
+  status?: string;
+  owner_id?: number;
+  sponsor_id?: number;
+  q?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export type NewcomerPayload = {
+  first_name: string;
+  last_name: string;
+  arrival_date: string;
+  contact_phone?: string;
+  contact_email?: string;
+  service_type?: string;
+  notes?: string;
+  status?: Newcomer["status"];
+};
+
+export type NewcomerUpdatePayload = Partial<Omit<NewcomerPayload, "arrival_date">> & {
+  arrival_date?: string;
+  status?: Newcomer["status"];
+};
+
+export type NewcomerConvertPayload = {
+  member_id?: number;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  email?: string;
+  status?: string;
+  district?: string;
+  notes?: string;
+  household_name?: string;
 };
 
 export type Page<T> = {
@@ -300,6 +428,66 @@ export async function exportPaymentsReport(params: PaymentFilters = {}): Promise
     throw new ApiError(res.status, message || "Export failed");
   }
   return res.blob();
+}
+
+export async function listSponsorships(params: SponsorshipFilters = {}): Promise<SponsorshipListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<SponsorshipListResponse>(`/sponsorships${query ? `?${query}` : ""}`);
+}
+
+export async function createSponsorship(payload: SponsorshipPayload): Promise<Sponsorship> {
+  return api<Sponsorship>("/sponsorships", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSponsorship(id: number, payload: Partial<SponsorshipPayload>): Promise<Sponsorship> {
+  return api<Sponsorship>(`/sponsorships/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function remindSponsorship(id: number): Promise<Sponsorship> {
+  return api<Sponsorship>(`/sponsorships/${id}/remind`, { method: "POST" });
+}
+
+export async function listNewcomers(params: NewcomerFilters = {}): Promise<NewcomerListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    const paramKey = key === "status" ? "status" : key;
+    search.set(paramKey, String(value));
+  });
+  const query = search.toString();
+  return api<NewcomerListResponse>(`/newcomers${query ? `?${query}` : ""}`);
+}
+
+export async function createNewcomer(payload: NewcomerPayload): Promise<Newcomer> {
+  return api<Newcomer>("/newcomers", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateNewcomer(id: number, payload: NewcomerUpdatePayload): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function convertNewcomer(id: number, payload: NewcomerConvertPayload): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}/convert`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export type ImportReport = {

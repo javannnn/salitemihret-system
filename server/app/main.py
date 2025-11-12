@@ -25,6 +25,8 @@ from app.routers import members_files as members_files_router
 from app.routers import priests as priests_router
 from app.routers import payments as payments_router
 from app.routers import whoami as whoami_router
+from app.routers import sponsorships as sponsorships_router
+from app.routers import newcomers as newcomers_router
 from app.services.child_promotion import get_children_ready_for_promotion
 from app.services import payments as payments_service
 
@@ -67,6 +69,8 @@ app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
 app.include_router(payments_router.router)
+app.include_router(sponsorships_router.router)
+app.include_router(newcomers_router.router)
 app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
 
@@ -95,6 +99,10 @@ async def enforce_license(request: Request, call_next):
 @app.on_event("startup")
 def ensure_optional_columns() -> None:
     """Guard optional columns so legacy databases don't error."""
+
+    if engine.dialect.name != "postgresql":
+        # SQLite-based test runs skip Postgres-specific guards.
+        return
 
     with engine.begin() as connection:
         # Ensure marital status enum exists

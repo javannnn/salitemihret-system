@@ -30,9 +30,14 @@ export default function AppShell() {
       { label: "Dashboard", to: "/dashboard", visible: true },
       { label: "Members", to: "/members", visible: permissions.viewMembers },
       { label: "Payments", to: "/payments", visible: permissions.viewPayments },
+      {
+        label: "Sponsorships",
+        to: "/sponsorships",
+        visible: permissions.viewSponsorships || permissions.viewNewcomers,
+      },
     ];
     return items.filter((item) => item.visible);
-  }, [permissions.viewMembers, permissions.viewPayments]);
+  }, [permissions.viewMembers, permissions.viewPayments, permissions.viewSponsorships, permissions.viewNewcomers]);
 
   if (loading) {
     return <div className="p-6 text-sm text-mute">Loading…</div>;

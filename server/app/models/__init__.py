@@ -9,3 +9,5 @@ from .member import Member, Spouse, Child  # noqa: F401
 from .member_contribution_payment import MemberContributionPayment  # noqa: F401
 from .payment import PaymentServiceType, Payment, PaymentReceipt  # noqa: F401
 from .payment_day_lock import PaymentDayLock  # noqa: F401
+from .newcomer import Newcomer  # noqa: F401
+from .sponsorship import Sponsorship  # noqa: F401

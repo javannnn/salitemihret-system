@@ -2,6 +2,7 @@
 
 from app.routers import (
     auth,
+    newcomers,
     children,
     license,
     members,
@@ -9,5 +10,6 @@ from app.routers import (
     members_files,
     payments,
     priests,
+    sponsorships,
     whoami,
 )  # noqa: F401

@@ -8,6 +8,7 @@ import CreateMember from "@/pages/Members/Create";
 import EditMember from "@/pages/Members/Edit";
 import PaymentsLedger from "@/pages/Payments/Ledger";
 import MemberPaymentTimeline from "@/pages/Payments/MemberTimeline";
+import SponsorshipWorkspace from "@/pages/Sponsorships";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/members/:id/edit" element={<EditMember />} />
         <Route path="/payments" element={<PaymentsLedger />} />
         <Route path="/payments/members/:memberId" element={<MemberPaymentTimeline />} />
+        <Route path="/sponsorships" element={<SponsorshipWorkspace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

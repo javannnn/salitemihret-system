@@ -107,6 +107,17 @@ def registrar_user(db_session: Session) -> User:
 
 
 @pytest.fixture()
+def sponsorship_user(db_session: Session) -> User:
+    role = _ensure_role(db_session, "SponsorshipCommittee")
+    user = User(email="sponsor@example.com", full_name="Sponsor Lead", hashed_password="hash", is_active=True)
+    user.roles.append(role)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
 def admin_user(db_session: Session) -> User:
     role = _ensure_role(db_session, "Admin")
     user = User(email="admin@example.com", full_name="Admin", hashed_password="hash", is_active=True)
