@@ -1,16 +1,46 @@
+import { notifySessionExpired } from "@/lib/session";
+
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8001";
 
 export type MemberStatus = "Active" | "Inactive" | "Pending" | "Archived";
 
 export type Tag = { id: number; name: string; slug: string };
 export type Ministry = { id: number; name: string; slug: string };
-export type Household = { id: number; name: string; head_member_id: number | null };
+export type Household = {
+  id: number;
+  name: string;
+  head_member_id: number | null;
+  head_member_name?: string | null;
+  members_count: number;
+};
+export type HouseholdMember = {
+  id: number;
+  first_name: string;
+  last_name: string;
+};
+export type HouseholdDetail = Household & {
+  members: HouseholdMember[];
+};
+export type HouseholdListResponse = {
+  items: Household[];
+  total: number;
+  page: number;
+  page_size: number;
+};
 export type Priest = { id: number; full_name: string; phone?: string | null; email?: string | null; status: string };
 export type Spouse = {
   id: number;
   first_name: string;
   last_name: string;
   full_name: string;
+  gender?: string | null;
+  country_of_birth?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+export type SpousePayload = {
+  first_name: string;
+  last_name: string;
   gender?: string | null;
   country_of_birth?: string | null;
   phone?: string | null;
@@ -161,6 +191,32 @@ export type PaymentSummaryResponse = {
   grand_total: number;
 };
 
+export type SponsorshipProgram =
+  | "Education"
+  | "Nutrition"
+  | "Healthcare"
+  | "Housing"
+  | "EmergencyRelief"
+  | "SpecialProjects"
+  | "Youth Scholarship";
+export type SponsorshipPledgeChannel = "InPerson" | "OnlinePortal" | "Phone" | "EventBooth";
+export type SponsorshipReminderChannel = "Email" | "SMS" | "Phone" | "WhatsApp";
+export type SponsorshipMotivation =
+  | "HonorMemorial"
+  | "CommunityOutreach"
+  | "Corporate"
+  | "ParishInitiative"
+  | "Other";
+export type SponsorshipNotesTemplate = "FollowUp" | "PaymentIssue" | "Gratitude" | "Escalation";
+
+export type PaymentHealth = {
+  monthly_contribution: number;
+  method?: string | null;
+  last_payment_date?: string | null;
+  status: "Green" | "Yellow" | "Red";
+  days_since_last_payment?: number | null;
+};
+
 export type Sponsorship = {
   id: number;
   sponsor: MemberSummary;
@@ -168,13 +224,19 @@ export type Sponsorship = {
   newcomer?: { id: number; first_name: string; last_name: string; status: string } | null;
   beneficiary_name: string;
   father_of_repentance_id?: number | null;
-  volunteer_service?: string | null;
+  father_of_repentance_name?: string | null;
+  volunteer_services: string[];
+  volunteer_service_other?: string | null;
   payment_information?: string | null;
   last_sponsored_date?: string | null;
+  days_since_last_sponsorship?: number | null;
   frequency: "OneTime" | "Monthly" | "Quarterly" | "Yearly";
   status: "Draft" | "Active" | "Suspended" | "Completed" | "Closed";
   monthly_amount: number;
-  program?: string | null;
+  program?: SponsorshipProgram | null;
+  pledge_channel?: SponsorshipPledgeChannel | null;
+  reminder_channel?: SponsorshipReminderChannel | null;
+  motivation?: SponsorshipMotivation | null;
   start_date: string;
   end_date?: string | null;
   last_status?: "Approved" | "Rejected" | "Pending" | null;
@@ -184,13 +246,18 @@ export type Sponsorship = {
   budget_amount?: number | null;
   budget_slots?: number | null;
   used_slots: number;
+  budget_utilization_percent?: number | null;
+  budget_over_capacity: boolean;
   notes?: string | null;
+  notes_template?: SponsorshipNotesTemplate | null;
   reminder_last_sent?: string | null;
   reminder_next_due?: string | null;
   assigned_staff_id?: number | null;
   amount_paid: number;
   pledged_total: number;
   outstanding_balance: number;
+  sponsor_status?: string | null;
+  payment_health?: PaymentHealth | null;
   created_at: string;
   updated_at: string;
 };
@@ -203,6 +270,9 @@ export type SponsorshipFilters = {
   page?: number;
   page_size?: number;
   q?: string;
+  has_newcomer?: boolean;
+  start_date?: string;
+  end_date?: string;
 };
 
 export type SponsorshipPayload = {
@@ -210,15 +280,125 @@ export type SponsorshipPayload = {
   beneficiary_member_id?: number;
   newcomer_id?: number;
   beneficiary_name?: string;
+  father_of_repentance_id?: number;
+  volunteer_services?: string[];
+  volunteer_service_other?: string;
+  payment_information?: string;
+  last_sponsored_date?: string;
   monthly_amount: number;
   start_date: string;
   frequency: Sponsorship["frequency"];
   status: Sponsorship["status"];
-  program?: string;
+  program?: SponsorshipProgram;
+  pledge_channel?: SponsorshipPledgeChannel;
+  reminder_channel?: SponsorshipReminderChannel;
+  motivation?: SponsorshipMotivation;
+  last_status?: Sponsorship["last_status"];
+  last_status_reason?: string;
+  budget_month?: number;
+  budget_year?: number;
+  budget_amount?: number;
+  budget_slots?: number;
   notes?: string;
+  notes_template?: SponsorshipNotesTemplate;
+};
+
+export type BudgetSummary = {
+  month: number;
+  year: number;
+  total_slots: number;
+  used_slots: number;
+  utilization_percent: number;
+};
+
+export type SponsorshipMetrics = {
+  total_active_sponsors: number;
+  newcomers_sponsored: number;
+  month_sponsorships: number;
+  budget_utilization_percent: number;
+  current_budget?: BudgetSummary | null;
+  alerts: string[];
 };
 
 export type SponsorshipListResponse = Page<Sponsorship>;
+
+export type Lesson = {
+  id: number;
+  lesson_code: string;
+  title: string;
+  description?: string | null;
+  level: "SundaySchool" | "Abenet";
+  duration_minutes: number;
+};
+
+export type MezmurGroup = {
+  id: number;
+  code: string;
+  title: string;
+  language: "Geez" | "Amharic" | "English";
+  category: "Liturgy" | "Youth" | "SpecialEvent";
+  rehearsal_day: "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday";
+  conductor_name?: string | null;
+  capacity?: number | null;
+};
+
+export type AttendancePayload = {
+  enrollment_id: number;
+  lesson_date: string;
+  status?: "Present" | "Absent" | "Excused";
+  note?: string;
+};
+
+export type AbenetEnrollment = {
+  id: number;
+  parent: MemberSummary;
+  child: { id: number | null; first_name: string; last_name: string };
+  service_stage: "Alphabet" | "Reading" | "ForDeacons";
+  status: "Active" | "Paused" | "Completed" | "Cancelled";
+  monthly_amount: number;
+  enrollment_date: string;
+  last_payment_at?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AbenetEnrollmentPayload = {
+  parent_member_id: number;
+  child_id?: number;
+  child_first_name?: string;
+  child_last_name?: string;
+  birth_date: string;
+  service_stage: AbenetEnrollment["service_stage"];
+  enrollment_date: string;
+  notes?: string;
+};
+
+export type AbenetEnrollmentUpdate = Partial<Omit<AbenetEnrollmentPayload, "parent_member_id" | "child_first_name" | "child_last_name" | "birth_date">> & {
+  status?: AbenetEnrollment["status"];
+};
+
+export type AbenetPaymentPayload = {
+  amount?: number;
+  method: string;
+  memo?: string;
+};
+
+export type AbenetReportRow = {
+  child_name: string;
+  parent_name: string;
+  service_stage: AbenetEnrollment["service_stage"];
+  last_payment_at?: string | null;
+};
+
+export type SchoolsMeta = {
+  monthly_amount: number;
+  service_stages: Array<AbenetEnrollment["service_stage"]>;
+  statuses: Array<AbenetEnrollment["status"]>;
+  payment_methods: string[];
+};
+
+export type AbenetEnrollmentList = Page<AbenetEnrollment>;
 
 export type Newcomer = {
   id: number;
@@ -334,6 +514,12 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, headers });
 }
 
+function handleUnauthorized(message?: string): never {
+  notifySessionExpired();
+  setToken(null);
+  throw new ApiError(401, message || "Unauthorized");
+}
+
 export class ApiError extends Error {
   status: number;
   body?: string;
@@ -352,8 +538,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
 
   if (res.status === 401) {
-    setToken(null);
-    throw new ApiError(401, text || "Unauthorized");
+    handleUnauthorized(text || "Unauthorized");
   }
 
   if (res.status === 204) {
@@ -388,8 +573,7 @@ export async function exportMembers(params: Record<string, string | number | und
   });
 
   if (res.status === 401) {
-    setToken(null);
-    throw new ApiError(401, "Unauthorized");
+    handleUnauthorized("Unauthorized");
   }
 
   if (res.status === 403) {
@@ -416,8 +600,7 @@ export async function exportPaymentsReport(params: PaymentFilters = {}): Promise
   const res = await authFetch(url, { headers: { Accept: "text/csv" } });
 
   if (res.status === 401) {
-    setToken(null);
-    throw new ApiError(401, "Unauthorized");
+    handleUnauthorized("Unauthorized");
   }
   if (res.status === 403) {
     const message = await res.text();
@@ -438,6 +621,10 @@ export async function listSponsorships(params: SponsorshipFilters = {}): Promise
   });
   const query = search.toString();
   return api<SponsorshipListResponse>(`/sponsorships${query ? `?${query}` : ""}`);
+}
+
+export async function getSponsorshipMetrics(): Promise<SponsorshipMetrics> {
+  return api<SponsorshipMetrics>("/sponsorships/metrics");
 }
 
 export async function createSponsorship(payload: SponsorshipPayload): Promise<Sponsorship> {
@@ -490,6 +677,86 @@ export async function convertNewcomer(id: number, payload: NewcomerConvertPayloa
   });
 }
 
+export async function listLessons(level?: Lesson["level"]): Promise<Lesson[]> {
+  const search = level ? `?level=${encodeURIComponent(level)}` : "";
+  return api<Lesson[]>(`/schools/lessons${search}`);
+}
+
+export async function listMezmurGroups(): Promise<MezmurGroup[]> {
+  return api<MezmurGroup[]>(`/schools/mezmur`);
+}
+
+export async function recordSundaySchoolAttendance(payload: AttendancePayload): Promise<SundaySchoolEnrollment> {
+  return api<SundaySchoolEnrollment>(`/schools/sunday-school/attendance`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function promoteSundaySchool(payload: {
+  enrollment_ids: number[];
+  next_class_level: SundaySchoolEnrollment["class_level"];
+  expected_graduation?: string;
+}): Promise<{ updated: number; skipped: number }> {
+  return api(`/schools/sunday-school/promotions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type AbenetFilters = {
+  service_stage?: string;
+  status?: string;
+  q?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export async function listAbenetEnrollments(params: AbenetFilters = {}): Promise<AbenetEnrollmentList> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<AbenetEnrollmentList>(`/schools/abenet${query ? `?${query}` : ""}`);
+}
+
+export async function createAbenetEnrollment(payload: AbenetEnrollmentPayload): Promise<AbenetEnrollment> {
+  return api<AbenetEnrollment>(`/schools/abenet`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAbenetEnrollment(
+  id: number,
+  payload: AbenetEnrollmentUpdate,
+): Promise<AbenetEnrollment> {
+  return api<AbenetEnrollment>(`/schools/abenet/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function recordAbenetPayment(
+  id: number,
+  payload: AbenetPaymentPayload,
+): Promise<AbenetEnrollment> {
+  return api<AbenetEnrollment>(`/schools/abenet/${id}/payments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSchoolsMeta(): Promise<SchoolsMeta> {
+  return api<SchoolsMeta>(`/schools/meta`);
+}
+
+export async function getAbenetReport(): Promise<AbenetReportRow[]> {
+  return api<AbenetReportRow[]>(`/schools/abenet/report`);
+}
+
 export type ImportReport = {
   inserted: number;
   updated: number;
@@ -508,8 +775,7 @@ export async function importMembers(file: File | Blob, filename = "members_impor
   });
 
   if (res.status === 401) {
-    setToken(null);
-    throw new ApiError(401, "Unauthorized");
+    handleUnauthorized("Unauthorized");
   }
 
   const text = await res.text();
@@ -545,8 +811,7 @@ export async function uploadAvatar(memberId: number, file: File): Promise<Avatar
     body,
   });
   if (res.status === 401) {
-    setToken(null);
-    throw new Error("Unauthorized");
+    handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
     const message = await res.text();
@@ -649,6 +914,16 @@ export async function findMemberDuplicates(params: {
   return response.items;
 }
 
+export async function updateMemberSpouse(
+  memberId: number,
+  payload: { marital_status?: string; spouse?: SpousePayload | null },
+): Promise<Spouse | null> {
+  return api<Spouse | null>(`/members/${memberId}/spouse`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function searchMembers(query: string, limit = 5): Promise<Member[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
@@ -679,9 +954,66 @@ export type PriestPayload = {
   email?: string;
   status?: string;
 };
+export type PriestUpdatePayload = Partial<PriestPayload>;
 
 export async function createPriest(payload: PriestPayload): Promise<Priest> {
   return api<Priest>("/priests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePriest(priestId: number, payload: PriestUpdatePayload): Promise<Priest> {
+  return api<Priest>(`/priests/${priestId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function archivePriest(priestId: number): Promise<Priest> {
+  return api<Priest>(`/priests/${priestId}/archive`, { method: "POST" });
+}
+
+export async function restorePriest(priestId: number): Promise<Priest> {
+  return api<Priest>(`/priests/${priestId}/restore`, { method: "POST" });
+}
+
+export async function listHouseholds(params: { q?: string; page?: number; page_size?: number } = {}): Promise<HouseholdListResponse> {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.page) search.set("page", String(params.page));
+  if (params.page_size) search.set("page_size", String(params.page_size));
+  const query = search.toString();
+  return api<HouseholdListResponse>(`/households${query ? `?${query}` : ""}`);
+}
+
+export async function getHousehold(householdId: number): Promise<HouseholdDetail> {
+  return api<HouseholdDetail>(`/households/${householdId}`);
+}
+
+export async function createHousehold(payload: { name: string; head_member_id?: number | null }): Promise<Household> {
+  return api<Household>("/households", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateHousehold(householdId: number, payload: { name?: string; head_member_id?: number | null }): Promise<Household> {
+  return api<Household>(`/households/${householdId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteHousehold(householdId: number): Promise<void> {
+  await api<void>(`/households/${householdId}`, { method: "DELETE" });
+}
+
+export async function assignHouseholdMembers(
+  householdId: number,
+  payload: { member_ids: number[]; head_member_id?: number | null },
+): Promise<HouseholdDetail> {
+  return api<HouseholdDetail>(`/households/${householdId}/members`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -792,4 +1124,227 @@ export async function activateLicense(token: string): Promise<LicenseStatusRespo
     method: "POST",
     body: JSON.stringify({ token }),
   });
+}
+export type SundaySchoolCategory = "Child" | "Youth" | "Adult";
+export type SundaySchoolPaymentMethod = "CASH" | "DIRECT_DEPOSIT" | "E_TRANSFER" | "CREDIT";
+
+export type SundaySchoolParticipant = {
+  id: number;
+  member_id: number;
+  member_username: string;
+  first_name: string;
+  last_name: string;
+  gender?: string | null;
+  date_of_birth?: string | null;
+  category: SundaySchoolCategory;
+  membership_date?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  pays_contribution: boolean;
+  monthly_amount?: number | null;
+  payment_method?: SundaySchoolPaymentMethod | null;
+  last_payment_at?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SundaySchoolParticipantList = {
+  items: SundaySchoolParticipant[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type SundaySchoolParticipantPayload = {
+  member_username: string;
+  category: SundaySchoolCategory;
+  first_name: string;
+  last_name: string;
+  gender: "Male" | "Female" | "Other";
+  dob: string;
+  membership_date: string;
+  phone?: string | null;
+  email?: string | null;
+  pays_contribution?: boolean;
+  monthly_amount?: number | null;
+  payment_method?: SundaySchoolPaymentMethod;
+};
+
+export type SundaySchoolParticipantDetail = SundaySchoolParticipant & {
+  recent_payments: {
+    id: number;
+    amount: number;
+    method?: string | null;
+    memo?: string | null;
+    posted_at: string;
+    status: string;
+  }[];
+};
+
+export type SundaySchoolStats = {
+  total_participants: number;
+  count_child: number;
+  count_youth: number;
+  count_adult: number;
+  count_paying_contribution: number;
+  count_not_paying_contribution: number;
+  revenue_last_30_days: number;
+  pending_mezmur: number;
+  pending_lessons: number;
+  pending_art: number;
+};
+
+export type SundaySchoolContent = {
+  id: number;
+  type: "Mezmur" | "Lesson" | "Art";
+  title: string;
+  body?: string | null;
+  file_path?: string | null;
+  status: "Draft" | "Pending" | "Approved" | "Rejected";
+  rejection_reason?: string | null;
+  published: boolean;
+  approved_at?: string | null;
+  approved_by_id?: number | null;
+  participant?: { id: number; first_name: string; last_name: string } | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SundaySchoolContentPayload = {
+  type: SundaySchoolContent["type"];
+  title: string;
+  body?: string;
+  file_path?: string;
+  participant_id?: number;
+};
+
+export type SundaySchoolContentList = {
+  items: SundaySchoolContent[];
+  total: number;
+};
+
+export type SundaySchoolMeta = {
+  categories: SundaySchoolCategory[];
+  payment_methods: SundaySchoolPaymentMethod[];
+  content_types: SundaySchoolContent["type"][];
+  content_statuses: SundaySchoolContent["status"][];
+};
+
+export async function getSundaySchoolMeta(): Promise<SundaySchoolMeta> {
+  return api<SundaySchoolMeta>("/sunday-school/meta");
+}
+
+export async function listSundaySchoolParticipants(params: {
+  category?: SundaySchoolCategory;
+  pays_contribution?: boolean;
+  membership_from?: string;
+  membership_to?: string;
+  last_payment_from?: string;
+  last_payment_to?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+} = {}): Promise<SundaySchoolParticipantList> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<SundaySchoolParticipantList>(`/sunday-school/participants${query ? `?${query}` : ""}`);
+}
+
+export async function createSundaySchoolParticipant(payload: SundaySchoolParticipantPayload): Promise<SundaySchoolParticipant> {
+  return api<SundaySchoolParticipant>("/sunday-school/participants", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSundaySchoolParticipant(
+  participantId: number,
+  payload: Partial<SundaySchoolParticipantPayload> & { is_active?: boolean },
+): Promise<SundaySchoolParticipant> {
+  return api<SundaySchoolParticipant>(`/sunday-school/participants/${participantId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deactivateSundaySchoolParticipant(participantId: number): Promise<SundaySchoolParticipant> {
+  return api<SundaySchoolParticipant>(`/sunday-school/participants/${participantId}`, { method: "DELETE" });
+}
+
+export async function getSundaySchoolParticipant(participantId: number): Promise<SundaySchoolParticipantDetail> {
+  return api<SundaySchoolParticipantDetail>(`/sunday-school/participants/${participantId}`);
+}
+
+export async function recordSundaySchoolContribution(
+  participantId: number,
+  payload: { amount?: number; method: SundaySchoolPaymentMethod; memo?: string },
+): Promise<SundaySchoolParticipant> {
+  return api<SundaySchoolParticipant>(`/sunday-school/participants/${participantId}/payments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSundaySchoolStats(): Promise<SundaySchoolStats> {
+  return api<SundaySchoolStats>("/sunday-school/participants/stats");
+}
+
+export async function listSundaySchoolContent(params: {
+  type?: SundaySchoolContent["type"];
+  status?: SundaySchoolContent["status"];
+  search?: string;
+} = {}): Promise<SundaySchoolContentList> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<SundaySchoolContentList>(`/sunday-school/content${query ? `?${query}` : ""}`);
+}
+
+export async function createSundaySchoolContent(payload: SundaySchoolContentPayload): Promise<SundaySchoolContent> {
+  return api<SundaySchoolContent>("/sunday-school/content", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSundaySchoolContent(
+  contentId: number,
+  payload: Partial<SundaySchoolContentPayload> & { published?: boolean },
+): Promise<SundaySchoolContent> {
+  return api<SundaySchoolContent>(`/sunday-school/content/${contentId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function submitSundaySchoolContent(contentId: number): Promise<SundaySchoolContent> {
+  return api<SundaySchoolContent>(`/sunday-school/content/${contentId}/submit`, { method: "POST" });
+}
+
+export async function approveSundaySchoolContent(contentId: number, publishImmediately = true): Promise<SundaySchoolContent> {
+  return api<SundaySchoolContent>(`/sunday-school/content/${contentId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ publish_immediately: publishImmediately }),
+  });
+}
+
+export async function rejectSundaySchoolContent(contentId: number, reason: string): Promise<SundaySchoolContent> {
+  return api<SundaySchoolContent>(`/sunday-school/content/${contentId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function listPublicSundaySchoolContent(type: SundaySchoolContent["type"]): Promise<SundaySchoolContent[]> {
+  const path =
+    type === "Mezmur" ? "/public/sunday-school/mezmur" : type === "Lesson" ? "/public/sunday-school/lessons" : "/public/sunday-school/art";
+  return api<SundaySchoolContent[]>(path);
 }
