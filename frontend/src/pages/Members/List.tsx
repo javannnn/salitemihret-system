@@ -17,6 +17,7 @@ import {
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
 import { Badge, Button, Card, Input, Select } from "@/components/ui";
+import { PhoneInput } from "@/components/PhoneInput";
 import {
   API_BASE,
   ApiError,
@@ -32,9 +33,13 @@ import {
   exportMembers,
   getMembersMeta,
 } from "@/lib/api";
+import { getCanonicalCanadianPhone, hasValidEmail, normalizeEmailInput } from "@/lib/validation";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import ImportWizard from "./ImportWizard";
+import HouseholdAssignDrawer, { HouseholdTarget } from "./components/HouseholdAssignDrawer";
+import PriestDirectoryModal from "./components/PriestDirectoryModal";
+import SpouseDrawer, { SpouseDraft } from "./components/SpouseDrawer";
 import { usePermissions } from "@/hooks/usePermissions";
 
 type Filters = {
@@ -52,7 +57,13 @@ type QuickCreateForm = {
   first_name: string;
   last_name: string;
   phone: string;
+  email: string;
   status: MemberStatus;
+};
+
+type QuickCreateErrors = {
+  phone?: string;
+  email?: string;
 };
 
 const PAGE_SIZE = 15;
@@ -81,6 +92,7 @@ const QUICK_CREATE_DEFAULT: QuickCreateForm = {
   first_name: "",
   last_name: "",
   phone: "",
+  email: "",
   status: "Active",
 };
 
@@ -129,6 +141,14 @@ export default function MembersList() {
     const queryLower = priestSearch.toLowerCase();
     return priests.filter((priest) => priest.full_name.toLowerCase().includes(queryLower));
   }, [priests, priestSearch]);
+  const syncMeta = useCallback((next: MembersMeta) => {
+    setMeta(next);
+    setPriests(next.father_confessors.slice().sort((a, b) => a.full_name.localeCompare(b.full_name)));
+  }, []);
+  const refreshMeta = useCallback(async () => {
+    const next = await getMembersMeta();
+    syncMeta(next);
+  }, [syncMeta]);
 
   const [meta, setMeta] = useState<MembersMeta | null>(null);
   const [data, setData] = useState<Page<Member> | null>(null);
@@ -159,6 +179,14 @@ export default function MembersList() {
   const [newMemberModalOpen, setNewMemberModalOpen] = useState(false);
   const [newMemberSaving, setNewMemberSaving] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState<QuickCreateForm>({ ...QUICK_CREATE_DEFAULT });
+  const [quickErrors, setQuickErrors] = useState<QuickCreateErrors>({});
+  const [householdDrawerOpen, setHouseholdDrawerOpen] = useState(false);
+  const [householdTargets, setHouseholdTargets] = useState<HouseholdTarget[]>([]);
+  const [householdMode, setHouseholdMode] = useState<"bulk" | "single">("bulk");
+  const [priestDirectoryOpen, setPriestDirectoryOpen] = useState(false);
+  const [spouseDrawerOpen, setSpouseDrawerOpen] = useState(false);
+  const [spouseMember, setSpouseMember] = useState<{ id: number | null; name: string }>({ id: null, name: "" });
+  const spouseDraftsRef = useRef<Map<number, SpouseDraft>>(new Map());
 
   const syncSearchParams = useCallback(
     ({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage }: {
@@ -185,6 +213,13 @@ export default function MembersList() {
   );
 
   const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const selectedMembersList = useMemo(() => {
+    if (!data) return [];
+    return data.items
+      .filter((member) => selectedIds.has(member.id))
+      .map((member) => ({ id: member.id, name: `${member.first_name} ${member.last_name}` }));
+  }, [data, selectedIds]);
+  const currentSpouseDraft = spouseMember.id ? spouseDraftsRef.current.get(spouseMember.id) ?? null : null;
   const anySelected = selectedArray.length > 0;
   useEffect(() => {
     if (!canBulk && selectedIds.size > 0) {
@@ -337,8 +372,7 @@ export default function MembersList() {
     getMembersMeta()
       .then((next) => {
         if (!cancelled) {
-          setMeta(next);
-          setPriests(next.father_confessors.slice().sort((a, b) => a.full_name.localeCompare(b.full_name)));
+          syncMeta(next);
         }
       })
       .catch((error) => {
@@ -351,7 +385,7 @@ export default function MembersList() {
     return () => {
       cancelled = true;
     };
-  }, [user, token, permissions.viewMembers, toast]);
+  }, [user, token, permissions.viewMembers, toast, syncMeta]);
 
   useEffect(() => {
     if (!user || !token || initialized) {
@@ -578,12 +612,57 @@ const downloadCsv = async (
     setSelectedPriestId("");
   };
 
+  const openHouseholdDrawerForTargets = (targets: HouseholdTarget[], mode: "bulk" | "single") => {
+    if (!targets.length) {
+      toast.push("Select members first");
+      return;
+    }
+    setHouseholdTargets(targets);
+    setHouseholdMode(mode);
+    setHouseholdDrawerOpen(true);
+  };
+
   const handleBulkSetHousehold = () => {
     if (!canBulk || !anySelected) {
       toast.push("Select members first");
       return;
     }
-    toast.push("Bulk household assignment coming soon");
+    const fallbackTargets = selectedArray.map((id) => ({ id, name: `Member #${id}` }));
+    const targets = selectedMembersList.length ? selectedMembersList : fallbackTargets;
+    openHouseholdDrawerForTargets(targets, "bulk");
+  };
+
+  const handleOpenHouseholdForMember = (member: Member) => {
+    openHouseholdDrawerForTargets([{ id: member.id, name: `${member.first_name} ${member.last_name}` }], "single");
+  };
+
+  const handleHouseholdAssigned = () => {
+    loadMembers(page);
+    refreshMeta().catch((error) => {
+      console.error(error);
+    });
+  };
+
+  const handleOpenSpouseDrawer = (member: Member) => {
+    setSpouseMember({ id: member.id, name: `${member.first_name} ${member.last_name}` });
+    setSpouseDrawerOpen(true);
+  };
+
+  const persistSpouseDraft = (memberId: number, draft: SpouseDraft) => {
+    spouseDraftsRef.current.set(memberId, draft);
+  };
+
+  const clearSpouseDraft = (memberId: number) => {
+    spouseDraftsRef.current.delete(memberId);
+  };
+
+  const handleSpouseSaved = () => {
+    loadMembers(page);
+  };
+
+  const handlePriestDirectoryUpdate = (next: Priest[]) => {
+    setPriests(next);
+    setMeta((prev) => (prev ? { ...prev, father_confessors: next } : prev));
   };
 
   const handleBulkExportSelected = async () => {
@@ -608,23 +687,59 @@ const downloadCsv = async (
     navigate(`/members/${memberId}/edit`);
   };
 
+  const validateQuickForm = useCallback(() => {
+    const errors: QuickCreateErrors = {};
+    const canonicalPhone = getCanonicalCanadianPhone(newMemberForm.phone);
+    if (!canonicalPhone) {
+      errors.phone = "Use +1 followed by 10 digits (e.g., +16475550123).";
+    }
+    const normalizedEmail = newMemberForm.email ? normalizeEmailInput(newMemberForm.email) : "";
+    if (normalizedEmail && !hasValidEmail(normalizedEmail)) {
+      errors.email = "Enter a valid email address.";
+    }
+    setQuickErrors(errors);
+    return {
+      isValid: Object.keys(errors).length === 0,
+      canonicalPhone,
+      normalizedEmail: normalizedEmail || null,
+    };
+  }, [newMemberForm.email, newMemberForm.phone]);
+
   const closeNewMemberModal = () => {
     setNewMemberModalOpen(false);
     setNewMemberSaving(false);
+    setQuickErrors({});
     setNewMemberForm({ ...QUICK_CREATE_DEFAULT });
   };
 
   const handleNewMemberChange = (field: keyof QuickCreateForm) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-      const value = event.target.value;
-      setNewMemberForm((prev) => ({ ...prev, [field]: field === "status" ? (value as MemberStatus) : value }));
+      let value = event.target.value;
+      if (field === "email") {
+        value = normalizeEmailInput(value);
+        setQuickErrors((prev) => ({ ...prev, email: undefined }));
+      }
+      setNewMemberForm((prev) => ({
+        ...prev,
+        [field]: field === "status" ? (value as MemberStatus) : value,
+      }));
     };
+
+  const handleQuickPhoneChange = (value: string) => {
+    setQuickErrors((prev) => ({ ...prev, phone: undefined }));
+    setNewMemberForm((prev) => ({ ...prev, phone: value }));
+  };
 
   const handleQuickCreateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (newMemberSaving) return;
-    if (!newMemberForm.first_name.trim() || !newMemberForm.last_name.trim() || !newMemberForm.phone.trim()) {
-      toast.push("First name, last name, and phone are required");
+    if (!newMemberForm.first_name.trim() || !newMemberForm.last_name.trim()) {
+      toast.push("First and last name are required");
+      return;
+    }
+    const contacts = validateQuickForm();
+    if (!contacts.isValid || !contacts.canonicalPhone) {
+      toast.push("Enter a valid Canadian phone number before saving.");
       return;
     }
     setNewMemberSaving(true);
@@ -634,8 +749,8 @@ const downloadCsv = async (
         middle_name: null,
         last_name: newMemberForm.last_name.trim(),
         baptismal_name: null,
-        email: null,
-        phone: newMemberForm.phone.trim(),
+        email: contacts.normalizedEmail,
+        phone: contacts.canonicalPhone,
         status: newMemberForm.status,
         gender: null,
         marital_status: null,
@@ -684,8 +799,9 @@ const downloadCsv = async (
   };
 
   const handleOpenFullForm = () => {
+    const draft = { ...newMemberForm };
     closeNewMemberModal();
-    navigate("/members/new");
+    navigate("/members/new", { state: { quickCreateDraft: draft } });
   };
 
   const closeAssignModal = () => {
@@ -1344,6 +1460,34 @@ const downloadCsv = async (
                             >
                               View profile
                             </button>
+                            {permissions.editCore && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  setRowMenu(null);
+                                  handleOpenHouseholdForMember(member);
+                                }}
+                              >
+                                Manage household
+                              </button>
+                            )}
+                            {permissions.editCore && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  setRowMenu(null);
+                                  handleOpenSpouseDrawer(member);
+                                }}
+                              >
+                                Manage spouse
+                              </button>
+                            )}
                             {permissions.editSpiritual && (
                               <button
                                 type="button"
@@ -1490,7 +1634,7 @@ const downloadCsv = async (
                     }
                   >
                     <option value="">All genders</option>
-                    {(meta?.genders || ["Male", "Female", "Other"]).map((gender) => (
+                    {(meta?.genders || ["Male", "Female"]).map((gender) => (
                       <option key={gender} value={gender}>
                         {gender}
                       </option>
@@ -1632,16 +1776,30 @@ const downloadCsv = async (
                         required
                       />
                     </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute">Phone *</label>
-                      <Input
-                        value={newMemberForm.phone}
-                        onChange={handleNewMemberChange("phone")}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute">Status</label>
+                  <div>
+                    <label className="text-xs uppercase text-mute">Phone *</label>
+                    <PhoneInput
+                      value={newMemberForm.phone}
+                      onChange={handleQuickPhoneChange}
+                      aria-invalid={quickErrors.phone ? "true" : undefined}
+                      required
+                    />
+                    <p className="text-xs text-mute mt-1">Canadian numbers auto-prefix with +1.</p>
+                    {quickErrors.phone && <p className="text-xs text-red-500">{quickErrors.phone}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute">Email</label>
+                    <Input
+                      value={newMemberForm.email}
+                      onChange={handleNewMemberChange("email")}
+                      type="email"
+                      placeholder="name@example.com"
+                      aria-invalid={quickErrors.email ? "true" : undefined}
+                    />
+                    {quickErrors.email && <p className="text-xs text-red-500 mt-1">{quickErrors.email}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute">Status</label>
                       <Select
                         value={newMemberForm.status}
                         onChange={handleNewMemberChange("status")}
@@ -1801,6 +1959,9 @@ const downloadCsv = async (
                   + Create new father confessor
                 </Button>
               )}
+              <Button type="button" variant="ghost" onClick={() => setPriestDirectoryOpen(true)}>
+                Manage father confessors
+              </Button>
 
               {assignError && <div className="text-sm text-red-600">{assignError}</div>}
 
@@ -1821,6 +1982,29 @@ const downloadCsv = async (
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onComplete={handleImportComplete}
+      />
+      <HouseholdAssignDrawer
+        open={householdDrawerOpen}
+        onClose={() => setHouseholdDrawerOpen(false)}
+        targets={householdTargets}
+        mode={householdMode}
+        onAssigned={handleHouseholdAssigned}
+      />
+      <SpouseDrawer
+        open={spouseDrawerOpen}
+        memberId={spouseMember.id}
+        memberName={spouseMember.name}
+        initialDraft={currentSpouseDraft}
+        onPersistDraft={(memberId, draft) => persistSpouseDraft(memberId, draft)}
+        onClearDraft={(memberId) => clearSpouseDraft(memberId)}
+        onClose={() => setSpouseDrawerOpen(false)}
+        onSaved={handleSpouseSaved}
+      />
+      <PriestDirectoryModal
+        open={priestDirectoryOpen}
+        onClose={() => setPriestDirectoryOpen(false)}
+        priests={priests}
+        onUpdate={handlePriestDirectoryUpdate}
       />
     </>
   );

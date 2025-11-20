@@ -163,6 +163,7 @@ Welcome to the hosted demonstration of the SaliteMihret membership platform. Thi
 - **Status & due chips** – Color-coded badges indicate `Pending`, `Completed`, or `Overdue`; due dates display alongside the badge (overdue dates render in red).
 - **Export report** – The *Export report* button downloads a CSV that honors the current filters (Finance/Admin). Office Admins can also download for read-only review.
 - **Record payment** – Opens dialog to enter amount, service type, optional member (smart search + manual ID), method, memo, due date, and status override.
+- **Service types** – The finance forms auto-load the baseline ledger codes (`CONTRIBUTION`, `TITHE`, `DONATION`, `SCHOOLFEE`, `SPONSORSHIP`). If the reference table was never seeded, the API now inserts those defaults the first time any Finance/Admin opens the dropdown, so the UI never shows an empty “Service type” select.
 - **Corrections** – Finance/Admin can submit a correction reason; the system creates a reversing entry.
 - **Member timeline** – Click any linked member to open an interactive, modern timeline showing each payment card with status chips, due dates, method, and notes. If the member was deleted or the payment is now unassigned, the page still renders the legacy ledger entries and clearly labels the record as archived/unlinked.
 - **Daily close** – Finance/Admin users can lock a business day (via the Payments → “Close day” actions or API) to prevent late entries; the system auto-locks the previous day at 02:05 UTC. Unlocking requires a justification and logs the actor/reason.

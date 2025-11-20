@@ -13,6 +13,7 @@ import {
   AbenetReportRow,
   MemberDetail,
   MemberSummary,
+  Member,
   SchoolsMeta,
   api,
   createAbenetEnrollment,
@@ -85,7 +86,9 @@ const defaultEnrollmentForm: EnrollmentFormState = {
 };
 
 type SundayFormState = {
-  member_id: string;
+  member_username: string;
+  first_name: string;
+  last_name: string;
   category: "Child" | "Youth" | "Adult";
   gender: "Male" | "Female" | "Other";
   dob: string;
@@ -98,7 +101,9 @@ type SundayFormState = {
 };
 
 const defaultSundayForm: SundayFormState = {
-  member_id: "",
+  member_username: "",
+  first_name: "",
+  last_name: "",
   category: "Child",
   gender: "Female",
   dob: todayISO(),
@@ -146,9 +151,7 @@ export default function SchoolsWorkspace() {
   const [showSundayForm, setShowSundayForm] = useState(false);
   const [sundayForm, setSundayForm] = useState<SundayFormState>(defaultSundayForm);
   const [sundayMemberSearch, setSundayMemberSearch] = useState("");
-  const [sundayMemberResults, setSundayMemberResults] = useState<MemberSummary[]>([]);
-  const [sundaySelectedMember, setSundaySelectedMember] = useState<MemberSummary | null>(null);
-  const [sundayMemberDetail, setSundayMemberDetail] = useState<MemberDetail | null>(null);
+  const [sundayMemberResults, setSundayMemberResults] = useState<Member[]>([]);
   const [sundayPaymentTarget, setSundayPaymentTarget] = useState<SundaySchoolParticipant | null>(null);
   const [showSundayPaymentModal, setShowSundayPaymentModal] = useState(false);
   const [sundayPaymentForm, setSundayPaymentForm] = useState({ amount: "", method: "CASH", memo: "" });
@@ -315,38 +318,25 @@ export default function SchoolsWorkspace() {
     setSundayForm(defaultSundayForm);
     setSundayMemberSearch("");
     setSundayMemberResults([]);
-    setSundaySelectedMember(null);
-    setSundayMemberDetail(null);
   };
 
-  const hydrateSundayMember = async (memberId: number) => {
-    if (!memberId) return;
-    try {
-      const detail = await api<MemberDetail>(`/members/${memberId}`);
-      setSundaySelectedMember({ id: detail.id, first_name: detail.first_name, last_name: detail.last_name });
-      setSundayMemberSearch(`${detail.first_name} ${detail.last_name}`);
-      setSundayMemberDetail(detail);
-      setSundayForm((prev) => ({
-        ...prev,
-        member_id: String(memberId),
-        phone: detail.phone || prev.phone,
-        email: detail.email || prev.email,
-        dob: detail.birth_date || prev.dob,
-        gender: (detail.gender as SundayFormState["gender"]) || prev.gender,
-      }));
-    } catch (error) {
-      console.error(error);
-      toast.push("Unable to load member details.");
-    }
-  };
-
-  const handleSundayMemberSelect = async (member: MemberSummary) => {
+  const handleSundayMemberSelect = (member: Member) => {
     setSundayMemberResults([]);
-    await hydrateSundayMember(member.id);
+    setSundayMemberSearch(`${member.first_name} ${member.last_name}`);
+    setSundayForm((prev) => ({
+      ...prev,
+      member_username: member.username,
+      first_name: member.first_name,
+      last_name: member.last_name,
+      phone: member.phone || prev.phone,
+      email: member.email || prev.email,
+      gender: (member.gender as SundayFormState["gender"]) || prev.gender,
+      dob: member.birth_date || prev.dob,
+    }));
   };
 
   const handleSundayFormSubmit = async () => {
-    if (!sundayMemberDetail || !sundayMemberDetail.username) {
+    if (!sundayForm.member_username.trim()) {
       toast.push("Select a member before saving.");
       return;
     }
@@ -354,16 +344,24 @@ export default function SchoolsWorkspace() {
       toast.push("Select a payment method for contributions.");
       return;
     }
+    if (!sundayForm.first_name.trim() || !sundayForm.last_name.trim()) {
+      toast.push("Member name is required.");
+      return;
+    }
+    if (!sundayForm.dob) {
+      toast.push("Enter the participant's date of birth.");
+      return;
+    }
     const payload: SundaySchoolParticipantPayload = {
-      member_username: sundayMemberDetail.username,
+      member_username: sundayForm.member_username.trim(),
       category: sundayForm.category,
-      first_name: sundayMemberDetail.first_name || sundaySelectedMember?.first_name || "Participant",
-      last_name: sundayMemberDetail.last_name || sundaySelectedMember?.last_name || "Participant",
-      gender: (sundayMemberDetail.gender as SundayFormState["gender"]) || sundayForm.gender || "Other",
-      dob: sundayMemberDetail.birth_date || sundayForm.dob || todayISO(),
+      first_name: sundayForm.first_name.trim(),
+      last_name: sundayForm.last_name.trim(),
+      gender: sundayForm.gender,
+      dob: sundayForm.dob,
       membership_date: sundayForm.membership_date || todayISO(),
-      phone: sundayForm.phone || sundayMemberDetail.phone || undefined,
-      email: sundayForm.email || sundayMemberDetail.email || undefined,
+      phone: sundayForm.phone || undefined,
+      email: sundayForm.email || undefined,
       pays_contribution: sundayForm.pays_contribution,
       monthly_amount: sundayForm.pays_contribution ? Number(sundayForm.monthly_amount || 0) : undefined,
       payment_method: sundayForm.pays_contribution ? (sundayForm.payment_method as SundaySchoolPaymentMethod) : undefined,
@@ -998,217 +996,7 @@ export default function SchoolsWorkspace() {
             </div>
           </Modal>
         )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showSundayForm && (
-          <Modal title="New Sunday School participant" onClose={() => setShowSundayForm(false)}>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Search member</label>
-                <Input
-                  placeholder="Search by name"
-                  value={sundayMemberSearch}
-                  onChange={(event) => setSundayMemberSearch(event.target.value)}
-                />
-                {sundayMemberResults.length > 0 && (
-                  <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70 max-h-40 overflow-y-auto">
-                    {sundayMemberResults.map((result) => (
-                      <li
-                        key={result.id}
-                        className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer"
-                        onClick={() => handleSundayMemberSelect(result)}
-                      >
-                        {result.first_name} {result.last_name}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Member ID</label>
-                  <Input
-                    type="number"
-                    value={sundayForm.member_id}
-                    onChange={(event) => setSundayForm((prev) => ({ ...prev, member_id: event.target.value }))}
-                    onBlur={(event) => hydrateSundayMember(Number(event.target.value))}
-                  />
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Category</label>
-                  <Select
-                    value={sundayForm.category}
-                    onChange={(event) =>
-                      setSundayForm((prev) => ({ ...prev, category: event.target.value as SundayFormState["category"] }))
-                    }
-                  >
-                    {SUNDAY_CATEGORIES.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Gender</label>
-                  <Select
-                    value={sundayForm.gender}
-                    onChange={(event) => setSundayForm((prev) => ({ ...prev, gender: event.target.value as SundayFormState["gender"] }))}
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Date of birth</label>
-                  <Input
-                    type="date"
-                    value={sundayForm.dob}
-                    onChange={(event) => setSundayForm((prev) => ({ ...prev, dob: event.target.value }))}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Membership date</label>
-                <Input
-                  type="date"
-                  value={sundayForm.membership_date}
-                  onChange={(event) => setSundayForm((prev) => ({ ...prev, membership_date: event.target.value }))}
-                />
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Phone</label>
-                  <Input
-                    value={sundayForm.phone}
-                    onChange={(event) => setSundayForm((prev) => ({ ...prev, phone: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Email</label>
-                  <Input
-                    value={sundayForm.email}
-                    onChange={(event) => setSundayForm((prev) => ({ ...prev, email: event.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="sunday-pays"
-                  type="checkbox"
-                  checked={sundayForm.pays_contribution}
-                  onChange={(event) => setSundayForm((prev) => ({ ...prev, pays_contribution: event.target.checked }))}
-                />
-                <label htmlFor="sunday-pays" className="text-sm">
-                  Pays contribution
-                </label>
-              </div>
-              {sundayForm.pays_contribution && (
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Monthly amount</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={sundayForm.monthly_amount}
-                      onChange={(event) => setSundayForm((prev) => ({ ...prev, monthly_amount: event.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Payment method</label>
-                    <Select
-                      value={sundayForm.payment_method}
-                      onChange={(event) => setSundayForm((prev) => ({ ...prev, payment_method: event.target.value }))}
-                    >
-                      <option value="">Select method</option>
-                      {sundayMeta?.payment_methods.map((method) => (
-                        <option key={method} value={method}>
-                          {method}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setShowSundayForm(false);
-                    resetSundayForm();
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleSundayFormSubmit}>Save participant</Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showSundayPaymentModal && sundayPaymentTarget && (
-          <Modal
-            title={`Record contribution for ${sundayPaymentTarget.first_name} ${sundayPaymentTarget.last_name}`}
-            onClose={() => setShowSundayPaymentModal(false)}
-          >
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Amount</label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={sundayPaymentForm.amount}
-                  onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, amount: event.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Method</label>
-                <Select
-                  value={sundayPaymentForm.method}
-                  onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, method: event.target.value }))}
-                >
-                  <option value="">Select method</option>
-                  {sundayMeta?.payment_methods.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Memo</label>
-                <Textarea
-                  rows={3}
-                  value={sundayPaymentForm.memo}
-                  onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, memo: event.target.value }))}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setShowSundayPaymentModal(false);
-                    setSundayPaymentTarget(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleSundayPaymentSubmit}>Record payment</Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
-
-        </div>
+      </AnimatePresence>        </div>
       ) : (
         <div className="space-y-6">
           <Card className="p-4 grid gap-4 md:grid-cols-4">
@@ -1533,6 +1321,229 @@ export default function SchoolsWorkspace() {
               </div>
             </div>
           </Card>
+          <AnimatePresence>
+            {showSundayForm && (
+              <Modal title="New Sunday School participant" onClose={() => setShowSundayForm(false)}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Search member</label>
+                    <Input
+                      placeholder="Search by name"
+                      value={sundayMemberSearch}
+                      onChange={(event) => setSundayMemberSearch(event.target.value)}
+                    />
+                    {sundayMemberResults.length > 0 && (
+                      <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70 max-h-40 overflow-y-auto">
+                        {sundayMemberResults.map((result) => (
+                          <li
+                            key={result.id}
+                            className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer"
+                            onClick={() => handleSundayMemberSelect(result)}
+                          >
+                            {result.first_name} {result.last_name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Member username (FN.LN)</label>
+                      <Input
+                        placeholder="hanna.mengistu"
+                        value={sundayForm.member_username}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, member_username: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">First name</label>
+                      <Input
+                        value={sundayForm.first_name}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, first_name: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Last name</label>
+                      <Input
+                        value={sundayForm.last_name}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, last_name: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Category</label>
+                      <Select
+                        value={sundayForm.category}
+                        onChange={(event) =>
+                          setSundayForm((prev) => ({ ...prev, category: event.target.value as SundayFormState["category"] }))
+                        }
+                      >
+                        {SUNDAY_CATEGORIES.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Gender</label>
+                      <Select
+                        value={sundayForm.gender}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, gender: event.target.value as SundayFormState["gender"] }))}
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Date of birth</label>
+                      <Input
+                        type="date"
+                        value={sundayForm.dob}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, dob: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Membership date</label>
+                    <Input
+                      type="date"
+                      value={sundayForm.membership_date}
+                      onChange={(event) => setSundayForm((prev) => ({ ...prev, membership_date: event.target.value }))}
+                    />
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Phone</label>
+                      <Input
+                        value={sundayForm.phone}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, phone: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Email</label>
+                      <Input
+                        value={sundayForm.email}
+                        onChange={(event) => setSundayForm((prev) => ({ ...prev, email: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="sunday-pays"
+                      type="checkbox"
+                      checked={sundayForm.pays_contribution}
+                      onChange={(event) => setSundayForm((prev) => ({ ...prev, pays_contribution: event.target.checked }))}
+                    />
+                    <label htmlFor="sunday-pays" className="text-sm">
+                      Pays contribution
+                    </label>
+                  </div>
+                  {sundayForm.pays_contribution && (
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Monthly amount</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={sundayForm.monthly_amount}
+                          onChange={(event) => setSundayForm((prev) => ({ ...prev, monthly_amount: event.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Payment method</label>
+                        <Select
+                          value={sundayForm.payment_method}
+                          onChange={(event) => setSundayForm((prev) => ({ ...prev, payment_method: event.target.value }))}
+                        >
+                          <option value="">Select method</option>
+                          {sundayMeta?.payment_methods.map((method) => (
+                            <option key={method} value={method}>
+                              {method}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setShowSundayForm(false);
+                        resetSundayForm();
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSundayFormSubmit}>Save participant</Button>
+                  </div>
+                </div>
+              </Modal>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showSundayPaymentModal && sundayPaymentTarget && (
+              <Modal
+                title={`Record contribution for ${sundayPaymentTarget.first_name} ${sundayPaymentTarget.last_name}`}
+                onClose={() => setShowSundayPaymentModal(false)}
+              >
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Amount</label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={sundayPaymentForm.amount}
+                      onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, amount: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Method</label>
+                    <Select
+                      value={sundayPaymentForm.method}
+                      onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, method: event.target.value }))}
+                    >
+                      <option value="">Select method</option>
+                      {sundayMeta?.payment_methods.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Memo</label>
+                    <Textarea
+                      rows={3}
+                      value={sundayPaymentForm.memo}
+                      onChange={(event) => setSundayPaymentForm((prev) => ({ ...prev, memo: event.target.value }))}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setShowSundayPaymentModal(false);
+                        setSundayPaymentTarget(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSundayPaymentSubmit}>Record payment</Button>
+                  </div>
+                </div>
+              </Modal>
+            )}
+          </AnimatePresence>
+
         </div>
       )}
     </div>

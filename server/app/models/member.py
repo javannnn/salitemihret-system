@@ -56,6 +56,12 @@ class Member(Base):
     contribution_amount = Column(Numeric(10, 2), nullable=False, default=75)
     contribution_currency = Column(String(3), nullable=False, default="CAD")
     contribution_exception_reason = Column(ContributionExceptionReason, nullable=True)
+    contribution_last_paid_at = Column(DateTime(timezone=True), nullable=True)
+    contribution_next_due_at = Column(DateTime(timezone=True), nullable=True)
+    status_auto = Column(MemberStatus, nullable=False, default="Pending")
+    status_override = Column(Boolean, default=False, nullable=False)
+    status_override_value = Column(MemberStatus, nullable=True)
+    status_override_reason = Column(String(255), nullable=True)
     notes = Column(String(500), nullable=True)
     avatar_path = Column(String(255), nullable=True)
     household_id = Column(Integer, ForeignKey("households.id", ondelete="SET NULL"), nullable=True)
@@ -94,6 +100,7 @@ class Member(Base):
         cascade="all, delete-orphan",
         order_by="MemberContributionPayment.paid_at.desc(), MemberContributionPayment.id.desc()",
     )
+    abenet_enrollments = relationship("AbenetEnrollment", back_populates="parent")
 
     @property
     def family_count(self) -> int:

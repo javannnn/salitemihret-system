@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } from "@/lib/api";
+import { subscribeSessionExpired } from "@/lib/session";
 
 export default function AppShell() {
   const { user, loading } = useAuth();
@@ -24,6 +25,7 @@ export default function AppShell() {
   const [licenseModalOpen, setLicenseModalOpen] = useState(false);
   const [licenseToken, setLicenseToken] = useState("");
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const navItems = useMemo(() => {
     const items = [
@@ -35,9 +37,20 @@ export default function AppShell() {
         to: "/sponsorships",
         visible: permissions.viewSponsorships || permissions.viewNewcomers,
       },
+      {
+        label: "Schools",
+        to: "/schools",
+        visible: permissions.viewSchools,
+      },
     ];
     return items.filter((item) => item.visible);
-  }, [permissions.viewMembers, permissions.viewPayments, permissions.viewSponsorships, permissions.viewNewcomers]);
+  }, [
+    permissions.viewMembers,
+    permissions.viewPayments,
+    permissions.viewSponsorships,
+    permissions.viewNewcomers,
+    permissions.viewSchools,
+  ]);
 
   if (loading) {
     return <div className="p-6 text-sm text-mute">Loading…</div>;
@@ -93,6 +106,15 @@ export default function AppShell() {
       active = false;
     };
   }, [user, toast]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSessionExpired(() => setSessionExpired(true));
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    setSessionExpired(false);
+  }, [user]);
 
   const handleLicenseActivate = async () => {
     if (!licenseToken.trim()) {
@@ -317,6 +339,46 @@ export default function AppShell() {
           </Card>
         </div>
       )}
+      <AnimatePresence>
+        {sessionExpired && (
+          <>
+            <motion.div
+              className="fixed inset-0 z-[100] bg-ink/70 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="fixed inset-0 z-[101] flex items-center justify-center px-6"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+            >
+              <Card className="max-w-lg w-full p-6 space-y-4 border border-amber-300 bg-amber-50/95 text-amber-900">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-amber-100 flex items-center justify-center">
+                    <ShieldAlert className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm uppercase tracking-wide">Session expired</p>
+                    <h3 className="text-xl font-semibold">Time to sign in again</h3>
+                  </div>
+                </div>
+                <p className="text-sm">
+                  For your security we ended this session after a long period of inactivity. Save any notes, then sign in
+                  again to keep working.
+                </p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="ghost" onClick={() => window.location.reload()}>
+                    Reload page
+                  </Button>
+                  <Button onClick={logout}>Go to login</Button>
+                </div>
+              </Card>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

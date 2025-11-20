@@ -23,6 +23,55 @@ from app.schemas.payment import (
     PaymentStatusUpdate,
     PaymentStatus,
 )
+from app.services.membership import apply_contribution_payment
+
+DEFAULT_PAYMENT_SERVICE_TYPES: tuple[dict[str, str], ...] = (
+    {
+        "code": "CONTRIBUTION",
+        "label": "Monthly Contribution",
+        "description": "Standard parish contribution or household dues.",
+    },
+    {
+        "code": "TITHE",
+        "label": "Tithe",
+        "description": "Tithes recorded outside the automated contribution flow.",
+    },
+    {
+        "code": "DONATION",
+        "label": "General Donation",
+        "description": "One-time gifts, fundraisers, or special appeals.",
+    },
+    {
+        "code": "SCHOOLFEE",
+        "label": "Sunday School Fee",
+        "description": "Fees for Sunday School or youth formation programs.",
+    },
+    {
+        "code": "SPONSORSHIP",
+        "label": "Sponsorship Donation",
+        "description": "Funds tied to sponsorship pledges or newcomer support.",
+    },
+    {
+        "code": "AbenetSchool",
+        "label": "Abenet School Tuition",
+        "description": "Tuition payments for the Abenet literacy and deacons track.",
+    },
+)
+
+
+def ensure_default_service_types(db: Session) -> None:
+    """Insert baseline payment service types if the table is empty or missing required codes."""
+    existing_codes = {
+        code for (code,) in db.query(PaymentServiceType.code).all()
+    }
+    missing = [
+        payload for payload in DEFAULT_PAYMENT_SERVICE_TYPES if payload["code"] not in existing_codes
+    ]
+    if not missing:
+        return
+    for payload in missing:
+        db.add(PaymentServiceType(**payload))
+    db.commit()
 
 
 def _get_service_type(db: Session, code: str, active_only: bool = True) -> PaymentServiceType:
@@ -109,7 +158,7 @@ def _ensure_unlocked(db: Session, day: date) -> None:
         )
 
 
-def record_payment(db: Session, payload: PaymentCreate, actor: User) -> Payment:
+def record_payment(db: Session, payload: PaymentCreate, actor: User | None, *, auto_commit: bool = True) -> Payment:
     service_type = _get_service_type(db, payload.service_type_code)
     member = _resolve_member(db, payload.member_id)
     posted_at = payload.posted_at or datetime.now(timezone.utc)
@@ -129,7 +178,11 @@ def record_payment(db: Session, payload: PaymentCreate, actor: User) -> Payment:
         status=status,
     )
     db.add(payment)
-    db.commit()
+    db.flush()
+    if member and service_type.code == "CONTRIBUTION":
+        apply_contribution_payment(member, amount=Decimal(str(payment.amount)), posted_at=posted_at)
+    if auto_commit:
+        db.commit()
     db.refresh(payment)
     return payment
 
@@ -254,6 +307,7 @@ def summarize_payments(
 
 
 def list_service_types(db: Session, include_inactive: bool = False) -> list[PaymentServiceTypeOut]:
+    ensure_default_service_types(db)
     query = db.query(PaymentServiceType)
     if not include_inactive:
         query = query.filter(PaymentServiceType.active.is_(True))

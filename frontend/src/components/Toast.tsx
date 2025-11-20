@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { subscribeSessionExpired, subscribeSessionRestored } from "@/lib/session";
 
 interface ToastItem {
   id: string;
@@ -13,6 +14,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [muted, setMuted] = useState(false);
 
   const createId = useCallback(() => {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -22,12 +24,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const push = useCallback((message: string) => {
+    if (muted) return;
     const id = createId();
     setToasts((prev) => [...prev, { id, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 3000);
-  }, [createId]);
+  }, [createId, muted]);
+
+  useEffect(() => {
+    const unsubscribeExpired = subscribeSessionExpired(() => {
+      setMuted(true);
+      setToasts([]);
+    });
+    const unsubscribeRestored = subscribeSessionRestored(() => setMuted(false));
+    return () => {
+      unsubscribeExpired();
+      unsubscribeRestored();
+    };
+  }, []);
 
   return (
     <ToastContext.Provider value={{ push }}>

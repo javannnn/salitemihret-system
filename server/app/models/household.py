@@ -19,3 +19,7 @@ class Household(Base):
 
     head = relationship("Member", foreign_keys=[head_member_id], backref="headed_household", lazy="joined")
     members = relationship("Member", back_populates="household", foreign_keys="Member.household_id")
+
+    @property
+    def members_count(self) -> int:
+        return len([member for member in self.members if getattr(member, "deleted_at", None) is None])

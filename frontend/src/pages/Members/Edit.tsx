@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
 import {
@@ -8,6 +9,7 @@ import {
   MemberAuditEntry,
   MemberDetail,
   MemberStatus,
+  MemberSundaySchoolParticipantStatus,
   MembersMeta,
   Payment,
   PaymentServiceType,
@@ -23,10 +25,100 @@ import {
 import { useToast } from "@/components/Toast";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
-import { ArrowLeft, ShieldAlert, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  BookOpen,
+  ChevronDown,
+  CreditCard,
+  GraduationCap,
+  MoreVertical,
+  PlusCircle,
+  ShieldAlert,
+  Trash2,
+  UsersRound,
+} from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 
 const STATUS_OPTIONS: MemberStatus[] = ["Active", "Inactive", "Pending", "Archived"];
+const statusChipStyles: Record<MemberStatus, string> = {
+  Active: "bg-emerald-100 text-emerald-700 ring-emerald-200",
+  Inactive: "bg-slate-100 text-slate-600 ring-slate-300",
+  Pending: "bg-amber-100 text-amber-700 ring-amber-200",
+  Archived: "bg-slate-200 text-slate-600 ring-slate-300",
+};
+
+const SUNDAY_STATUS_STYLES: Record<MemberSundaySchoolParticipantStatus, string> = {
+  "Up to date": "bg-emerald-50 text-emerald-700",
+  Overdue: "bg-rose-50 text-rose-700",
+  "No payments yet": "bg-amber-50 text-amber-700",
+  "Not contributing": "bg-slate-100 text-slate-600",
+};
+
+const SECTION_NAV_ITEMS = [
+  { id: "identity", label: "Identity" },
+  { id: "membership", label: "Membership" },
+  { id: "sundaySchool", label: "Sunday school" },
+  { id: "contact", label: "Contact" },
+  { id: "household", label: "Household" },
+  { id: "giving", label: "Giving" },
+  { id: "payments", label: "Payments" },
+  { id: "family", label: "Family" },
+  { id: "ministries", label: "Ministries" },
+  { id: "notes", label: "Notes" },
+] as const;
+
+type SectionId = (typeof SECTION_NAV_ITEMS)[number]["id"];
+
+const CANADIAN_COUNTRY_CODE = "+1";
+const CANADA_FLAG = "🇨🇦";
+
+const extractCanadianDigits = (value?: string | null) => {
+  if (!value) return "";
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("1") && digits.length === 11) {
+    digits = digits.slice(1);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
+
+const formatCanadianPhoneDisplay = (digits: string) => {
+  if (!digits) return "";
+  const area = digits.slice(0, 3);
+  const mid = digits.slice(3, 6);
+  const last = digits.slice(6, 10);
+  let output = "";
+  if (area) {
+    output += area.length === 3 ? `(${area})` : area;
+  }
+  if (mid) {
+    output += area.length === 3 ? " " : "";
+    output += mid;
+  }
+  if (last) {
+    output += mid.length === 3 ? "-" : "";
+    output += last;
+  }
+  return output.trim();
+};
+
+const normalizeCanadianInput = (input: string) => {
+  const rawDigits = input.replace(/\D/g, "");
+  let digits = rawDigits;
+  let autoAdjusted = false;
+  if (digits.startsWith("1") && digits.length > 10) {
+    digits = digits.slice(1);
+    autoAdjusted = true;
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(0, 10);
+    autoAdjusted = true;
+  }
+  return { digits, autoAdjusted: autoAdjusted || (!!digits && rawDigits !== digits) };
+};
 
 type SpouseFormState = {
   first_name: string;
@@ -70,6 +162,9 @@ const createChildFormState = (initial?: Partial<ChildFormState>): ChildFormState
   notes: initial?.notes ?? "",
 });
 
+const cloneMemberDetail = (value: MemberDetail): MemberDetail =>
+  JSON.parse(JSON.stringify(value)) as MemberDetail;
+
 export default function EditMember() {
   return (
     <ProtectedRoute roles={["Registrar", "Admin", "PublicRelations", "Clerk", "OfficeAdmin", "FinanceAdmin"]}>
@@ -77,6 +172,345 @@ export default function EditMember() {
     </ProtectedRoute>
   );
 }
+
+function SummaryCards({ member, formatDate }: { member: MemberDetail; formatDate: (value?: string | null) => string }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="border rounded-lg p-4 space-y-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide">Household & Ministries</h3>
+        <div className="text-sm">
+          <div className="text-xs uppercase text-mute">Household</div>
+          {member.household ? (
+            <div className="font-medium">{member.household.name}</div>
+          ) : (
+            <div className="text-mute">No household assigned</div>
+          )}
+        </div>
+        <div className="text-sm">
+          <div className="text-xs uppercase text-mute">Tags</div>
+          <div className="flex flex-wrap gap-2 mt-1">
+            {member.tags.length > 0 ? (
+              member.tags.map((tag) => (
+                <Badge key={tag.id} className="normal-case">
+                  {tag.name}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-mute text-xs">No tags yet</span>
+            )}
+          </div>
+        </div>
+        <div className="text-sm">
+          <div className="text-xs uppercase text-mute">Ministries</div>
+          <div className="flex flex-wrap gap-2 mt-1">
+            {member.ministries.length > 0 ? (
+              member.ministries.map((ministry) => (
+                <Badge key={ministry.id} className="normal-case">
+                  {ministry.name}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-mute text-xs">No ministries yet</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="border rounded-lg p-4 space-y-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide">Profile Snapshot</h3>
+        <div className="grid md:grid-cols-2 gap-3 text-sm">
+          <div>
+            <div className="text-xs uppercase text-mute">Gender</div>
+            <div>{member.gender || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Marital status</div>
+            <div>{member.marital_status || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">District</div>
+            <div>{member.district || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Family count</div>
+            <div>{member.family_count}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Birth date</div>
+            <div>{formatDate(member.birth_date)}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Membership date</div>
+            <div>{formatDate(member.join_date)}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Father confessor</div>
+            <div>{member.father_confessor?.full_name ?? (member.has_father_confessor ? "Assigned" : "—")}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-mute">Giving</div>
+            <div>
+              {member.is_tither ? "Tither" : "Non-tither"}
+              {" · "}
+              {member.pays_contribution ? "Gives contribution" : "Contribution pending"}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <div className="text-xs uppercase text-mute">Contribution details</div>
+            <div>
+              {member.contribution_method || "—"}
+              {member.contribution_amount !== null && member.contribution_amount !== undefined && (
+                <span>
+                  {" · "}
+                  {member.contribution_currency} {member.contribution_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              )}
+              {member.contribution_exception_reason && (
+                <span className="text-amber-600"> · {member.contribution_exception_reason === "LowIncome" ? "Low income" : member.contribution_exception_reason} exception</span>
+              )}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <div className="text-xs uppercase text-mute">Address</div>
+            <div>
+              {[
+                member.address,
+                member.address_street,
+                member.address_city,
+                member.address_region,
+                member.address_postal_code,
+                member.address_country,
+              ]
+                .filter(Boolean)
+                .join(", ") || "—"}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AvatarCard({
+  avatarUrl,
+  initials,
+  canUpload,
+  uploading,
+  onUploadClick,
+  inputRef,
+  onFileChange,
+}: {
+  avatarUrl: string | null;
+  initials: string;
+  canUpload: boolean;
+  uploading: boolean;
+  onUploadClick: () => void;
+  inputRef: RefObject<HTMLInputElement>;
+  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-5 text-center space-y-4 shadow-sm">
+      <div className="relative mx-auto">
+        <div className="h-28 w-28 rounded-full border border-slate-200 bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center text-2xl font-semibold overflow-hidden shadow-sm">
+          {avatarUrl ? <img src={avatarUrl} alt="Member avatar" className="h-full w-full object-cover" /> : initials || "—"}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Button variant="soft" className="w-full rounded-full" onClick={onUploadClick} disabled={uploading || !canUpload}>
+          {uploading ? "Uploading…" : "Upload new photo"}
+        </Button>
+        <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onFileChange} />
+        <p className="text-[11px] text-slate-500">PNG, JPG or WEBP up to 5MB.</p>
+        {!canUpload && <p className="text-[11px] text-slate-500">Avatar updates require Registrar or Admin permissions.</p>}
+      </div>
+    </div>
+  );
+}
+
+type QuickAction = {
+  label: string;
+  description?: string;
+  disabled: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+};
+
+function QuickActionsCard({ actions }: { actions: QuickAction[] }) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-5 space-y-3 shadow-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Quick actions</h3>
+      <div className="space-y-2">
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={action.onClick}
+            disabled={action.disabled}
+            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+              action.disabled ? "border-slate-100 text-slate-400 cursor-not-allowed" : "border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <span
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${
+                  action.disabled ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {action.icon}
+              </span>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-slate-900">{action.label}</div>
+                {action.description && <p className="text-xs text-slate-500">{action.description}</p>}
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-slate-400" />
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type SnapshotCardProps = {
+  memberAge: number | null;
+  membershipSince: string;
+  sundayLinkedCount: number;
+  sundaySummary: { upToDate: number; overdue: number; pending: number; notContributing: number };
+  sundayContributors: number;
+  lastContributionDate: string;
+  lastSundayPayment: string;
+  addressSummary: string;
+  isTither: boolean;
+  paysContribution: boolean;
+};
+
+function SnapshotCard({
+  memberAge,
+  membershipSince,
+  sundayLinkedCount,
+  sundaySummary,
+  sundayContributors,
+  lastContributionDate,
+  lastSundayPayment,
+  addressSummary,
+  isTither,
+  paysContribution,
+}: SnapshotCardProps) {
+  const sundayStatusLabel = sundayLinkedCount
+    ? `${sundaySummary.upToDate} up to date · ${sundaySummary.overdue} overdue`
+    : "No participants yet";
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-5 space-y-4 shadow-sm text-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Member snapshot</h3>
+      <div className="grid gap-3">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 flex items-center justify-between">
+          <div>
+            <div className="text-[11px] uppercase text-slate-500">Age</div>
+            <div className="text-base font-semibold text-slate-900">{memberAge ?? "—"}</div>
+          </div>
+          <div className="text-xs text-slate-500">Member since {membershipSince}</div>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+          <div className="text-[11px] uppercase text-slate-500">Contribution status</div>
+          <div className="font-semibold text-slate-900">
+            {isTither ? "Tither" : "Non-tither"} · {paysContribution ? "Contribution active" : "Contribution paused"}
+          </div>
+          <div className="text-xs text-slate-500">Last ledger payment: {lastContributionDate}</div>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+          <div className="text-[11px] uppercase text-slate-500">Sunday school</div>
+          <div className="font-semibold text-slate-900">
+            {sundayLinkedCount} linked · {sundayContributors} contributors
+          </div>
+          <div className="text-xs text-slate-500">
+            {sundayStatusLabel} · Last payment {lastSundayPayment}
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+          <div className="text-[11px] uppercase text-slate-500">Address</div>
+          <div className="font-semibold text-slate-900">{addressSummary}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditTrailCard({
+  auditLoading,
+  auditEntries,
+}: {
+  auditLoading: boolean;
+  auditEntries: MemberAuditEntry[];
+}) {
+  return (
+    <div className="border rounded-lg p-4 space-y-3">
+      <h3 className="text-sm font-semibold uppercase tracking-wide">Audit Trail</h3>
+      {auditLoading ? (
+        <div className="text-sm text-mute">Loading audit entries…</div>
+      ) : auditEntries.length === 0 ? (
+        <div className="text-sm text-mute">No changes recorded yet.</div>
+      ) : (
+        <ul className="space-y-2 text-sm">
+          {auditEntries.map((entry, index) => (
+            <li key={`${entry.changed_at}-${index}`} className="border rounded-md p-3">
+              <div className="flex items-center justify-between text-xs text-mute">
+                <span>{new Date(entry.changed_at).toLocaleString()}</span>
+                <span>{entry.actor}</span>
+              </div>
+              <div className="mt-1 font-medium">
+                {entry.action.toUpperCase()} {entry.field}
+              </div>
+              <div className="text-xs text-mute">
+                {entry.old_value ?? "—"} → {entry.new_value ?? "—"}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+type SectionCardProps = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  actions?: ReactNode;
+  children: ReactNode;
+};
+
+const SectionCard = forwardRef<HTMLDivElement, SectionCardProps>(function SectionCardComponent(
+  { id, title, subtitle, collapsed = false, onToggle, actions, children }: SectionCardProps,
+  ref
+) {
+  return (
+    <section ref={ref} id={id} className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <div className="flex items-start justify-between gap-3 px-5 py-4">
+        <div>
+          <h3 className="text-sm font-semibold tracking-wide text-slate-700">{title}</h3>
+          {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+        </div>
+        {(actions || onToggle) && (
+          <div className="flex items-center gap-2">
+            {actions}
+            {onToggle && (
+              <button
+                type="button"
+                onClick={onToggle}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                aria-label={collapsed ? "Expand section" : "Collapse section"}
+              >
+                <ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {!collapsed && <div className="px-5 pb-5 space-y-4">{children}</div>}
+    </section>
+  );
+});
 
 function EditMemberInner() {
   const { id } = useParams();
@@ -88,10 +522,10 @@ function EditMemberInner() {
   const disableCore = disableAll || !permissions.editCore;
   const disableFinance = disableAll || !permissions.editFinance;
   const disableSpiritual = disableAll || !permissions.editSpiritual;
-  const disableStatus = disableAll || !permissions.editStatus;
   const canViewAudit = permissions.viewAudit;
   const canSubmit = !disableAll;
   const canUploadAvatar = !disableCore;
+  const canOverrideStatus = permissions.editStatus || permissions.editFinance;
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [meta, setMeta] = useState<MembersMeta | null>(null);
   const exceptionReasons = meta?.contribution_exception_reasons ?? [];
@@ -99,6 +533,8 @@ function EditMemberInner() {
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [phoneDisplay, setPhoneDisplay] = useState("");
+  const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
   const [auditEntries, setAuditEntries] = useState<MemberAuditEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(true);
   const [selectedHousehold, setSelectedHousehold] = useState<string>("");
@@ -123,6 +559,154 @@ function EditMemberInner() {
   }, [serviceTypes]);
   const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const baselineMemberRef = useRef<MemberDetail | null>(null);
+  const [activeSection, setActiveSection] = useState<SectionId>("identity");
+  const [collapsedSections, setCollapsedSections] = useState<Record<SectionId, boolean>>({
+    identity: false,
+    membership: false,
+    sundaySchool: false,
+    contact: false,
+    household: false,
+    giving: true,
+    payments: true,
+    family: true,
+    ministries: false,
+    notes: false,
+  });
+  const sectionRefs = useRef<Record<SectionId, HTMLDivElement | null>>({
+    identity: null,
+    membership: null,
+    sundaySchool: null,
+    contact: null,
+    household: null,
+    giving: null,
+    payments: null,
+    family: null,
+    ministries: null,
+    notes: null,
+  });
+  const setSectionRef = useCallback(
+    (id: SectionId) => (node: HTMLDivElement | null) => {
+      sectionRefs.current[id] = node;
+    },
+    []
+  );
+  const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
+  const toggleSectionCollapse = useCallback((id: SectionId) => {
+    setCollapsedSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+  const scrollToSection = useCallback(
+    (id: SectionId) => {
+      if (collapsedSections[id]) {
+        setCollapsedSections((prev) => ({ ...prev, [id]: false }));
+      }
+      const target = sectionRefs.current[id];
+      if (!target) {
+        return;
+      }
+      const offset = 120;
+      const top = target.getBoundingClientRect().top + window.scrollY - offset;
+      window.scrollTo({ top, behavior: "smooth" });
+      setActiveSection(id);
+    },
+    [collapsedSections]
+  );
+  useEffect(() => {
+    const handleScroll = () => {
+      let closest: SectionId = SECTION_NAV_ITEMS[0].id;
+      let minDistance = Number.POSITIVE_INFINITY;
+      SECTION_NAV_ITEMS.forEach((section) => {
+        const node = sectionRefs.current[section.id];
+        if (!node) {
+          return;
+        }
+        const distance = Math.abs(node.getBoundingClientRect().top - 140);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closest = section.id;
+        }
+      });
+      setActiveSection((prev) => (prev === closest ? prev : closest));
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+  const memberAge = useMemo(() => {
+    if (!member?.birth_date) {
+      return null;
+    }
+    const birth = new Date(member.birth_date);
+    if (Number.isNaN(birth.getTime())) {
+      return null;
+    }
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const hasHadBirthday =
+      today.getMonth() > birth.getMonth() ||
+      (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+    if (!hasHadBirthday) {
+      age -= 1;
+    }
+    return age;
+  }, [member?.birth_date]);
+  const sundayStatusSummary = useMemo(() => {
+    const summary = {
+      upToDate: 0,
+      overdue: 0,
+      pending: 0,
+      notContributing: 0,
+    };
+    (member?.sunday_school_participants ?? []).forEach((participant) => {
+      if (participant.status === "Up to date") {
+        summary.upToDate += 1;
+      } else if (participant.status === "Overdue") {
+        summary.overdue += 1;
+      } else if (participant.status === "No payments yet") {
+        summary.pending += 1;
+      } else {
+        summary.notContributing += 1;
+      }
+    });
+    return summary;
+  }, [member?.sunday_school_participants]);
+  const quickActions = useMemo<QuickAction[]>(
+    () =>
+      !member?.id
+        ? []
+        : [
+            {
+              label: "View payments",
+              description: "Open ledger timeline",
+              disabled: !permissions.viewPayments,
+              onClick: () => navigate(`/payments/members/${member.id}`),
+              icon: <CreditCard className="h-4 w-4" />,
+            },
+            {
+              label: "View sponsorships",
+              description: "Jump to sponsorship dashboard",
+              disabled: !permissions.viewSponsorships,
+              onClick: () => navigate("/sponsorships"),
+              icon: <UsersRound className="h-4 w-4" />,
+            },
+            {
+              label: "Sunday School records",
+              description: "Review linked participants",
+              disabled: !permissions.viewSchools,
+              onClick: () => navigate(`/schools/sunday-school?member=${member.id}`),
+              icon: <BookOpen className="h-4 w-4" />,
+            },
+            {
+              label: "Schools workspace",
+              description: "Open Abenet / Sunday School",
+              disabled: !permissions.viewSchools,
+              onClick: () => navigate("/schools"),
+              icon: <GraduationCap className="h-4 w-4" />,
+            },
+          ],
+    [member?.id, navigate, permissions.viewPayments, permissions.viewSchools, permissions.viewSponsorships]
+  );
 
   const loadMemberPayments = useCallback(
     async (memberId: number) => {
@@ -174,6 +758,9 @@ function EditMemberInner() {
         })
       )
     );
+    const digits = extractCanadianDigits(details.phone);
+    setPhoneDisplay(formatCanadianPhoneDisplay(digits));
+    setPhoneAutoAdjusted(false);
   }, []);
 
   useEffect(() => {
@@ -211,8 +798,11 @@ function EditMemberInner() {
     const load = async () => {
       try {
         const data = await api<MemberDetail>(`/members/${id}`);
-        setMember(data);
-        initializeFormsFromMember(data);
+        const normalized = cloneMemberDetail(data);
+        setMember(normalized);
+        initializeFormsFromMember(normalized);
+        baselineMemberRef.current = cloneMemberDetail(data);
+        setHasUnsavedChanges(false);
       } catch (error) {
         console.error(error);
         toast.push("Failed to load member");
@@ -354,6 +944,10 @@ useEffect(() => {
 
   useEffect(() => {
     if (!member) return;
+    if (!hasUnsavedChanges) {
+      toast.push("No changes to save");
+      return;
+    }
     if (member.marital_status === "Married" && !spouseForm) {
       setSpouseForm({
         first_name: "",
@@ -371,12 +965,31 @@ useEffect(() => {
 
   const canDelete = user?.roles.some((role) => role === "Admin" || role === "PublicRelations");
 
-  const handleChange = (field: keyof MemberDetail) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange =
+    (field: keyof MemberDetail) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (disableCore) {
+        return;
+      }
+      const value = event.target.value;
+      setMember((prev) => (prev ? { ...prev, [field]: value } : prev));
+      markDirty();
+    };
+
+  const handlePhoneInputChange = (value: string) => {
     if (disableCore) {
+      setPhoneDisplay(value);
       return;
     }
-    setMember((prev) => prev ? { ...prev, [field]: event.target.value } : prev);
+    const normalized = normalizeCanadianInput(value);
+    setPhoneDisplay(formatCanadianPhoneDisplay(normalized.digits));
+    setPhoneAutoAdjusted(normalized.autoAdjusted);
+    setMember((prev) =>
+      prev ? { ...prev, phone: normalized.digits ? `${CANADIAN_COUNTRY_CODE}${normalized.digits}` : "" } : prev
+    );
+    markDirty();
   };
+
+  const acceptAutoAdjustedPhone = () => setPhoneAutoAdjusted(false);
 
 
   const handleHouseholdSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -396,13 +1009,7 @@ useEffect(() => {
       const household = meta?.households.find((item) => String(item.id) === value);
       return { ...prev, household: household ?? null };
     });
-  };
-
-  const handleStatusChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    if (disableStatus) {
-      return;
-    }
-    setMember((prev) => (prev ? { ...prev, status: event.target.value as MemberStatus } : prev));
+    markDirty();
   };
 
   const toggleBoolean = (field: "is_tither" | "pays_contribution" | "has_father_confessor") =>
@@ -422,6 +1029,7 @@ useEffect(() => {
         return;
       }
       setMember((prev) => (prev ? { ...prev, [field]: checked } : prev));
+      markDirty();
     };
 
   const updateSpouseField = (field: keyof SpouseFormState, value: string) => {
@@ -442,6 +1050,7 @@ useEffect(() => {
       }
       return { ...prev, [field]: value };
     });
+    markDirty();
   };
 
   const updateChildField = (key: string, field: keyof Omit<ChildFormState, "key">, value: string) => {
@@ -449,16 +1058,19 @@ useEffect(() => {
       return;
     }
     setChildrenForm((prev) => prev.map((child) => (child.key === key ? { ...child, [field]: value } : child)));
+    markDirty();
   };
 
   const addChild = () => {
     if (disableCore) return;
     setChildrenForm((prev) => [...prev, createChildFormState()]);
+    markDirty();
   };
 
   const removeChild = (key: string) => {
     if (disableCore) return;
     setChildrenForm((prev) => prev.filter((child) => child.key !== key));
+    markDirty();
   };
 
   const toggleTag = (tagId: number) => {
@@ -473,6 +1085,7 @@ useEffect(() => {
       if (!tag) return prev;
       return { ...prev, tags: [...prev.tags, tag] };
     });
+    markDirty();
   };
 
   const toggleMinistry = (ministryId: number) => {
@@ -487,6 +1100,7 @@ useEffect(() => {
       if (!ministry) return prev;
       return { ...prev, ministries: [...prev.ministries, ministry] };
     });
+    markDirty();
   };
 
   const handleContributionExceptionChange = (value: string) => {
@@ -501,6 +1115,40 @@ useEffect(() => {
         contribution_amount: nextAmount,
       };
     });
+    markDirty();
+  };
+
+  const handleOverrideToggle = (checked: boolean) => {
+    if (!canOverrideStatus || disableAll) {
+      return;
+    }
+    setMember((prev) => {
+      if (!prev) return prev;
+      const fallbackStatus = prev.membership_health?.effective_status ?? prev.status;
+      return {
+        ...prev,
+        status_override: checked,
+        status_override_value: checked ? prev.status_override_value ?? fallbackStatus : null,
+        status_override_reason: checked ? prev.status_override_reason ?? "" : null,
+      };
+    });
+    markDirty();
+  };
+
+  const handleOverrideStatusChange = (value: MemberStatus) => {
+    if (!canOverrideStatus || disableAll) {
+      return;
+    }
+    setMember((prev) => (prev ? { ...prev, status_override_value: value } : prev));
+    markDirty();
+  };
+
+  const handleOverrideReasonChange = (value: string) => {
+    if (!canOverrideStatus || disableAll) {
+      return;
+    }
+    setMember((prev) => (prev ? { ...prev, status_override_reason: value } : prev));
+    markDirty();
   };
 
   const handleRecordPayment = async () => {
@@ -545,6 +1193,16 @@ useEffect(() => {
     } finally {
       setSavingPayment(false);
     }
+  };
+
+  const handleCancelChanges = () => {
+    if (!baselineMemberRef.current) {
+      return;
+    }
+    const snapshot = cloneMemberDetail(baselineMemberRef.current);
+    setMember(snapshot);
+    initializeFormsFromMember(snapshot);
+    setHasUnsavedChanges(false);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -623,10 +1281,6 @@ useEffect(() => {
         payload.ministry_ids = member.ministries.map((ministry) => ministry.id);
       }
 
-      if (!disableStatus) {
-        payload.status = member.status;
-      }
-
       if (!disableFinance) {
         payload.is_tither = member.is_tither;
         payload.pays_contribution = true;
@@ -638,6 +1292,9 @@ useEffect(() => {
       if (!disableSpiritual) {
         payload.has_father_confessor = member.has_father_confessor;
       }
+      payload.status_override = member.status_override ?? false;
+      payload.status_override_value = member.status_override ? member.status_override_value ?? member.status : null;
+      payload.status_override_reason = member.status_override ? trimOrNull(member.status_override_reason) : null;
 
       if (selectedHousehold === "new") {
         const trimmed = newHouseholdName.trim();
@@ -690,10 +1347,13 @@ useEffect(() => {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
-      setMember(updated);
-      initializeFormsFromMember(updated);
-      await refreshAudit(updated.id);
-      toast.push("Member updated");
+      const normalized = cloneMemberDetail(updated);
+      setMember(normalized);
+      initializeFormsFromMember(normalized);
+      baselineMemberRef.current = cloneMemberDetail(updated);
+      setHasUnsavedChanges(false);
+      await refreshAudit(normalized.id);
+      toast.push("Changes saved");
     } catch (error) {
       console.error(error);
       toast.push("Failed to update member");
@@ -770,173 +1430,452 @@ useEffect(() => {
     return <div className="text-sm text-mute">Loading member…</div>;
   }
 
+  const membershipHealth = member.membership_health;
+  const membershipEvents = member.membership_events ?? [];
+  const overrideDisabled = disableAll || !canOverrideStatus;
+  const effectiveStatus = membershipHealth?.effective_status ?? member.status;
+  const initials = `${(member.first_name?.[0] ?? "").toUpperCase()}${(member.last_name?.[0] ?? "").toUpperCase()}`;
+  const statusChipClass = statusChipStyles[effectiveStatus] ?? "bg-slate-100 text-slate-600 ring-slate-200";
+  const headerSubtitle = `Username: ${member.username} · Member ID: ${member.id}`;
+  const statusDescription = membershipHealth
+    ? membershipHealth.override_active
+      ? `Manual override · Auto status ${membershipHealth.auto_status}`
+      : membershipHealth.days_until_due !== null && membershipHealth.days_until_due !== undefined
+        ? membershipHealth.days_until_due >= 0
+          ? `Next due in ${membershipHealth.days_until_due} days`
+          : `Overdue by ${Math.abs(membershipHealth.days_until_due)} days`
+        : "Automatic status"
+    : "";
+  const nextContributionLabel = membershipHealth?.next_due_at ? formatDate(membershipHealth.next_due_at) : "—";
+  const lastContributionLabel = membershipHealth?.last_paid_at ? formatDate(membershipHealth.last_paid_at) : "—";
+  const membershipSince = formatDate(member.join_date);
+  const addressSummary =
+    [
+      member.address,
+      member.address_street,
+      member.address_city,
+      member.address_region,
+      member.address_postal_code,
+      member.address_country,
+    ]
+      .filter(Boolean)
+      .join(", ") || "—";
+  const sundayParticipants = member.sunday_school_participants ?? [];
+  const sundayPayments = member.sunday_school_payments ?? [];
+  const sundayContributors = sundayParticipants.filter((participant) => participant.pays_contribution).length;
+  const contributionHistory = member.contribution_history ?? [];
+  const lastContributionDateLabel = contributionHistory.length ? formatDate(contributionHistory[0].paid_at) : "No payments yet";
+  const lastSundayPaymentLabel = sundayPayments.length ? formatDate(sundayPayments[0].posted_at) : "No payments yet";
+  const unsavedLabel = hasUnsavedChanges ? "Unsaved changes" : "All changes saved";
+
   return (
-    <Card className="p-6 max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" onClick={() => navigate(-1)}>
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-          <div>
-            <h2 className="text-xl font-semibold">{member.first_name} {member.last_name}</h2>
-            <div className="text-xs text-mute">{member.username}</div>
-          </div>
-          <Badge>{member.status}</Badge>
-        </div>
-        {canDelete && (
-          <Button variant="ghost" onClick={handleDelete} disabled={deleting}>
-            <Trash2 className="w-4 h-4 mr-1" /> Archive
-          </Button>
-        )}
-      </div>
-      {disableAll && (
-        <div className="border border-amber-200 bg-amber-50 text-amber-900 rounded-lg p-4 flex items-start gap-3">
-          <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
-          <div>
-            <div className="font-medium">Read-only access</div>
-            <p className="text-sm leading-relaxed">
-              You can review this member&apos;s record, but updates are limited to Registrar or PR Admin roles.
-            </p>
-          </div>
-        </div>
-      )}
-      <div className="grid gap-6 md:grid-cols-[260px,1fr]">
-        <div className="space-y-4">
-          <div className="border rounded-lg p-4 text-center space-y-3">
-            <div className="mx-auto h-40 w-40 rounded-full bg-muted overflow-hidden flex items-center justify-center">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt={`${member.first_name} ${member.last_name}`} className="h-full w-full object-cover" />
-              ) : (
-                <span className="text-sm text-mute">No avatar</span>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Button variant="soft" onClick={handleAvatarPick} disabled={avatarUploading || !canUploadAvatar}>
-                {avatarUploading ? "Uploading…" : "Upload Avatar"}
-              </Button>
-              <input
-                ref={avatarInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={handleAvatarChange}
-              />
-              <p className="text-xs text-mute">PNG, JPEG, or WEBP up to 5MB.</p>
-              {!canUploadAvatar && (
-                <p className="text-xs text-mute">
-                  Avatar updates are limited to Registrar and Admin roles.
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full px-3">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Back
+            </Button>
+            <div className="flex flex-col">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-lg font-semibold tracking-tight">
+                  {member.first_name} {member.last_name}
+                </h1>
+                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${statusChipClass}`}>
+                  {effectiveStatus}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">{headerSubtitle}</p>
+              {statusDescription && (
+                <p
+                  className={`text-xs ${membershipHealth?.override_active ? "text-amber-600" : "text-slate-500"}`}
+                >
+                  {statusDescription}
                 </p>
               )}
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            {canDelete && (
+              <Button variant="ghost" onClick={handleDelete} disabled={deleting} className="rounded-full">
+                <Trash2 className="mr-1 h-4 w-4" />
+                Archive
+              </Button>
+            )}
+            <Button type="submit" form="member-form" disabled={updating || !canSubmit} className="rounded-full px-5">
+              {updating ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
         </div>
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Identity</h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">First name</label>
-                <Input value={member.first_name} onChange={handleChange("first_name")} required disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Last name</label>
-                <Input value={member.last_name} onChange={handleChange("last_name")} required disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Middle name</label>
-                <Input value={member.middle_name ?? ""} onChange={handleChange("middle_name")} disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Baptismal name</label>
-                <Input value={member.baptismal_name ?? ""} onChange={handleChange("baptismal_name")} disabled={disableCore} />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Username</label>
-                <Input value={member.username} disabled readOnly />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Gender</label>
-                <Select
-                  value={member.gender ?? ""}
-                  onChange={(event) => {
-                    if (disableCore) return;
-                    setMember((prev) => (prev ? { ...prev, gender: event.target.value || null } : prev));
-                  }}
-                  disabled={disableCore}
-                >
-                  <option value="">No gender</option>
-                  {(meta?.genders ?? []).map((gender) => (
-                    <option key={gender} value={gender}>
-                      {gender}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Marital status</label>
-                <Select
-                  value={member.marital_status ?? ""}
-                  onChange={(event) => {
-                    if (disableCore) return;
-                    setMember((prev) => (prev ? { ...prev, marital_status: event.target.value || null } : prev));
-                  }}
-                  disabled={disableCore}
-                >
-                  <option value="">Not set</option>
-                  {(meta?.marital_statuses ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-              <label className="text-xs uppercase text-mute">Membership status</label>
-              <Select value={member.status} onChange={handleStatusChange} disabled={disableStatus}>
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-              {disableStatus && (
-                <p className="text-xs text-mute mt-1">Status changes require PR Admin approval.</p>
-              )}
-            </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Date of birth</label>
-                <Input
-                  type="date"
-                  value={member.birth_date ?? ""}
-                  onChange={(event) => {
-                    if (disableCore) return;
-                    setMember((prev) => (prev ? { ...prev, birth_date: event.target.value || null } : prev));
-                  }}
-                  disabled={disableCore}
-                />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Membership date</label>
-                <Input
-                  type="date"
-                  value={member.join_date ?? ""}
-                  onChange={(event) => {
-                    if (disableCore) return;
-                    setMember((prev) => (prev ? { ...prev, join_date: event.target.value || null } : prev));
-                  }}
-                  disabled={disableCore}
-                />
-              </div>
-            </div>
-          </section>
+      </header>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Contact & Address</h3>
+      <main className="flex-1">
+        <div className="mx-auto max-w-6xl px-4 py-4 space-y-6">
+          {disableAll && (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 rounded-lg p-4 flex items-start gap-3">
+              <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium">Read-only access</div>
+                <p className="text-sm leading-relaxed">
+                  You can review this member&apos;s record, but updates are limited to Registrar or PR Admin roles.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <nav className="border border-slate-200 bg-white rounded-full px-2 py-1 overflow-x-auto">
+            <div className="flex gap-1">
+              {SECTION_NAV_ITEMS.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => scrollToSection(section.id)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                    activeSection === section.id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+            <div className="space-y-6">
+              <form id="member-form" className="space-y-6" onSubmit={handleSubmit}>
+                  <SectionCard
+                    id="identity"
+                    ref={setSectionRef("identity")}
+                    title="Identity"
+                    subtitle="Core profile details and membership status"
+                    collapsed={collapsedSections.identity}
+                    onToggle={() => toggleSectionCollapse("identity")}
+                  >
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs uppercase text-mute">First name</label>
+                        <Input value={member.first_name} onChange={handleChange("first_name")} required disabled={disableCore} />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Last name</label>
+                        <Input value={member.last_name} onChange={handleChange("last_name")} required disabled={disableCore} />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Middle name</label>
+                        <Input value={member.middle_name ?? ""} onChange={handleChange("middle_name")} disabled={disableCore} />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Baptismal name</label>
+                        <Input value={member.baptismal_name ?? ""} onChange={handleChange("baptismal_name")} disabled={disableCore} />
+                      </div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs uppercase text-mute">Username</label>
+                        <Input value={member.username} disabled readOnly />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Gender</label>
+                        <Select
+                          value={member.gender ?? ""}
+                          onChange={(event) => {
+                            if (disableCore) return;
+                            setMember((prev) => (prev ? { ...prev, gender: event.target.value || null } : prev));
+                            markDirty();
+                          }}
+                          disabled={disableCore}
+                        >
+                          <option value="">Not set</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Marital status</label>
+                        <Select
+                          value={member.marital_status ?? ""}
+                          onChange={(event) => {
+                            if (disableCore) return;
+                            setMember((prev) => (prev ? { ...prev, marital_status: event.target.value || null } : prev));
+                            markDirty();
+                          }}
+                          disabled={disableCore}
+                        >
+                          <option value="">Not set</option>
+                          {(meta?.marital_statuses ?? []).map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs uppercase text-mute">Date of birth</label>
+                        <Input
+                          type="date"
+                          value={member.birth_date ?? ""}
+                          onChange={(event) => {
+                            if (disableCore) return;
+                            setMember((prev) => (prev ? { ...prev, birth_date: event.target.value || null } : prev));
+                            markDirty();
+                          }}
+                          disabled={disableCore}
+                        />
+                        <p className="text-xs text-mute mt-1">{memberAge !== null ? `${memberAge} years old` : "Age calculated automatically"}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Membership date</label>
+                        <Input
+                          type="date"
+                          value={member.join_date ?? ""}
+                          onChange={(event) => {
+                            if (disableCore) return;
+                            setMember((prev) => (prev ? { ...prev, join_date: event.target.value || null } : prev));
+                            markDirty();
+                          }}
+                          disabled={disableCore}
+                        />
+                  </div>
+                </div>
+              </SectionCard>
+              <SectionCard
+                id="membership"
+                ref={setSectionRef("membership")}
+                title="Membership health"
+                subtitle="Status follows monthly contribution payments"
+                collapsed={collapsedSections.membership}
+                onToggle={() => toggleSectionCollapse("membership")}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <div className="text-xs uppercase text-mute">Effective status</div>
+                    <div className="text-base font-semibold text-slate-900">{effectiveStatus}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-mute">Auto status</div>
+                    <div className="text-sm text-slate-700">{membershipHealth?.auto_status ?? "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-mute">Last payment</div>
+                    <div>{lastContributionLabel}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-mute">Next due</div>
+                    <div>{nextContributionLabel}</div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase text-slate-500">Next payment</div>
+                    <div className="text-base font-semibold text-slate-900">{nextContributionLabel}</div>
+                  </div>
+                  <div
+                    className={`text-sm font-semibold ${
+                      membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                        ? membershipHealth.days_until_due >= 0
+                          ? "text-emerald-700"
+                          : "text-rose-700"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                      ? membershipHealth.days_until_due >= 0
+                        ? `${membershipHealth.days_until_due} days remaining`
+                        : `${Math.abs(membershipHealth.days_until_due)} days overdue`
+                      : "No schedule"}
+                  </div>
+                </div>
+                {membershipHealth?.override_active && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    Manual override active
+                    {member.status_override_reason ? ` — ${member.status_override_reason}` : ""}
+                  </div>
+                )}
+                {membershipHealth?.overdue_days && membershipHealth.overdue_days > 0 && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                    Contribution overdue by {membershipHealth.overdue_days} days. Record a payment to reactivate status.
+                  </div>
+                )}
+                {canOverrideStatus && (
+                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs uppercase text-mute">Manual override</label>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          className="accent-accent"
+                          checked={member.status_override ?? false}
+                          onChange={(event) => handleOverrideToggle(event.target.checked)}
+                          disabled={overrideDisabled}
+                        />
+                        Keep status fixed regardless of payments
+                      </label>
+                    </div>
+                    {member.status_override && (
+                      <>
+                        <Select
+                          value={member.status_override_value ?? effectiveStatus}
+                          onChange={(event) => handleOverrideStatusChange(event.target.value as MemberStatus)}
+                          disabled={overrideDisabled}
+                        >
+                          {STATUS_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Select>
+                        <Input
+                          value={member.status_override_reason ?? ""}
+                          onChange={(event) => handleOverrideReasonChange(event.target.value)}
+                          placeholder="Reason (optional)"
+                          disabled={overrideDisabled}
+                        />
+                      </>
+                    )}
+                    <p className="text-[11px] text-slate-500">
+                      Overrides should be used sparingly. Status will return to automatic once overrides are disabled.
+                    </p>
+                  </div>
+                )}
+              </SectionCard>
+                  <SectionCard
+                    id="sundaySchool"
+                    ref={setSectionRef("sundaySchool")}
+                    title="Sunday school"
+                    subtitle="Linked participants and contribution health"
+                    collapsed={collapsedSections.sundaySchool}
+                    onToggle={() => toggleSectionCollapse("sundaySchool")}
+                    actions={
+                      permissions.manageSchools ? (
+                        <Button
+                          type="button"
+                          variant="soft"
+                          className="rounded-full px-3 py-1 text-xs font-semibold"
+                          onClick={() => navigate("/schools/sunday-school")}
+                        >
+                          Add participant
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    <div className="grid gap-3 sm:grid-cols-4 text-sm">
+                      <div className="rounded-xl bg-slate-50 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Linked</p>
+                        <p className="text-lg font-semibold text-slate-900">{sundayParticipants.length}</p>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-wide text-emerald-700">Up to date</p>
+                        <p className="text-lg font-semibold text-emerald-700">{sundayStatusSummary.upToDate}</p>
+                      </div>
+                      <div className="rounded-xl bg-amber-50 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-wide text-amber-700">Pending</p>
+                        <p className="text-lg font-semibold text-amber-700">{sundayStatusSummary.pending}</p>
+                      </div>
+                      <div className="rounded-xl bg-rose-50 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-wide text-rose-700">Overdue</p>
+                        <p className="text-lg font-semibold text-rose-700">{sundayStatusSummary.overdue}</p>
+                      </div>
+                    </div>
+                    {!sundayParticipants.length ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                        No Sunday School participants linked yet. Use the Sunday School workspace to enroll a child, youth, or adult.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {sundayParticipants.map((participant) => (
+                          <div key={participant.id} className="rounded-xl border border-slate-200 bg-white/70 p-4 space-y-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold text-slate-900">
+                                  {participant.first_name} {participant.last_name}
+                                </div>
+                                <p className="text-xs text-slate-500">
+                                  {participant.category} · Username {participant.member_username}
+                                </p>
+                              </div>
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                  SUNDAY_STATUS_STYLES[participant.status]
+                                }`}
+                              >
+                                {participant.status}
+                              </span>
+                            </div>
+                            <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                              <div>
+                                <dt className="text-xs uppercase text-slate-500">Monthly amount</dt>
+                                <dd className="font-medium">
+                                  {participant.monthly_amount !== null && participant.monthly_amount !== undefined
+                                    ? `${member.contribution_currency} ${participant.monthly_amount.toFixed(2)}`
+                                    : "—"}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs uppercase text-slate-500">Preferred method</dt>
+                                <dd className="font-medium">{participant.payment_method || "—"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs uppercase text-slate-500">Last payment</dt>
+                                <dd className="font-medium">{formatDate(participant.last_payment_at)}</dd>
+                              </div>
+                            </dl>
+                            <p className="text-xs text-slate-500">
+                              {participant.pays_contribution
+                                ? "Contribution enabled for this participant."
+                                : "Marked as not contributing to Sunday School fees."}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {permissions.viewPayments && sundayPayments.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Recent payments</h4>
+                        <div className="space-y-2">
+                          {sundayPayments.slice(0, 3).map((payment) => (
+                            <div
+                              key={payment.id}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                            >
+                              <div>
+                                <div className="font-medium text-slate-900">{payment.service_type_label}</div>
+                                <div className="text-xs text-slate-500">{new Date(payment.posted_at).toLocaleDateString()}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-semibold">
+                                  {payment.currency}{" "}
+                                  {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-xs text-slate-500">{payment.method || "—"}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {permissions.viewSchools && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="rounded-full px-4"
+                        onClick={() => navigate(`/schools/sunday-school?member=${member.id}`)}
+                      >
+                        Open Sunday School workspace
+                      </Button>
+                    )}
+                  </SectionCard>
+
+          <SectionCard
+            id="contact"
+            ref={setSectionRef("contact")}
+            title="Contact & address"
+            subtitle="Primary communication info plus duplicate detection"
+            collapsed={collapsedSections.contact}
+            onToggle={() => toggleSectionCollapse("contact")}
+          >
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs uppercase text-mute">Email</label>
@@ -944,7 +1883,30 @@ useEffect(() => {
               </div>
               <div>
                 <label className="text-xs uppercase text-mute">Phone</label>
-                <Input value={member.phone} onChange={handleChange("phone")} required disabled={disableCore} />
+                <div className="flex gap-2">
+                  <span className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
+                    {CANADA_FLAG} {CANADIAN_COUNTRY_CODE}
+                  </span>
+                  <Input
+                    value={phoneDisplay}
+                    onChange={(event) => handlePhoneInputChange(event.target.value)}
+                    required
+                    disabled={disableCore}
+                    placeholder="(613) 555-0199"
+                  />
+                </div>
+                {phoneAutoAdjusted && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+                    Auto-adjusted to Canadian format. Accept?
+                    <button
+                      type="button"
+                      className="font-semibold underline hover:text-amber-900"
+                      onClick={acceptAutoAdjustedPhone}
+                    >
+                      Accept
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs uppercase text-mute">District</label>
@@ -1008,10 +1970,16 @@ useEffect(() => {
                 </Card>
               )}
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Household & Faith</h3>
+          <SectionCard
+            id="household"
+            ref={setSectionRef("household")}
+            title="Household & faith"
+            subtitle="Household membership and father confessor context"
+            collapsed={collapsedSections.household}
+            onToggle={() => toggleSectionCollapse("household")}
+          >
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs uppercase text-mute">Household</label>
@@ -1032,6 +2000,7 @@ useEffect(() => {
                       onChange={(event) => {
                         if (disableCore) return;
                         setNewHouseholdName(event.target.value);
+                        markDirty();
                       }}
                       placeholder="Household name"
                       disabled={disableCore}
@@ -1058,6 +2027,7 @@ useEffect(() => {
                           }
                         : prev
                     );
+                    markDirty();
                   }}
                   disabled={disableCore}
                 />
@@ -1080,6 +2050,7 @@ useEffect(() => {
                     if (!checked) {
                       setFatherConfessorId("");
                     }
+                    markDirty();
                   }}
                   disabled={disableSpiritual}
                 />
@@ -1089,7 +2060,10 @@ useEffect(() => {
                 <Select
                   className="md:w-72"
                   value={fatherConfessorId}
-                  onChange={(event) => setFatherConfessorId(event.target.value)}
+                  onChange={(event) => {
+                    setFatherConfessorId(event.target.value);
+                    markDirty();
+                  }}
                   required
                   disabled={disableSpiritual}
                 >
@@ -1105,10 +2079,16 @@ useEffect(() => {
                 <p className="text-xs text-mute">Registrar or PR Admin must manage Father Confessor assignments.</p>
               )}
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Giving & Contributions</h3>
+          <SectionCard
+            id="giving"
+            ref={setSectionRef("giving")}
+            title="Giving & contributions"
+            subtitle="Finance admins keep contribution data in sync here"
+            collapsed={collapsedSections.giving}
+            onToggle={() => toggleSectionCollapse("giving")}
+          >
             <div className="flex flex-wrap gap-4">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -1139,6 +2119,7 @@ useEffect(() => {
                   onChange={(event) => {
                     if (disableFinance) return;
                     setMember((prev) => (prev ? { ...prev, contribution_method: event.target.value || null } : prev));
+                    markDirty();
                   }}
                   disabled={disableFinance}
                 >
@@ -1169,6 +2150,7 @@ useEffect(() => {
                           }
                         : prev
                     );
+                    markDirty();
                   }}
                   disabled={disableFinance || !member.contribution_exception_reason}
                 />
@@ -1199,15 +2181,63 @@ useEffect(() => {
                 Finance Admin permissions are required to adjust giving details.
               </p>
             )}
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold uppercase tracking-wide">Financial Activity</h3>
-              {permissions.viewPayments && member?.id && (
+          <SectionCard
+            id="payments"
+            ref={setSectionRef("payments")}
+            title="Financial activity"
+            subtitle="Ledger history and quick entry"
+            collapsed={collapsedSections.payments}
+            onToggle={() => toggleSectionCollapse("payments")}
+            actions={
+              permissions.viewPayments && member?.id ? (
                 <Button type="button" variant="ghost" onClick={() => navigate(`/payments/members/${member.id}`)}>
                   View payment timeline
                 </Button>
+              ) : undefined
+            }
+          >
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase text-slate-500">Next contribution due</div>
+                  <div className="text-base font-semibold text-slate-900">{nextContributionLabel}</div>
+                </div>
+                <div
+                  className={`text-sm font-semibold ${
+                    membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                      ? membershipHealth.days_until_due >= 0
+                        ? "text-emerald-700"
+                        : "text-rose-700"
+                      : "text-slate-500"
+                  }`}
+                >
+                  {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                    ? membershipHealth.days_until_due >= 0
+                      ? `${membershipHealth.days_until_due} days`
+                      : `${Math.abs(membershipHealth.days_until_due)} days overdue`
+                    : "No schedule"}
+                </div>
+              </div>
+              {membershipEvents.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Status activity</h4>
+                  <div className="space-y-2">
+                    {membershipEvents.slice(0, 5).map((event) => (
+                      <div key={`${event.type}-${event.timestamp}`} className="rounded-xl border border-slate-200 px-3 py-2">
+                        <div className="flex items-center justify-between text-[11px] uppercase text-slate-500">
+                          <span>{formatDate(event.timestamp)}</span>
+                          <span>{event.type}</span>
+                        </div>
+                        <div className="text-sm font-semibold text-slate-900">{event.label}</div>
+                        {event.description && (
+                          <div className="text-xs text-slate-500">{event.description}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
             {!permissions.viewPayments ? (
@@ -1311,76 +2341,61 @@ useEffect(() => {
                 </div>
               </div>
             )}
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Family</h3>
+          <SectionCard
+            id="family"
+            ref={setSectionRef("family")}
+            title="Family"
+            subtitle="Spouse + children context stays synced with membership records"
+            collapsed={collapsedSections.family}
+            onToggle={() => toggleSectionCollapse("family")}
+          >
             {member.marital_status === "Married" ? (
-              <div className="border border-border rounded-lg p-4 space-y-3">
-                <h4 className="text-xs uppercase text-mute">Spouse</h4>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                <h4 className="text-xs uppercase text-mute tracking-wide">Spouse</h4>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs uppercase text-mute">First name</label>
-                    <Input
-                      value={spouseForm?.first_name ?? ""}
-                      onChange={(event) => updateSpouseField("first_name", event.target.value)}
-                    />
+                    <Input value={spouseForm?.first_name ?? ""} onChange={(event) => updateSpouseField("first_name", event.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute">Last name</label>
-                    <Input
-                      value={spouseForm?.last_name ?? ""}
-                      onChange={(event) => updateSpouseField("last_name", event.target.value)}
-                    />
+                    <Input value={spouseForm?.last_name ?? ""} onChange={(event) => updateSpouseField("last_name", event.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute">Gender</label>
-                    <Select
-                      value={spouseForm?.gender ?? ""}
-                      onChange={(event) => updateSpouseField("gender", event.target.value)}
-                    >
+                    <Select value={spouseForm?.gender ?? ""} onChange={(event) => updateSpouseField("gender", event.target.value)}>
                       <option value="">Not set</option>
-                      {(meta?.genders ?? []).map((gender) => (
-                        <option key={gender} value={gender}>
-                          {gender}
-                        </option>
-                      ))}
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
                     </Select>
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute">Country of birth</label>
-                    <Input
-                      value={spouseForm?.country_of_birth ?? ""}
-                      onChange={(event) => updateSpouseField("country_of_birth", event.target.value)}
-                    />
+                    <Input value={spouseForm?.country_of_birth ?? ""} onChange={(event) => updateSpouseField("country_of_birth", event.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute">Phone</label>
-                    <Input
-                      value={spouseForm?.phone ?? ""}
-                      onChange={(event) => updateSpouseField("phone", event.target.value)}
-                    />
+                    <Input value={spouseForm?.phone ?? ""} onChange={(event) => updateSpouseField("phone", event.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute">Email</label>
-                    <Input
-                      value={spouseForm?.email ?? ""}
-                      onChange={(event) => updateSpouseField("email", event.target.value)}
-                      type="email"
-                    />
+                    <Input value={spouseForm?.email ?? ""} onChange={(event) => updateSpouseField("email", event.target.value)} type="email" />
                   </div>
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-mute">
-                Spouse information is required only when marital status is set to Married.
-              </p>
+              <p className="text-xs text-mute">Spouse information is required only when marital status is set to Married.</p>
             )}
 
-            <div className="border border-border rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs uppercase text-mute">Children</h4>
-                <Button type="button" variant="soft" onClick={addChild}>
+            <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs uppercase text-mute tracking-wide">Children</h4>
+                  <p className="text-[11px] text-slate-500">Track household dependents for Sunday School and sponsorship links.</p>
+                </div>
+                <Button type="button" variant="soft" onClick={addChild} className="rounded-full px-4">
                   Add child
                 </Button>
               </div>
@@ -1389,68 +2404,44 @@ useEffect(() => {
               ) : (
                 <div className="space-y-4">
                   {childrenForm.map((child) => (
-                    <div key={child.key} className="border border-border/70 rounded-lg p-3 space-y-3">
-                      <div className="flex items-center justify-between">
+                    <div key={child.key} className="rounded-lg border border-slate-200/70 p-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="text-xs uppercase text-mute">Child</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="text-red-500"
-                          onClick={() => removeChild(child.key)}
-                        >
+                        <Button type="button" variant="ghost" className="text-red-500" onClick={() => removeChild(child.key)}>
                           <Trash2 className="h-4 w-4" />
+                          Remove
                         </Button>
                       </div>
                       <div className="grid md:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs uppercase text-mute">First name</label>
-                          <Input
-                            value={child.first_name}
-                            onChange={(event) => updateChildField(child.key, "first_name", event.target.value)}
-                          />
+                          <Input value={child.first_name} onChange={(event) => updateChildField(child.key, "first_name", event.target.value)} />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Last name</label>
-                          <Input
-                            value={child.last_name}
-                            onChange={(event) => updateChildField(child.key, "last_name", event.target.value)}
-                          />
+                          <Input value={child.last_name} onChange={(event) => updateChildField(child.key, "last_name", event.target.value)} />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Gender</label>
-                          <Select
-                            value={child.gender}
-                            onChange={(event) => updateChildField(child.key, "gender", event.target.value)}
-                          >
+                          <Select value={child.gender} onChange={(event) => updateChildField(child.key, "gender", event.target.value)}>
                             <option value="">Not set</option>
-                            {(meta?.genders ?? []).map((gender) => (
-                              <option key={gender} value={gender}>
-                                {gender}
-                              </option>
-                            ))}
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
                           </Select>
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Birth date</label>
-                          <Input
-                            type="date"
-                            value={child.birth_date}
-                            onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)}
-                          />
+                          <Input type="date" value={child.birth_date} onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)} />
                         </div>
+                      </div>
+                      <div className="grid md:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs uppercase text-mute">Country of birth</label>
-                          <Input
-                            value={child.country_of_birth}
-                            onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)}
-                          />
+                          <Input value={child.country_of_birth} onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)} />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Notes</label>
-                          <Input
-                            value={child.notes}
-                            onChange={(event) => updateChildField(child.key, "notes", event.target.value)}
-                          />
+                          <Input value={child.notes} onChange={(event) => updateChildField(child.key, "notes", event.target.value)} />
                         </div>
                       </div>
                     </div>
@@ -1458,76 +2449,81 @@ useEffect(() => {
                 </div>
               )}
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Tags</h3>
-            <div className="mt-2 space-y-2">
-              {metaLoading && <div className="text-xs text-mute">Loading tags…</div>}
-              {!metaLoading && meta && meta.tags.length > 0 && (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {meta.tags.map((tag) => {
-                    const checked = member.tags.some((assigned) => assigned.id === tag.id);
-                    return (
-                      <label
-                        key={tag.id}
-                        className="flex items-center gap-2 rounded-lg border border-border bg-card/60 p-2 text-sm cursor-pointer"
-                      >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleTag(tag.id)}
-                        className="accent-accent"
-                        disabled={disableCore}
-                      />
-                        <span>{tag.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-              {!metaLoading && meta && meta.tags.length === 0 && (
-                <div className="text-xs text-mute">No tags available yet.</div>
-              )}
+          <SectionCard
+            id="ministries"
+            ref={setSectionRef("ministries")}
+            title="Tags & ministries"
+            subtitle="Chip selectors keep roles + cohorts tidy"
+            collapsed={collapsedSections.ministries}
+            onToggle={() => toggleSectionCollapse("ministries")}
+          >
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-xs uppercase text-mute mb-2">Tags</h4>
+                {metaLoading && <div className="text-xs text-mute">Loading tags…</div>}
+                {!metaLoading && meta && meta.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {meta.tags.map((tag) => {
+                      const checked = member.tags.some((assigned) => assigned.id === tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleTag(tag.id)}
+                          disabled={disableCore}
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-white text-slate-600"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
+                        >
+                          {tag.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {!metaLoading && meta && meta.tags.length === 0 && (
+                  <div className="text-xs text-mute">No tags available yet.</div>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-xs uppercase text-mute mb-2">Ministries</h4>
+                {metaLoading && <div className="text-xs text-mute">Loading ministries…</div>}
+                {!metaLoading && meta && meta.ministries.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {meta.ministries.map((ministry) => {
+                      const checked = member.ministries.some((assigned) => assigned.id === ministry.id);
+                      return (
+                        <button
+                          key={ministry.id}
+                          type="button"
+                          onClick={() => toggleMinistry(ministry.id)}
+                          disabled={disableCore}
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-white text-slate-600"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
+                        >
+                          {ministry.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {!metaLoading && meta && meta.ministries.length === 0 && (
+                  <div className="text-xs text-mute">No ministries available yet.</div>
+                )}
+              </div>
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Ministries</h3>
-            <div className="mt-2 space-y-2">
-              {metaLoading && <div className="text-xs text-mute">Loading ministries…</div>}
-              {!metaLoading && meta && meta.ministries.length > 0 && (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {meta.ministries.map((ministry) => {
-                    const checked = member.ministries.some((assigned) => assigned.id === ministry.id);
-                    return (
-                      <label
-                        key={ministry.id}
-                        className="flex items-center gap-2 rounded-lg border border-border bg-card/60 p-2 text-sm cursor-pointer"
-                      >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleMinistry(ministry.id)}
-                        className="accent-accent"
-                        disabled={disableCore}
-                      />
-                        <span>{ministry.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-              {!metaLoading && meta && meta.ministries.length === 0 && (
-                <div className="text-xs text-mute">No ministries available yet.</div>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Notes</h3>
+          <SectionCard
+            id="notes"
+            ref={setSectionRef("notes")}
+            title="Notes"
+            subtitle="Internal-only remarks visible to registrar roles"
+            collapsed={collapsedSections.notes}
+            onToggle={() => toggleSectionCollapse("notes")}
+          >
             <Textarea rows={3} value={member.notes ?? ""} onChange={handleChange("notes")} disabled={disableCore} />
-          </section>
+          </SectionCard>
 
           <div className="flex justify-end">
             <Button type="submit" disabled={updating || !canSubmit}>
@@ -1535,142 +2531,50 @@ useEffect(() => {
             </Button>
           </div>
         </form>
+        <SummaryCards member={member} formatDate={formatDate} />
+        <AuditTrailCard auditLoading={auditLoading} auditEntries={auditEntries} />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="border rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide">Household & Ministries</h3>
-          <div className="text-sm">
-            <div className="text-xs uppercase text-mute">Household</div>
-            {member.household ? (
-              <div className="font-medium">{member.household.name}</div>
-            ) : (
-              <div className="text-mute">No household assigned</div>
-            )}
-          </div>
-          <div className="text-sm">
-            <div className="text-xs uppercase text-mute">Tags</div>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {member.tags.length > 0 ? (
-                member.tags.map((tag) => (
-                  <Badge key={tag.id} className="normal-case">
-                    {tag.name}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-mute text-xs">No tags yet</span>
-              )}
-            </div>
-          </div>
-          <div className="text-sm">
-            <div className="text-xs uppercase text-mute">Ministries</div>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {member.ministries.length > 0 ? (
-                member.ministries.map((ministry) => (
-                  <Badge key={ministry.id} className="normal-case">
-                    {ministry.name}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-mute text-xs">No ministries yet</span>
-              )}
-            </div>
+    <aside className="space-y-4">
+      <AvatarCard
+        avatarUrl={avatarUrl}
+        initials={initials}
+        canUpload={canUploadAvatar}
+        uploading={avatarUploading}
+        onUploadClick={handleAvatarPick}
+        inputRef={avatarInputRef}
+        onFileChange={handleAvatarChange}
+      />
+      <QuickActionsCard actions={quickActions} />
+      <SnapshotCard
+        memberAge={memberAge}
+        membershipSince={membershipSince}
+        sundayLinkedCount={sundayParticipants.length}
+        sundaySummary={sundayStatusSummary}
+        sundayContributors={sundayContributors}
+        lastContributionDate={lastContributionDateLabel}
+        lastSundayPayment={lastSundayPaymentLabel}
+        addressSummary={addressSummary}
+        isTither={member.is_tither}
+        paysContribution={member.pays_contribution}
+      />
+    </aside>
           </div>
         </div>
-        <div className="border rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide">Profile Snapshot</h3>
-          <div className="grid md:grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-xs uppercase text-mute">Gender</div>
-              <div>{member.gender || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Marital status</div>
-              <div>{member.marital_status || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">District</div>
-              <div>{member.district || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Family count</div>
-              <div>{member.family_count}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Birth date</div>
-              <div>{formatDate(member.birth_date)}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Membership date</div>
-              <div>{formatDate(member.join_date)}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Father confessor</div>
-              <div>{member.father_confessor?.full_name ?? (member.has_father_confessor ? "Assigned" : "—")}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase text-mute">Giving</div>
-              <div>
-                {member.is_tither ? "Tither" : "Non-tither"}
-                {" · "}
-                {member.pays_contribution ? "Gives contribution" : "Contribution pending"}
-              </div>
-            </div>
-            <div className="md:col-span-2">
-              <div className="text-xs uppercase text-mute">Contribution details</div>
-              <div>
-                {member.contribution_method || "—"}
-                {member.contribution_amount !== null && member.contribution_amount !== undefined && (
-                  <span>
-                    {" · "}
-                    {member.contribution_currency} {member.contribution_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                )}
-                {member.contribution_exception_reason && (
-                  <span className="text-amber-600"> · {member.contribution_exception_reason === "LowIncome" ? "Low income" : member.contribution_exception_reason} exception</span>
-                )}
-              </div>
-            </div>
-            <div className="md:col-span-2">
-              <div className="text-xs uppercase text-mute">Address</div>
-              <div>
-                {[
-                  member.address,
-                  member.address_street,
-                  member.address_city,
-                  member.address_region,
-                  member.address_postal_code,
-                  member.address_country,
-                ]
-                  .filter(Boolean)
-                  .join(", ") || "—"}
-              </div>
-            </div>
+      </main>
+
+      <footer className="sticky bottom-0 border-t border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>{unsavedLabel}</span>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="ghost" onClick={handleCancelChanges} className="rounded-full px-4">
+              Cancel
+            </Button>
+            <Button type="submit" form="member-form" disabled={updating || !canSubmit} className="rounded-full px-5">
+              {updating ? "Saving…" : "Save changes"}
+            </Button>
           </div>
         </div>
-      </div>
-      <div className="border rounded-lg p-4 space-y-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide">Audit Trail</h3>
-        {auditLoading ? (
-          <div className="text-sm text-mute">Loading audit entries…</div>
-        ) : auditEntries.length === 0 ? (
-          <div className="text-sm text-mute">No changes recorded yet.</div>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {auditEntries.map((entry, index) => (
-              <li key={`${entry.changed_at}-${index}`} className="border rounded-md p-3">
-                <div className="flex items-center justify-between text-xs text-mute">
-                  <span>{new Date(entry.changed_at).toLocaleString()}</span>
-                  <span>{entry.actor}</span>
-                </div>
-                <div className="mt-1 font-medium">{entry.action.toUpperCase()} {entry.field}</div>
-                <div className="text-xs text-mute">
-                  {entry.old_value ?? "—"} → {entry.new_value ?? "—"}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Card>
+      </footer>
+    </div>
   );
 }

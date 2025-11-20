@@ -21,6 +21,8 @@ export type PermissionMap = {
   manageSponsorships: boolean;
   viewNewcomers: boolean;
   manageNewcomers: boolean;
+  viewSchools: boolean;
+  manageSchools: boolean;
 };
 
 const BASE_PERMISSIONS: PermissionMap = {
@@ -42,6 +44,8 @@ const BASE_PERMISSIONS: PermissionMap = {
   manageSponsorships: false,
   viewNewcomers: false,
   manageNewcomers: false,
+  viewSchools: false,
+  manageSchools: false,
 };
 
 const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
@@ -64,6 +68,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewSchools: true,
+    manageSchools: true,
   },
   PublicRelations: {
     viewMembers: true,
@@ -81,6 +87,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewSchools: true,
+    manageSchools: true,
   },
   Registrar: {
     viewMembers: true,
@@ -91,6 +99,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     exportMembers: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewSchools: true,
   },
   Clerk: {
     viewMembers: true,
@@ -104,6 +113,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewPayments: true,
     viewSponsorships: true,
     viewNewcomers: true,
+    viewSchools: true,
   },
   FinanceAdmin: {
     viewMembers: true,
@@ -112,6 +122,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewPayments: true,
     managePayments: true,
     viewSponsorships: true,
+    viewSchools: true,
   },
   SponsorshipCommittee: {
     viewMembers: true,
@@ -119,6 +130,13 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewSchools: true,
+  },
+  SchoolAdmin: {
+    viewMembers: true,
+    viewSchools: true,
+    manageSchools: true,
+    viewPayments: true,
   },
 };
 

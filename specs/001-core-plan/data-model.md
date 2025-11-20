@@ -1,6 +1,9 @@
 # Data Model — Core Plan
 
-Source of truth: `docs/spec-kit/03-domain-model.md`. All DocTypes live in the `salitemiret` Frappe app and inherit standard Frappe metadata (`name`, `owner`, `creation`, `modified`, `docstatus`). Soft-delete semantics rely on the documented `is_active` / `active` flags.
+Source of truth: `docs/spec-kit/03-domain-model.md`. All entities live in the
+FastAPI backend (`server/app/models/**`) as SQLAlchemy models that inherit from
+the shared `Base` declarative class. Soft deletes rely on the documented
+`is_active`/`active` flags or nullable `deleted_at` columns.
 
 ## Overview
 
@@ -12,6 +15,11 @@ Source of truth: `docs/spec-kit/03-domain-model.md`. All DocTypes live in the `s
 | Payment | Immutable ledger entry with correction linkage | `payment_reference`, `member`, `payment_date`, `amount`, `method`, `allocation`, `correction_of`, `created_by_import` |
 | Sponsorship | Sponsor commitments | `sponsorship_id`, `member`, `beneficiary_name`, `monthly_amount`, `program`, `status` |
 | Newcomer | Settlement pipeline | `newcomer_id`, `first_name`, `last_name`, `preferred_language`, `visit_date`, `followup_owner`, `converted_member` |
+| Abenet Enrollment | Adult formation enrollment | `member`, `cohort`, `mentor_member_id`, `status`, `enrollment_date`, `completion_date`, `notes` |
+| Sunday School Enrollment | Youth cohort record | `member`, `guardian_member_id`, `class_level`, `status`, `mezmur_id`, `enrollment_date`, `expected_graduation`, `notes`, `last_attended_on` |
+| Sunday School Attendance | Attendance row linked to enrollment | `enrollment_id`, `lesson_date`, `status`, `note`, `created_by_id` |
+| Lesson | Reusable lesson metadata | `lesson_code`, `title`, `description`, `level`, `duration_minutes` |
+| Mezmur | Choir/mezmur groups | `code`, `title`, `language`, `category`, `rehearsal_day`, `conductor_name`, `capacity` |
 | Abenet Enrollment | Adult formation enrollment | `member`, `cohort`, `enrollment_date`, `status`, `mentor` |
 | Sunday School Enrollment | Youth enrollment tracking | `child`, `guardian`, `class_level`, `enrollment_date`, `expected_graduation`, `status`, `mezmur_group` |
 | Lesson | Curriculum definition | `lesson_code`, bilingual titles, `level`, `duration_minutes` |

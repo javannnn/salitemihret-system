@@ -11,3 +11,12 @@ from .payment import PaymentServiceType, Payment, PaymentReceipt  # noqa: F401
 from .payment_day_lock import PaymentDayLock  # noqa: F401
 from .newcomer import Newcomer  # noqa: F401
 from .sponsorship import Sponsorship  # noqa: F401
+from .schools import (  # noqa: F401
+    Lesson,
+    Mezmur,
+    AbenetEnrollment,
+    AbenetEnrollmentPayment,
+    SundaySchoolEnrollment,
+    SundaySchoolContent,
+    SundaySchoolAuditLog,
+)

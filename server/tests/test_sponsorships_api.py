@@ -31,7 +31,12 @@ def test_sponsorship_flow_with_newcomer_conversion(
         "start_date": date.today().isoformat(),
         "status": "Active",
         "frequency": "Monthly",
-        "program": "Family Support",
+        "program": "Education",
+        "pledge_channel": "InPerson",
+        "reminder_channel": "Email",
+        "motivation": "ParishInitiative",
+        "volunteer_services": ["HolyDayCleanup", "MealSupport"],
+        "volunteer_service_other": "Weekend outreach",
     }
     create_resp = client.post("/sponsorships", json=sponsorship_payload)
     assert create_resp.status_code == 201, create_resp.text
@@ -52,6 +57,9 @@ def test_sponsorship_flow_with_newcomer_conversion(
     detail = detail_resp.json()
     assert detail["beneficiary_member"] is not None
     assert detail["newcomer"] is None
+    assert detail["volunteer_services"] == ["HolyDayCleanup", "MealSupport"]
+    assert detail["volunteer_service_other"] == "Weekend outreach"
+    assert "payment_health" in detail
 
 
 def test_office_admin_cannot_create_sponsorship(
@@ -83,3 +91,24 @@ def test_newcomer_requires_contact_info(client, authorize, public_relations_user
     }
     resp = client.post("/newcomers", json=payload)
     assert resp.status_code == 422
+
+
+def test_sponsorship_metrics_endpoint(client, authorize, sponsorship_user, sample_member):
+    authorize(sponsorship_user)
+    payload = {
+        "sponsor_member_id": sample_member.id,
+        "beneficiary_name": "Metrics Beneficiary",
+        "monthly_amount": "75.00",
+        "start_date": date.today().isoformat(),
+        "status": "Active",
+        "frequency": "Monthly",
+    }
+    create_resp = client.post("/sponsorships", json=payload)
+    assert create_resp.status_code == 201, create_resp.text
+
+    metrics_resp = client.get("/sponsorships/metrics")
+    assert metrics_resp.status_code == 200, metrics_resp.text
+    metrics = metrics_resp.json()
+    assert "total_active_sponsors" in metrics
+    assert "budget_utilization_percent" in metrics
+    assert "alerts" in metrics

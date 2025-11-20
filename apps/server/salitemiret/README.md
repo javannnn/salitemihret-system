@@ -1,3 +1,8 @@
+> **Legacy Notice**: This directory contains the historical Frappe app that
+> predated the FastAPI + Postgres pivot. It is retained for reference only.
+> Production code now lives under `server/`. Do not modify these fixtures unless
+> specifically migrating legacy data.
+
 ## SaliteMiret RBAC Baseline
 
 This Frappe app seeds the core SaliteMihret roles and the curated permission

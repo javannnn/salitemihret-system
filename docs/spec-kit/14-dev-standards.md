@@ -8,13 +8,15 @@
 - **Git Hooks**: pre-commit runs lint, format, and security scans prior to push.
 
 ## Coding Conventions
-- TypeScript interfaces generated from DocType schemas; avoid duplicate manual
-  types.
+- TypeScript interfaces mirror the backend Pydantic schemas. Shared DTOs live in
+  `frontend/src/api/types.ts`; keep them in sync with `server/app/schemas/*`.
 - React components use function components with hooks; state management via
   TanStack Query and local component state only.
-- Python modules follow Frappe best practices: services under `salitemiret/api/`,
-  jobs under `salitemiret/background_jobs/`, validations in DocType classes.
-- Avoid direct SQL except in migration patches or read-only reporting views.
+- Python modules follow FastAPI conventions: routers in `app/routers/`,
+  services under `app/services/`, models under `app/models/`, and background job
+  helpers under `app/services/*`.
+- Avoid direct SQL except inside Alembic migrations or read-only reporting views
+  (SQL files under `server/app/reporting/`).
 
 ## Commit Hygiene
 - Follow Conventional Commits (`feat`, `fix`, `docs`, `chore`, `refactor`,
@@ -23,10 +25,11 @@
 - Commit small, logical units; avoid mixing feature and refactor in same commit.
 
 ## Database Migrations
-- Use Frappe patches for schema changes, stored under
-  `salitemiret/patches/<module>/` with descriptive filenames.
-- Include idempotency guard in every patch.
-- Provide rollback notes when destructive changes occur.
+- Use Alembic revisions (`server/alembic/versions/`). One migration per PR unless
+  there is a compelling reason to batch.
+- Always include idempotent guards when altering enums or data.
+- Document downgrade feasibility; if irreversible, call it out in the migration
+  docstring and PR.
 
 ## Feature Flags & Toggles
 - Configurable toggles stored in `salitemiret/feature_flags.py` and persisted via
@@ -35,10 +38,12 @@
   cycles.
 
 ## Fixtures & Seed Data
-- Canonical fixtures stored in `apps/salitemiret/fixtures/`. Include roles,
-  workflow states, and default translations.
-- Fixtures updated via `bench export-fixtures` and version-controlled.
-- Test-only fixtures live under `tests/fixtures/` and must not contain PII.
+- Canonical seed script lives in `server/app/scripts/seed_demo.py`; update it
+  whenever schema or lookup tables change.
+- JSON/CSV fixtures for tests live under `server/tests/fixtures/` and
+  `frontend/tests/fixtures/`. No PII allowed.
+- Reference data (tags, ministries, payment service types) should be inserted
+  via Alembic migrations to keep environments aligned.
 
 ## Documentation Expectations
 - Update relevant Spec Kit module and API docs when introducing new workflows.

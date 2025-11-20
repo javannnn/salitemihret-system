@@ -31,14 +31,20 @@ ministries, and governance to support decision-making and compliance.
      operations dashboard.
 
 ## API Endpoints
-- `GET /api/method/salitemiret.api.reports.run` (supports `report_name`,
-  `filters`).
-- `POST /api/method/salitemiret.api.reports.schedule` for scheduled delivery.
+- `GET /reports/{code}` – run a report synchronously with query params/filters (FastAPI router backed by SQL views or query builders).
+- `POST /reports/{code}/schedule` – create/update schedules (frequency, recipients, format) stored in Postgres and executed via APScheduler.
+- `GET /reports/summary` – persona dashboard summarizing recent totals (finance, membership, sponsorships, etc.).
+- Module-specific feeds (e.g., `GET /schools/abenet/report`) expose focused datasets that the reporting workspace can render/export alongside the generic catalog.
 
 ## Validation Rules
 - Filters validated against allowlist per report to prevent SQL injection.
 - Scheduled reports require at least one valid email recipient.
 - Large date ranges (> 2 years) require Council role override.
+
+## Reports & Exports
+- **Membership roster**, **Finance ledger**, **Volunteer engagement**, **Media pipeline**, and **Council governance** reports described above remain first-class catalog entries.
+- **Abenet School Report** (`GET /schools/abenet/report`) feeds the Work Item #6 requirement (child, parent, service stage, last payment date) and is surfaced in the same UI/export flow.
+- All exports ship as streamed CSV (or PDF when requested) with consistent headers + trace IDs.
 
 ## Notifications
 - Scheduled report deliveries send email with download link and summary metrics.
@@ -69,11 +75,6 @@ ministries, and governance to support decision-making and compliance.
 - Generated files expire after 24 hours to minimize exposure.
 
 ## Implementation Plan
-- **Day 9**: Build SQL views in `apps/salitemiret/reporting/sql/` and map Frappe
-  report definitions; ensure permissions align with RBAC roles.
-- **Day 9**: Implement execution and scheduling APIs in
-  `apps/salitemiret/api/reports.py`, plus scheduled delivery workers and email
-  templates.
-- **Day 9**: Deliver React report catalog, filter drawer, and scheduling UI in
-  `frontend/src/features/reports/`, wiring background job polling and audit
-  notations.
+- **Day 9**: Build SQL views/queries in `server/app/reporting/` (or inline SQLAlchemy read models) with RBAC guards; add Alembic seeds for default schedules if needed.
+- **Day 9**: Implement FastAPI router/service (`server/app/routers/reports.py`, `server/app/services/reports.py`) plus APScheduler jobs + email templates for scheduled delivery.
+- **Day 9**: Deliver React report catalog/filter drawer/scheduling UI in `frontend/src/features/reports/`, wiring background job polling, audit logging, and hooks to module feeds such as `/schools/abenet/report`.

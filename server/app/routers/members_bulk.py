@@ -271,24 +271,27 @@ def get_member_meta(
     ministry_rows = db.query(Ministry.id, Ministry.name, Ministry.slug).order_by(Ministry.name.asc()).all()
     ministries = [MinistryOut(id=row.id, name=row.name, slug=row.slug) for row in ministry_rows]
 
-    if hasattr(Household, "head_member_id"):
-        household_rows = (
-            db.query(Household.id, Household.name, Household.head_member_id)
-            .order_by(Household.name.asc())
-            .all()
+    household_rows = (
+        db.query(
+            Household.id,
+            Household.name,
+            Household.head_member_id,
+            func.count(Member.id).label("members_count"),
         )
-        households = [
-            HouseholdOut(id=row.id, name=row.name, head_member_id=row.head_member_id) for row in household_rows
-        ]
-    else:
-        household_rows = (
-            db.query(Household.id, Household.name)
-            .order_by(Household.name.asc())
-            .all()
+        .outerjoin(Member, Member.household_id == Household.id)
+        .group_by(Household.id)
+        .order_by(Household.name.asc())
+        .all()
+    )
+    households = [
+        HouseholdOut(
+            id=row.id,
+            name=row.name,
+            head_member_id=row.head_member_id,
+            members_count=row.members_count or 0,
         )
-        households = [
-            HouseholdOut(id=row.id, name=row.name, head_member_id=None) for row in household_rows
-        ]
+        for row in household_rows
+    ]
 
     priest_query = db.query(Priest.id, Priest.full_name)
     if hasattr(Priest, "phone"):

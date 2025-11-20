@@ -22,10 +22,14 @@ from app.routers import license as license_router
 from app.routers import members as members_router
 from app.routers import members_bulk as members_bulk_router
 from app.routers import members_files as members_files_router
+from app.routers import households as households_router
 from app.routers import priests as priests_router
 from app.routers import payments as payments_router
 from app.routers import whoami as whoami_router
 from app.routers import sponsorships as sponsorships_router
+from app.routers import sunday_school as sunday_school_router
+from app.routers import reports as reports_router
+from app.routers import schools as schools_router
 from app.routers import newcomers as newcomers_router
 from app.services.child_promotion import get_children_ready_for_promotion
 from app.services import payments as payments_service
@@ -68,9 +72,14 @@ app.include_router(children_router.router)
 app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
+app.include_router(households_router.router)
 app.include_router(payments_router.router)
 app.include_router(sponsorships_router.router)
 app.include_router(newcomers_router.router)
+app.include_router(sunday_school_router.router)
+app.include_router(sunday_school_router.public_router)
+app.include_router(reports_router.router)
+app.include_router(schools_router.router)
 app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
 
@@ -435,3 +444,11 @@ def start_scheduled_jobs() -> None:
 def shutdown_scheduler() -> None:
     if scheduler.running:
         scheduler.shutdown(wait=False)
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

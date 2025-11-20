@@ -1,13 +1,39 @@
 from datetime import date, datetime
-from typing import List, Optional
+import re
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, validator
 
+from app.schemas.household import HouseholdOut
+from app.schemas.payment import PaymentStatus
+
 ALLOWED_MEMBER_STATUSES = {"Active", "Inactive", "Pending", "Archived"}
-ALLOWED_MEMBER_GENDERS = {"Male", "Female", "Other"}
+ALLOWED_MEMBER_GENDERS = {"Male", "Female"}
 ALLOWED_MEMBER_MARITAL_STATUSES = {"Single", "Married", "Divorced", "Widowed", "Separated", "Other"}
-ALLOWED_CONTRIBUTION_METHODS = {"Cash", "Direct Deposit", "E-Transfer", "Credit"}
+ALLOWED_CONTRIBUTION_METHODS = {"Cash", "Debit", "Credit", "E-Transfer", "Cheque", "Direct Deposit"}
 ALLOWED_CONTRIBUTION_EXCEPTION_REASONS = {"LowIncome", "Senior", "Student", "Other"}
+
+CANADIAN_PHONE_ERROR = "Phone number must be a valid Canadian number (e.g., +16475550123)"
+
+
+def normalize_member_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if not digits:
+        raise ValueError("Phone number is required")
+    if digits.startswith("1") and len(digits) == 11:
+        digits = digits[1:]
+    if len(digits) != 10:
+        raise ValueError(CANADIAN_PHONE_ERROR)
+    return f"+1{digits}"
+
+
+def normalize_optional_member_phone(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return normalize_member_phone(stripped)
 
 
 class SpouseBase(BaseModel):
@@ -23,6 +49,10 @@ class SpouseBase(BaseModel):
         if value and value not in ALLOWED_MEMBER_GENDERS:
             raise ValueError("Invalid gender value")
         return value
+
+    @validator("phone")
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
 
 
 class SpouseCreate(SpouseBase):
@@ -82,15 +112,6 @@ class MinistryOut(BaseModel):
         from_attributes = True
 
 
-class HouseholdOut(BaseModel):
-    id: int
-    name: str
-    head_member_id: Optional[int]
-
-    class Config:
-        from_attributes = True
-
-
 class MemberAuditOut(BaseModel):
     id: int
     field: str
@@ -119,6 +140,13 @@ class PriestCreate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     email: Optional[EmailStr] = None
     status: Optional[str] = Field("Active", max_length=50)
+
+
+class PriestUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    phone: Optional[str] = Field(None, max_length=50)
+    email: Optional[EmailStr] = None
+    status: Optional[str] = Field(None, max_length=50)
 
 
 class MemberBase(BaseModel):
@@ -151,6 +179,9 @@ class MemberBase(BaseModel):
     household_size_override: Optional[int] = Field(None, ge=1, le=25)
     has_father_confessor: bool = False
     father_confessor_id: Optional[int] = None
+    status_override: Optional[bool] = None
+    status_override_value: Optional[str] = None
+    status_override_reason: Optional[str] = Field(None, max_length=255)
     spouse: Optional[SpouseCreate] = None
     children: List[ChildCreate] = Field(default_factory=list)
     tag_ids: List[int] = Field(default_factory=list)
@@ -178,7 +209,7 @@ class MemberBase(BaseModel):
     def validate_phone(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("Phone number is required")
-        return value.strip()
+        return normalize_member_phone(value.strip())
 
     @validator("marital_status")
     def validate_marital_status(cls, value: Optional[str]) -> Optional[str]:
@@ -202,6 +233,12 @@ class MemberBase(BaseModel):
     def validate_contribution_exception_reason(cls, value: Optional[str]) -> Optional[str]:
         if value and value not in ALLOWED_CONTRIBUTION_EXCEPTION_REASONS:
             raise ValueError("Invalid contribution exception reason")
+        return value
+
+    @validator("status_override_value")
+    def validate_override_value(cls, value: Optional[str]) -> Optional[str]:
+        if value and value not in ALLOWED_MEMBER_STATUSES:
+            raise ValueError("Invalid override status value")
         return value
 
 
@@ -243,6 +280,9 @@ class MemberUpdate(BaseModel):
     children: Optional[List[ChildCreate]] = None
     tag_ids: Optional[List[int]] = None
     ministry_ids: Optional[List[int]] = None
+    status_override: Optional[bool] = None
+    status_override_value: Optional[str] = None
+    status_override_reason: Optional[str] = Field(None, max_length=255)
 
     @validator("birth_date", "join_date")
     def validate_dates(cls, value: Optional[date]) -> Optional[date]:
@@ -274,6 +314,23 @@ class MemberUpdate(BaseModel):
             raise ValueError("Invalid contribution method value")
         return value
 
+    @validator("status_override_value")
+    def validate_override_value(cls, value: Optional[str]) -> Optional[str]:
+        if value and value not in ALLOWED_MEMBER_STATUSES:
+            raise ValueError("Invalid override status value")
+        return value
+
+
+class MemberSpouseUpdate(BaseModel):
+    marital_status: Optional[str] = None
+    spouse: Optional[SpouseCreate] = None
+
+    @validator("marital_status")
+    def validate_marital_status(cls, value: Optional[str]) -> Optional[str]:
+        if value and value not in ALLOWED_MEMBER_MARITAL_STATUSES:
+            raise ValueError("Invalid marital status value")
+        return value
+
 
 class MemberListOut(BaseModel):
     id: int
@@ -283,6 +340,7 @@ class MemberListOut(BaseModel):
     last_name: str
     status: str
     gender: Optional[str]
+    birth_date: Optional[date]
     marital_status: Optional[str]
     district: Optional[str]
     email: Optional[EmailStr]
@@ -315,6 +373,54 @@ class ContributionPaymentOut(BaseModel):
         from_attributes = True
 
 
+class MemberSundaySchoolParticipantOut(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+    member_username: str
+    category: str
+    pays_contribution: bool
+    monthly_amount: Optional[float]
+    payment_method: Optional[str]
+    last_payment_at: Optional[datetime]
+    status: Literal["Up to date", "Overdue", "No payments yet", "Not contributing"]
+
+    class Config:
+        from_attributes = True
+
+
+class MemberSundaySchoolPaymentOut(BaseModel):
+    id: int
+    amount: float
+    currency: str
+    method: Optional[str]
+    memo: Optional[str]
+    posted_at: datetime
+    status: PaymentStatus
+    service_type_label: str
+
+    class Config:
+        from_attributes = True
+
+
+class MembershipEventOut(BaseModel):
+    timestamp: datetime
+    type: Literal["Renewal", "Overdue", "Override"]
+    label: str
+    description: Optional[str] = None
+
+
+class MembershipHealthOut(BaseModel):
+    effective_status: str
+    auto_status: str
+    override_active: bool
+    override_reason: Optional[str]
+    last_paid_at: Optional[datetime]
+    next_due_at: Optional[datetime]
+    days_until_due: Optional[int]
+    overdue_days: Optional[int]
+
+
 class MemberDetailOut(MemberListOut):
     birth_date: Optional[date]
     join_date: Optional[date]
@@ -340,6 +446,13 @@ class MemberDetailOut(MemberListOut):
     tags: List[TagOut] = Field(default_factory=list)
     ministries: List[MinistryOut] = Field(default_factory=list)
     contribution_history: List[ContributionPaymentOut] = Field(default_factory=list)
+    sunday_school_participants: List[MemberSundaySchoolParticipantOut] = Field(default_factory=list)
+    sunday_school_payments: List[MemberSundaySchoolPaymentOut] = Field(default_factory=list)
+    status_override: bool
+    status_override_value: Optional[str]
+    status_override_reason: Optional[str]
+    membership_health: MembershipHealthOut
+    membership_events: List[MembershipEventOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     created_by_id: Optional[int]

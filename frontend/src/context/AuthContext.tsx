@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { WhoAmI, whoami } from "@/lib/auth";
 import { getToken, setToken } from "@/lib/api";
+import { resetSessionExpiryNotice } from "@/lib/session";
 
 interface AuthContextValue {
   user: WhoAmI | null;
@@ -22,6 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setTokenState(null);
       setLoading(false);
+      resetSessionExpiryNotice();
       return;
     }
 
@@ -30,6 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await whoami();
       setUser(data);
       setTokenState(getToken());
+      resetSessionExpiryNotice();
     } catch (error) {
       console.error(error);
       setUser(null);

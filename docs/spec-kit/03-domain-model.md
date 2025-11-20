@@ -1,22 +1,21 @@
 # Domain Model
 
 ## Overview
-All business entities are implemented as Frappe DocTypes within the
-`salitemiret` app. Each DocType inherits standard fields (`name`, `owner`,
-`creation`, `modified`, `docstatus`) and enforces audit trails through Frappe
-Versioning plus the custom `Audit Event` DocType. Soft deletes use the
-`disabled` flag unless otherwise noted.
+All business entities are implemented as SQLAlchemy models under
+`server/app/models`. Each model inherits from the shared `Base` declarative map
+and persists to PostgreSQL tables with explicit timestamps (`created_at`,
+`updated_at`, optional `deleted_at`). Soft deletes rely on boolean flags
+(`is_active`, `active`) or nullable `deleted_at` columns depending on the entity.
 
 Relationships follow these patterns:
-- Member-centric DocTypes (`Family Member`, `Member Status History`, `Payment`,
-  `Sponsorship`) reference `Member` via `Link` fields.
-- Program enrollment DocTypes (`Abenet Enrollment`, `Sunday School Enrollment`)
-  connect members or newcomers to structured course or lesson records.
-- Media and council DocTypes emit audit events on state changes.
+- Member-centric models (`Household`, `MemberStatusHistory`, `Payment`,
+  `Sponsorship`) reference `Member` via foreign keys.
+- Program enrollment models (`AbenetEnrollment`, `SundaySchoolEnrollment`)
+  connect members or newcomers to formation records.
+- Media and council models emit audit entries when their status fields change.
 
-All tables below list custom fields (excluding Frappe system fields). Unless
-specified, strings are stored as `Data` (255 chars) and text blocks as `Text` or
-`Rich Text`.
+Unless noted, strings map to `VARCHAR(255)` and text blocks map to `TEXT`.
+Select/enum fields are PostgreSQL ENUMs managed through Alembic migrations.
 
 ## Member Management
 ### Member
@@ -34,10 +33,12 @@ specified, strings are stored as `Data` (255 chars) and text blocks as `Text` or
 | email | Data | Preferred email (validated). |
 | phone | Data | E.164 formatted phone number. |
 | address_line1 | Data | Street address. |
-| city | Data | City. |
-| state_province | Data | Province/state. |
+| city | Link (Geo City) | Canonical city lookup; enforces consistent spelling and lat/long metadata. |
+| state_province | Link (Geo Region) | Province/state selector tied to curated region list. |
 | postal_code | Data | Postal code. |
-| country | Data | ISO country. |
+| country | Link (Geo Country) | ISO 3166-1 alpha-2 driven dropdown. |
+| contact_preference | Select | Primary channel: Phone, SMS, Email, WhatsApp, Signal. |
+| communication_channels | MultiSelect | Secondary opt-ins rendered as pill selectors; stored as CSV. |
 | status | Link (Member Status History) | Latest status document. |
 | preferred_language | Select | en, am. |
 | join_date | Date | Date first registered. |
@@ -74,6 +75,37 @@ specified, strings are stored as `Data` (255 chars) and text blocks as `Text` or
 **Indexes**: Composite on (`member`, `effective_date DESC`). Latest record is the
 active status link.
 
+### Reference Lookups
+#### Geo Country
+| Field | Type | Description |
+|-------|------|-------------|
+| code | Data (unique) | ISO 3166-1 alpha-2 code (e.g., `CA`). |
+| name | Data | Display label. |
+| priority | Int | Sort order so common locales surface first. |
+
+#### Geo Region
+| Field | Type | Description |
+|-------|------|-------------|
+| country | Link (Geo Country) | Owning country. |
+| code | Data (unique) | Subdivision code (e.g., `CA-ON`). |
+| name | Data | Region/province label. |
+
+#### Geo City
+| Field | Type | Description |
+|-------|------|-------------|
+| region | Link (Geo Region) | Parent subdivision. |
+| name | Data | City label. |
+| transliterated_name | Data | Optional Amharic/Ge'ez friendly spelling. |
+
+#### Reference Option
+| Field | Type | Description |
+|-------|------|-------------|
+| group | Select | `language`, `marital_status`, `contact_channel`, `pledge_frequency`, `sponsorship_program`, etc. |
+| value | Data | Machine value (slug). |
+| label | Data | Human label shown in UI. |
+| locale | Data | Optional locale to override label rendering. |
+| sort_order | Int | Controls pill order. |
+
 ## Financials and Sponsorships
 ### Payment
 | Field | Type | Description |
@@ -96,13 +128,21 @@ Corrections insert a new row with `method=Adjustment` and `correction_of` set.
 |-------|------|-------------|
 | sponsorship_id | Data (unique) | Generated code. |
 | member | Link (Member) | Sponsor. |
-| beneficiary_name | Data | Recipient name (Amharic optional). |
+| beneficiary_member | Link (Member) | Beneficiary when already an active member. |
+| beneficiary_newcomer | Link (Newcomer) | Used until the newcomer converts; auto-updated post-conversion. |
+| beneficiary_display_name | Data (read-only) | Auto-derived from linked record to show bilingual name. |
 | start_date | Date | Commitment start. |
 | end_date | Date | Optional end. |
 | monthly_amount | Currency | Pledged monthly contribution. |
-| status | Select | Active, Paused, Completed, Cancelled. |
-| program | Select | Feeding, Education, Medical, Other. |
-| notes | Text | Stewardship history. |
+| pledge_frequency | Select | Monthly, Quarterly, Semiannual, Annual, One-time. |
+| pledge_channel | Select | In person, Online portal, Phone, Event booth. |
+| reminder_channel | Select | Email, SMS, Phone, WhatsApp. |
+| status | Select | Draft, Active, Paused, Lapsed, Completed. |
+| program | Select | Education, Nutrition, Healthcare, Housing, Emergency Relief, Special Projects. |
+| motivation | Select | Honor/Memorial, Community Outreach, Corporate, Parish Initiative, Other (requires note). |
+| steward_notes | Text | Rich-text journal for stewardship context (templates enforced). |
+
+**Lookups**: All select fields pull from `Reference Option`; reminders honor the sponsor's contact preference before defaulting to email.
 
 **Indexes**: Index on (`member`, `status`).
 
@@ -156,7 +196,7 @@ Corrections insert a new row with `method=Adjustment` and `correction_of` set.
 | description | Text | Outline. |
 | level | Select | Sunday School, Abenet, Volunteer. |
 | duration_minutes | Int | Planned duration. |
-| resources | Table (Child DocType) | Linked resource files. |
+| resources | Child table | Linked resource files. |
 
 **Indexes**: Unique on `lesson_code`.
 
@@ -268,7 +308,7 @@ Corrections insert a new row with `method=Adjustment` and `correction_of` set.
 | Field | Type | Description |
 |-------|------|-------------|
 | event_type | Select | Import Started, Import Completed, Status Suggested, Status Approved, Payment Recorded, Payment Corrected, Media Approved, Media Published, Council Update, Manual Entry. |
-| source_doctype | Data | DocType referenced. |
+| source_table | Data | Table/model referenced. |
 | source_name | Data | Record name. |
 | actor | Link (User) | User who triggered. |
 | payload | JSON | Serialized context (diffs, CSV location, trace_id). |
@@ -278,11 +318,11 @@ Corrections insert a new row with `method=Adjustment` and `correction_of` set.
 **Indexes**: Composite index on (`source_doctype`, `source_name`, `occurred_on`).
 
 ## Soft Delete & Retention Rules
-- DocTypes with `is_active` or `active` fields use soft deletes. List queries
+- Models with `is_active` or `active` flags use soft deletes. List queries
   filter out inactive records by default but retain history for compliance.
 - `Audit Event` records are immutable and retained indefinitely.
-- `Public Post` retains previous versions via Frappe Versioning; deleting a post
-  requires Council approval and is tracked via audit.
+- `Public Post` retains previous versions via the `public_posts_history` table;
+  deleting a post requires Council approval and is tracked via audit.
 
 ## Relationships Summary
 - `Member` 1:N `Family Member`, `Member Status History`, `Payment`, `Sponsorship`,
@@ -290,7 +330,7 @@ Corrections insert a new row with `method=Adjustment` and `correction_of` set.
 - `Media Request` 1:1 `Public Post` upon approval.
 - `Council Department` 1:N `Council Trainee`.
 - `Lesson` and `Mezmur` referenced by enrollments and volunteer training flows.
-- `Audit Event` references any DocType via `source_doctype` and `source_name`.
+- `Audit Event` references any entity via `source_table` and `source_name`.
 
 ## Denormalized Search Views
 Read-optimized SQL views provide aggregated data for dashboards:

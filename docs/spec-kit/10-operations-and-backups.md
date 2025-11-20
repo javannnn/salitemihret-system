@@ -1,50 +1,59 @@
 # Operations and Backups
 
 ## Backup Strategy
-- **Database**: Nightly full MariaDB dumps at 02:00 UTC stored in S3 with server-
-  side encryption. Hourly binlog shipping enables point-in-time recovery.
-- **File Storage**: Media uploads and exported CSVs synced nightly to S3 bucket
-  with versioning enabled. Retain 30-day history.
-- **Redis**: Hourly snapshots persisted to disk and copied to S3.
-- **Configuration**: Docker Compose environment files and Nginx configs stored in
-  private Git repository with GitOps workflows.
+- **PostgreSQL**: Nightly `pg_basebackup` at 02:00 UTC stored in S3 (server-side
+  encryption, lifecycle 35 days). WAL archiving every 5 minutes enables
+  point-in-time recovery (RPO ≤ 1 hour).
+- **Uploads / Exports**: Avatar files, import templates, and CSV exports synced
+  nightly to S3/MinIO with versioning. Retention: 30 days (daily), 90 days
+  (weekly), 1 year (monthly snapshots).
+- **Redis (optional)**: Hourly RDB snapshots copied to object storage when Redis
+  is enabled.
+- **Configuration**: systemd unit files, Nginx configs, and `.env` templates
+  kept in the infra repo and mirrored to `/etc/salitemihret/backup.tgz` daily.
 
 ## Restoration Procedures
-1. Trigger restore runbook in incident management tool.
-2. Provision fresh database instance; import latest full dump.
-3. Replay binlogs up to target timestamp (RPO 1 hour).
-4. Restore file storage from S3 version matching timestamp.
-5. Reconfigure Frappe site to point to restored database, flush cache, run `bench
-   migrate`.
-6. Validate critical workflows (login, member search, status approval, payment
-   entry, media feed) before reopening access.
+1. Trigger the restore runbook via the incident tool; assign Database Lead.
+2. Provision clean Postgres instance; restore the latest base backup.
+3. Replay WAL segments up to the target timestamp (RPO target 60 minutes).
+4. Restore `/var/www/salitemihret/uploads` from the matching snapshot; verify
+  checksums.
+5. Redeploy backend: `git checkout <tag>`, `pip install -r requirements.txt`,
+  `alembic upgrade head`, `sudo systemctl restart salitemihret-backend`.
+6. Rebuild frontend assets (`pnpm build`, rsync to `/var/www/salitemihret/`,
+  reload Nginx).
+7. Run smoke tests (login, member search, status approval, payment entry, media
+  feed) before reopening access.
 
 ## Drill Cadence
-- Quarterly restore drills into staging using production snapshot.
-- Document metrics: time to restore (target < 4 hours), data loss (<= 1 hour),
-  and blockers encountered.
-- Post-drill retro updates runbook and backlog items.
+- Quarterly DR drill restoring staging from a production snapshot. Record
+  metrics: total restore time (<4 hours), data loss window (<1 hour), blockers.
+- After every drill, update the runbook and backlog any automation gaps.
 
 ## Runbooks
-- **Import Failure**: Steps to inspect job queue, download error CSV, requeue.
-- **Status Suggestion Alerts**: Validate streak calculation job, confirm PR
-  notifications delivered.
-- **Child Turns 18 Notification**: Ensure scheduler job (`child_adulthood_job`)
-  ran; review audit events.
-- **Payment Correction**: Verify original and correction records, confirm audit
-  entries, and reconcile financial report.
-- **Media Publication**: Check media request status, generated public post, and
-  CDN invalidation.
-- Runbooks stored in `docs/runbooks/` and referenced inside application tooltips.
+- **Import Failure**: Inspect APScheduler logs, re-run `members.import_members`
+  with captured CSV, notify PR if requeueing.
+- **Status Suggestion Alerts**: Validate streak calculation job health, review
+  `member_audit` entries, confirm notifications delivered.
+- **Child Turns 18**: Check `child_promotion` job schedule, inspect pending
+  queue, ensure emails sent.
+- **Payment Correction**: Confirm paired payment rows, verify audit entries, and
+  reconcile the payments export.
+- **Media Publication**: Validate request status, generated public post, and CDN
+  invalidation log.
+- Runbooks live under `docs/runbooks/` and are linked from the admin UI help
+  modals.
 
 ## Disaster Recovery Targets
-- **RTO**: 4 hours for critical services.
-- **RPO**: 1 hour, driven by binlog shipping and Redis snapshots.
-- **Service Prioritization**: Restore order – Database, Redis, Backend, Frontend,
-  Background Workers, Nginx, Observability exporters.
+- **RTO**: 4 hours for API + frontend + database.
+- **RPO**: 1 hour (dictated by WAL archiving cadence).
+- **Restore Order**: PostgreSQL → Redis (if enabled) → FastAPI backend →
+  Frontend → Nginx → Background schedulers → Observability agents.
 
 ## Operational Monitoring
-- Weekly ops review ensures backup jobs succeed (check S3 logs, retention).
-- Alert if backups fail twice consecutively or deviation from expected size >10%.
-- Publish monthly operations report summarizing backup success rates and restore
-  drill outcomes.
+- Daily cron verifies backup artifacts (size delta within ±10%, checksum) and
+  posts status to the ops channel.
+- Alerts trigger if a backup misses two consecutive runs or WAL shipping lags >
+  30 minutes.
+- Monthly ops review summarizes backup success rates, restore drills, and
+  outstanding remediation tasks.

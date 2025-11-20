@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.security import hash_password
 from app.config import UPLOAD_DIR
+from app.core.config import settings
 from app.core.db import Base, SessionLocal, engine
 from app.models.household import Household
 from app.models.member import Member
@@ -18,9 +19,19 @@ from app.models.priest import Priest
 from app.models.role import Role
 from app.models.newcomer import Newcomer
 from app.models.sponsorship import Sponsorship
+from app.models.schools import (
+    Lesson,
+    Mezmur,
+    SundaySchoolEnrollment,
+    AbenetEnrollment,
+    AbenetEnrollmentPayment,
+)
 from app.models.tag import Tag
 from app.models.user import User
 from app.services.members_utils import apply_children, apply_spouse
+from app.schemas.payment import PaymentCreate
+from app.services import payments as payments_service
+from app.services.schools import ABENET_SERVICE_CODE
 
 ROLE_NAMES = [
     "OfficeAdmin",
@@ -322,7 +333,11 @@ DEMO_SPONSORSHIPS = [
         "monthly_amount": Decimal("150.00"),
         "frequency": "Monthly",
         "status": "Active",
-        "program": "Family Support",
+        "program": "Housing",
+        "pledge_channel": "InPerson",
+        "reminder_channel": "Email",
+        "motivation": "ParishInitiative",
+        "notes_template": "FollowUp",
         "start_date": date(2025, 1, 1),
         "notes": "Family sponsorship covering rent and groceries.",
         "budget_month": 1,
@@ -335,13 +350,50 @@ DEMO_SPONSORSHIPS = [
         "monthly_amount": Decimal("90.00"),
         "frequency": "Monthly",
         "status": "Active",
-        "program": "Youth Scholarship",
+        "program": "Education",
+        "pledge_channel": "OnlinePortal",
+        "reminder_channel": "SMS",
+        "motivation": "HonorMemorial",
+        "notes_template": "Gratitude",
         "start_date": date(2024, 11, 1),
         "notes": "Supporting youth choir stipend.",
         "budget_month": 1,
         "budget_year": 2025,
         "budget_slots": 1,
     },
+]
+
+DEMO_LESSONS = [
+    {"lesson_code": "SS-INTRO", "title": "Welcome & Prayer", "level": "SundaySchool", "duration_minutes": 30},
+    {"lesson_code": "SS-GOSPEL", "title": "Gospel Reflections", "level": "SundaySchool", "duration_minutes": 45},
+    {"lesson_code": "AB-FOUND", "title": "Abenet Foundations", "level": "Abenet", "duration_minutes": 60},
+]
+
+DEMO_MEZMUR = [
+    {"code": "MZ-KID-01", "title": "Hosanna Kids", "language": "Amharic", "category": "Youth", "rehearsal_day": "Saturday"},
+    {"code": "MZ-YOUTH-02", "title": "Youth Harmony", "language": "English", "category": "Youth", "rehearsal_day": "Sunday"},
+]
+
+DEMO_SUNDAY_ENROLLMENTS = [
+    {
+        "member_username": "hanna.mengistu",
+        "guardian_username": "abeba.tesfaye",
+        "class_level": "Youth",
+        "mezmur_code": "MZ-YOUTH-02",
+        "enrollment_date": date(2024, 9, 1),
+    }
+]
+
+DEMO_ABENET_ENROLLMENTS = [
+    {
+        "parent_username": "abeba.tesfaye",
+        "child_first_name": "Hanna",
+        "child_last_name": "Mengistu",
+        "birth_date": date(2010, 7, 21),
+        "service_stage": "Alphabet",
+        "enrollment_date": date(2025, 1, 10),
+        "notes": "Preparing for alphabet classes",
+    }
 ]
 
 
@@ -656,8 +708,12 @@ def ensure_sponsorships(db: Session, members_by_username: dict[str, Member], new
             frequency=data["frequency"],
             status=data["status"],
             program=data["program"],
+            pledge_channel=data.get("pledge_channel"),
+            reminder_channel=data.get("reminder_channel"),
+            motivation=data.get("motivation"),
             start_date=data["start_date"],
             notes=data.get("notes"),
+            notes_template=data.get("notes_template"),
             budget_month=data.get("budget_month"),
             budget_year=data.get("budget_year"),
             budget_slots=data.get("budget_slots"),
@@ -665,6 +721,126 @@ def ensure_sponsorships(db: Session, members_by_username: dict[str, Member], new
             last_sponsored_date=data.get("last_sponsored_date"),
         )
         db.add(record)
+    db.commit()
+
+
+def ensure_lessons(db: Session) -> dict[str, Lesson]:
+    lessons: dict[str, Lesson] = {}
+    for data in DEMO_LESSONS:
+        record = db.query(Lesson).filter_by(lesson_code=data["lesson_code"]).first()
+        if not record:
+            record = Lesson(
+                lesson_code=data["lesson_code"],
+                title=data["title"],
+                level=data["level"],
+                duration_minutes=data.get("duration_minutes", 60),
+            )
+            db.add(record)
+            db.flush()
+        lessons[data["lesson_code"]] = record
+    db.commit()
+    return lessons
+
+
+def ensure_mezmur(db: Session) -> dict[str, Mezmur]:
+    groups: dict[str, Mezmur] = {}
+    for data in DEMO_MEZMUR:
+        record = db.query(Mezmur).filter_by(code=data["code"]).first()
+        if not record:
+            record = Mezmur(
+                code=data["code"],
+                title=data["title"],
+                language=data["language"],
+                category=data["category"],
+                rehearsal_day=data["rehearsal_day"],
+                conductor_name=data.get("conductor_name"),
+                capacity=data.get("capacity"),
+            )
+            db.add(record)
+            db.flush()
+        groups[data["code"]] = record
+    db.commit()
+    return groups
+
+
+def _seed_pending_invoice(db: Session, enrollment: AbenetEnrollment, actor: User | None) -> None:
+    if not actor:
+        return
+    payload = PaymentCreate(
+        amount=settings.ABENET_MONTHLY_AMOUNT,
+        currency="CAD",
+        method=None,
+        memo=f"Pending Abenet tuition for {enrollment.child_first_name} {enrollment.child_last_name}".strip(),
+        service_type_code=ABENET_SERVICE_CODE,
+        member_id=enrollment.parent_member_id,
+        status="Pending",
+        due_date=enrollment.enrollment_date,
+    )
+    payment = payments_service.record_payment(db, payload, actor, auto_commit=False)
+    link = AbenetEnrollmentPayment(enrollment_id=enrollment.id, payment_id=payment.id)
+    db.add(link)
+
+
+def ensure_school_enrollments(
+    db: Session,
+    members_by_username: dict[str, Member],
+    mezmur_by_code: dict[str, Mezmur],
+    school_admin: User | None = None,
+) -> None:
+    for data in DEMO_SUNDAY_ENROLLMENTS:
+        member = members_by_username.get(data["member_username"])
+        if not member:
+            continue
+        guardian = members_by_username.get(data.get("guardian_username", ""))
+        existing = (
+            db.query(SundaySchoolEnrollment)
+            .filter(SundaySchoolEnrollment.member_id == member.id, SundaySchoolEnrollment.class_level == data["class_level"])
+            .first()
+        )
+        if existing:
+            continue
+        mezmur = mezmur_by_code.get(data.get("mezmur_code", ""))
+        enrollment = SundaySchoolEnrollment(
+            member_id=member.id,
+            guardian_member_id=guardian.id if guardian else None,
+            class_level=data["class_level"],
+            status="Enrolled",
+            mezmur_id=mezmur.id if mezmur else None,
+            enrollment_date=data["enrollment_date"],
+            expected_graduation=data.get("expected_graduation", data["enrollment_date"] + timedelta(days=365)),
+        )
+        db.add(enrollment)
+
+    for data in DEMO_ABENET_ENROLLMENTS:
+        parent = members_by_username.get(data["parent_username"])
+        if not parent:
+            continue
+        existing = db.query(AbenetEnrollment).filter(
+            AbenetEnrollment.parent_member_id == parent.id,
+            AbenetEnrollment.child_first_name == data["child_first_name"],
+            AbenetEnrollment.service_stage == data["service_stage"],
+        )
+        if existing.first():
+            continue
+        child = next(
+            (c for c in parent.children_all if c.first_name == data["child_first_name"] and c.last_name == data["child_last_name"]),
+            None,
+        )
+        enrollment = AbenetEnrollment(
+            parent_member_id=parent.id,
+            child_id=child.id if child else None,
+            child_first_name=data["child_first_name"],
+            child_last_name=data["child_last_name"],
+            birth_date=data["birth_date"],
+            service_stage=data["service_stage"],
+            monthly_amount=settings.ABENET_MONTHLY_AMOUNT,
+            status="Active",
+            enrollment_date=data["enrollment_date"],
+            notes=data.get("notes"),
+        )
+        db.add(enrollment)
+        db.flush()
+        _seed_pending_invoice(db, enrollment, school_admin)
     db.commit()
 
 
@@ -688,9 +864,13 @@ def main() -> None:
         ministries = ensure_ministries(db)
         admin_user = users.get("admin@example.com")
         ensure_members(db, households, tags, ministries, priests, admin_user)
+        payments_service.ensure_default_service_types(db)
         members_by_username = {member.username: member for member in db.query(Member).all()}
         newcomer_records = ensure_newcomers(db, members_by_username)
         ensure_sponsorships(db, members_by_username, newcomer_records)
+        ensure_lessons(db)
+        mezmur_by_code = ensure_mezmur(db)
+        ensure_school_enrollments(db, members_by_username, mezmur_by_code, admin_user)
     finally:
         db.close()
 

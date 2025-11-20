@@ -18,13 +18,16 @@
 - **Accessibility**: axe-core checks integrated into Cypress flows.
 
 ### Back-End
-- **Unit Tests**: Python `pytest` with Frappe fixtures verifying DocType
-  validations, whitelisted methods, and custom scripts.
-- **Integration Tests**: Exercise REST APIs using Frappe test client. Focus on
-  import pipeline, status suggestion logic (including 6-month contributions and
-  child turning 18), and media approval.
-- **Background Jobs**: Worker-specific tests simulate Redis queue execution for
-  member imports, payment corrections, and notification emails.
+- **Unit Tests**: Python `pytest` targeting SQLAlchemy models, services, and
+  Pydantic schemas. Use the in-memory Postgres fixture (`tests/conftest.py`) to
+  validate constraints and soft-delete behaviors.
+- **Integration Tests**: FastAPI `TestClient` + httpx sessions hit real routers
+  (`/members`, `/payments`, `/sponsorships`). Focus on imports, status
+  suggestion logic (six-month streaks, turning-18 automation), and sponsorship
+  reminder workflows.
+- **Background Jobs**: APScheduler tasks executed via dependency injection,
+  simulating promotion digests and finance reminders with frozen time to assert
+  scheduling cadence.
 
 ### Cross-Cutting
 - **Authorization Matrix**: Automated suite iterates through roles executing key

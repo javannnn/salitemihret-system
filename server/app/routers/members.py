@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -14,6 +14,8 @@ from app.models.household import Household
 from app.models.member import Member
 from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.ministry import Ministry
+from app.models.payment import Payment, PaymentServiceType
+from app.models.schools import SundaySchoolEnrollment
 from app.models.priest import Priest
 from app.models.tag import Tag
 from app.models.user import User
@@ -24,9 +26,13 @@ from app.schemas.member import (
     MemberDuplicateMatch,
     MemberDuplicateResponse,
     MemberListResponse,
+    MemberSpouseUpdate,
     MemberUpdate,
     ContributionPaymentCreate,
     ContributionPaymentOut,
+    SpouseOut,
+    MemberSundaySchoolParticipantOut,
+    MemberSundaySchoolPaymentOut,
 )
 from app.services.audit import record_member_changes, snapshot_member
 from app.services.members_query import apply_member_sort, build_members_query
@@ -37,7 +43,14 @@ from app.services.members_utils import (
     find_member_duplicates,
     generate_username,
 )
+from app.services.membership import (
+    apply_contribution_payment,
+    build_membership_events,
+    refresh_membership_state,
+    set_status_override,
+)
 from app.services.notifications import notify_contribution_change
+from app.services.sunday_school import SUNDAY_SCHOOL_SERVICE_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +60,7 @@ READ_ROLES = ("PublicRelations", "OfficeAdmin", "Registrar", "Admin", "Clerk", "
 WRITE_ROLES = ("PublicRelations", "Registrar", "Admin")
 DELETE_ROLES = ("PublicRelations", "Admin")
 FINANCE_ROLES = ("Admin", "FinanceAdmin")
+OVERRIDE_ROLES = {"Admin", "PublicRelations", "FinanceAdmin"}
 
 DEFAULT_CONTRIBUTION_AMOUNT = Decimal("75.00")
 DEFAULT_CONTRIBUTION_CURRENCY = "CAD"
@@ -104,6 +118,17 @@ def _set_ministries(db: Session, member: Member, ministry_ids: list[int]) -> Non
         member.ministries = []
 
 
+def _can_override_status(user: User) -> bool:
+    return any(role.name in OVERRIDE_ROLES for role in getattr(user, "roles", []))
+
+
+def _attach_membership_metadata(member: Member) -> None:
+    health = refresh_membership_state(member, persist=False)
+    events = build_membership_events(member, health)
+    setattr(member, "membership_health", health.__dict__)
+    setattr(member, "membership_events", [event.__dict__ for event in events])
+
+
 def _normalize_contribution(amount: Decimal, exception_reason: str | None) -> tuple[Decimal, str | None]:
     amount = amount.quantize(Decimal("0.01"))
     if amount <= 0:
@@ -142,6 +167,25 @@ def _enforce_contribution_flag(flag: bool | None) -> bool:
     if flag is False:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Membership contribution is mandatory")
     return True
+
+
+def _sunday_participant_status(record: SundaySchoolEnrollment, now_aware: datetime, now_naive: datetime) -> str:
+    if not record.pays_contribution:
+        return "Not contributing"
+    if not record.last_payment_at:
+        return "No payments yet"
+    last_payment = record.last_payment_at
+    if last_payment.tzinfo is None:
+        delta_days = (now_naive - last_payment).days
+    else:
+        delta_days = (now_aware - last_payment).days
+    return "Up to date" if delta_days <= 45 else "Overdue"
+
+
+def _decimal_or_none(value) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 @router.get("", response_model=MemberListResponse)
@@ -309,6 +353,30 @@ def create_member(
         created_by_id=current_user.id,
         updated_by_id=current_user.id,
     )
+    override_requested = any(
+        value is not None
+        for value in (
+            payload.status_override,
+            payload.status_override_value,
+            payload.status_override_reason,
+        )
+    )
+    if override_requested:
+        if not _can_override_status(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Status overrides require Admin, Finance Admin, or Public Relations roles.",
+            )
+        enabled = payload.status_override if payload.status_override is not None else True
+        desired_value = payload.status_override_value or payload.status
+        try:
+            set_status_override(member, enabled=enabled, value=desired_value, reason=payload.status_override_reason)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    else:
+        member.status_override = False
+        member.status_override_value = None
+        member.status_override_reason = None
     if payload.household_name:
         member.household = ensure_household(db, payload.household_name)
     elif payload.household_id is not None:
@@ -341,6 +409,8 @@ def create_member(
     if payload.ministry_ids:
         _set_ministries(db, member, payload.ministry_ids)
 
+    refresh_membership_state(member)
+
     db.commit()
     detail_member = (
         db.query(Member)
@@ -363,6 +433,7 @@ def create_member(
     if detail_member.pays_contribution:
         notify_contribution_change(detail_member, "pays_contribution", False, True)
 
+    _attach_membership_metadata(detail_member)
     return MemberDetailOut.from_orm(detail_member)
 
 
@@ -387,7 +458,74 @@ def get_member(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
-    return MemberDetailOut.from_orm(member)
+    _attach_membership_metadata(member)
+    response = MemberDetailOut.from_orm(member)
+
+    sunday_participants = (
+        db.query(SundaySchoolEnrollment)
+        .filter(
+            SundaySchoolEnrollment.member_id == member.id,
+            SundaySchoolEnrollment.is_active.is_(True),
+        )
+        .order_by(SundaySchoolEnrollment.last_name.asc(), SundaySchoolEnrollment.first_name.asc())
+        .all()
+    )
+    now_aware = datetime.now(timezone.utc)
+    now_naive = now_aware.replace(tzinfo=None)
+    participant_payload = [
+        MemberSundaySchoolParticipantOut(
+            id=record.id,
+            first_name=record.first_name,
+            last_name=record.last_name,
+            member_username=record.member_username,
+            category=getattr(record.category, "value", record.category),
+            pays_contribution=record.pays_contribution,
+            monthly_amount=_decimal_or_none(record.monthly_amount),
+            payment_method=record.payment_method,
+            last_payment_at=record.last_payment_at,
+            status=_sunday_participant_status(record, now_aware, now_naive),
+        )
+        for record in sunday_participants
+    ]
+
+    sunday_service = (
+        db.query(PaymentServiceType)
+        .filter(PaymentServiceType.code == SUNDAY_SCHOOL_SERVICE_CODE)
+        .first()
+    )
+    payment_payload: list[MemberSundaySchoolPaymentOut] = []
+    if sunday_service:
+        sunday_payments = (
+            db.query(Payment)
+            .options(selectinload(Payment.service_type))
+            .filter(
+                Payment.member_id == member.id,
+                Payment.service_type_id == sunday_service.id,
+            )
+            .order_by(Payment.posted_at.desc())
+            .limit(10)
+            .all()
+        )
+        payment_payload = [
+            MemberSundaySchoolPaymentOut(
+                id=payment.id,
+                amount=float(payment.amount),
+                currency=payment.currency,
+                method=payment.method,
+                memo=payment.memo,
+                posted_at=payment.posted_at,
+                status=payment.status,
+                service_type_label=payment.service_type.label if payment.service_type else sunday_service.label,
+            )
+            for payment in sunday_payments
+        ]
+
+    return response.copy(
+        update={
+            "sunday_school_participants": participant_payload,
+            "sunday_school_payments": payment_payload,
+        }
+    )
 
 
 @router.put("/{member_id}", response_model=MemberDetailOut)
@@ -448,8 +586,6 @@ def update_member(
         member.address_country = payload.address_country
     if payload.district is not None:
         member.district = payload.district
-    if payload.status is not None:
-        member.status = payload.status
     if payload.is_tither is not None:
         member.is_tither = payload.is_tither
     if payload.contribution_method is not None:
@@ -460,6 +596,29 @@ def update_member(
         member.household_size_override = payload.household_size_override
     if payload.has_father_confessor is not None:
         member.has_father_confessor = payload.has_father_confessor
+    override_requested = any(
+        value is not None
+        for value in (
+            payload.status,
+            payload.status_override,
+            payload.status_override_value,
+            payload.status_override_reason,
+        )
+    )
+    if override_requested:
+        if not _can_override_status(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Status overrides require Admin, Finance Admin, or Public Relations roles.",
+            )
+        enabled = payload.status_override if payload.status_override is not None else True
+        desired_value = payload.status_override_value or payload.status or member.status_override_value or member.status
+        try:
+            set_status_override(member, enabled=enabled, value=desired_value, reason=payload.status_override_reason)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    elif payload.status_override is not None and payload.status_override is False:
+        set_status_override(member, enabled=False, value=None, reason=None)
     if payload.household_name is not None:
         if payload.household_name.strip():
             member.household = ensure_household(db, payload.household_name)
@@ -523,6 +682,8 @@ def update_member(
     updated_pays_flag = payload.pays_contribution if payload.pays_contribution is not None else member.pays_contribution
     member.pays_contribution = _enforce_contribution_flag(updated_pays_flag)
 
+    refresh_membership_state(member)
+
     member.updated_by_id = current_user.id
 
     _ensure_unique_contacts(
@@ -550,6 +711,7 @@ def update_member(
     )
     if detail_member is None:
         detail_member = member
+    _attach_membership_metadata(detail_member)
 
     if detail_member.is_tither != previous_is_tither:
         notify_contribution_change(detail_member, "is_tither", previous_is_tither, detail_member.is_tither)
@@ -557,6 +719,52 @@ def update_member(
         notify_contribution_change(detail_member, "pays_contribution", previous_pays_contribution, detail_member.pays_contribution)
 
     return MemberDetailOut.from_orm(detail_member)
+
+
+@router.patch("/{member_id}/spouse", response_model=SpouseOut | None)
+def update_member_spouse(
+    *,
+    member_id: int,
+    payload: MemberSpouseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*WRITE_ROLES)),
+) -> SpouseOut | None:
+    member = (
+        db.query(Member)
+        .filter(Member.id == member_id, Member.deleted_at.is_(None))
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+
+    previous_snapshot = snapshot_member(member)
+    desired_status = payload.marital_status if payload.marital_status is not None else member.marital_status
+    spouse_payload = payload.spouse.dict() if payload.spouse else None
+
+    if spouse_payload and not desired_status:
+        desired_status = "Married"
+
+    if desired_status == "Married" and spouse_payload is None and member.spouse is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Spouse details are required for married members")
+
+    apply_spouse(member, spouse_payload)
+
+    if desired_status is not None:
+        member.marital_status = desired_status
+
+    if member.marital_status == "Married" and member.spouse is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Spouse details are required for married members")
+
+    member.updated_by_id = current_user.id
+
+    db.flush()
+    record_member_changes(db, member, previous_snapshot, current_user.id)
+    db.commit()
+    db.refresh(member)
+
+    if member.spouse:
+        return SpouseOut.from_orm(member.spouse)
+    return None
 
 
 @router.get(
@@ -614,6 +822,9 @@ def create_member_contribution(
         recorded_by_id=current_user.id,
     )
     db.add(payment)
+    posted_at = datetime.combine(payload.paid_at, datetime.min.time(), tzinfo=timezone.utc)
+    apply_contribution_payment(member, amount=amount, posted_at=posted_at)
+    refresh_membership_state(member)
     member.updated_by_id = current_user.id
     db.commit()
     db.refresh(payment)
@@ -665,11 +876,15 @@ def restore_member(
 
     old_snapshot = snapshot_member(member)
     member.deleted_at = None
-    member.status = "Inactive"
+    member.status_override = False
+    member.status_override_value = None
+    member.status_override_reason = None
+    refresh_membership_state(member)
     member.updated_by_id = current_user.id
 
     db.flush()
     record_member_changes(db, member, old_snapshot, current_user.id)
     db.commit()
     db.refresh(member)
+    _attach_membership_metadata(member)
     return MemberDetailOut.from_orm(member)

@@ -1,123 +1,130 @@
 # Architecture
 
 ## System Overview
-SaliteMihret System is delivered as an internal-facing web application backed by
-a Frappe ERPNext stack. A React + TypeScript front end consumes authenticated
-REST endpoints and Frappe whitelisted methods exposed by the
-`salitemiret` Frappe app. All services run in Docker Compose for local
-development and are deployed behind Nginx with TLS termination in staging and
-production.
+SaliteMihret now runs as a two-tier web application: a FastAPI backend
+(`server/app/main.py`) backed by PostgreSQL and a React 18 admin client built
+with Vite. SQLAlchemy models and Alembic migrations own the domain schema, while
+APScheduler jobs handle background automations (child promotions, reminders,
+license health checks). The backend is packaged as a uvicorn application managed
+by a systemd service (`salitemihret-backend` in staging/prod,
+`salitemihret-dev-backend` on the integration host). Nginx fronts the API and
+serves the built SPA from `/var/www/salitemihret`, proxying `/api` to the uvicorn
+process on `127.0.0.1:8000`.
 
-The application is organized as a monorepo containing:
-- `apps/salitemiret/` – custom Frappe app with DocTypes, hooks, scheduled jobs,
-  and API endpoints.
-- `frontend/` – Vite-powered React client.
-- `ops/` – Infrastructure as code, Docker Compose definitions, and GitHub
-  Actions workflows.
+### Repository Layout
+- `server/` – FastAPI app, SQLAlchemy models, Alembic migrations, APScheduler jobs
+- `frontend/` – React + Vite client (TanStack Query, Tailwind, shadcn/ui)
+- `docs/`, `specs/` – Spec-Kit source, progress logs, QA guides
+- `apps/` – Archived Frappe code kept only for historical reference (do not edit)
 
 ## Front-End Architecture
-- **Framework**: React 18 with TypeScript, built using Vite for fast iteration.
-- **Styling**: Tailwind CSS layered with shadcn/ui components to ensure design
-  consistency. The Neo-Lumina design language is captured via a dedicated theme
-  file and applied through Tailwind tokens.
-- **State & Data**: TanStack Query handles server state, caching, and optimistic
-  updates. Critical entities (Members, Sponsorships, Payments, Media Requests,
-  Volunteer Groups, Council Departments) map to dedicated query keys, each
-  including a `trace_id` header for observability.
-- **Routing**: React Router with nested layouts for topbar + sidebar regions and
-  drawer-based detail panels. Forms rely on React Hook Form with Zod validators
-  generated from DocType schemas.
-- **Internationalization**: `i18next` configured with English (`en`) and Amharic
-  (`am`) namespaces. Date and number formatting uses `Intl` APIs with locale
-  fallbacks.
-- **Motion**: Framer Motion orchestrates transitions for drawers, steppers, and
-  toast notifications. Animations respect reduced-motion preferences.
-- **Error & Telemetry**: Sentry JavaScript SDK captures exceptions, attaches the
-  current member context, and forwards the back-end `trace_id` via baggage.
+- **Framework**: React 18 with TypeScript 5, bundled via Vite for fast dev loops.
+- **Styling**: Tailwind CSS tokens layered with shadcn/ui primitives; the
+  Neo-Lumina palette lives in `frontend/src/styles/theme.ts`.
+- **State/Data**: TanStack Query handles server state (members, sponsorships,
+  payments, media, councils) with suspenseful loading and retry logic. Form
+  schemas use Zod mirrored from the FastAPI Pydantic models.
+- **Routing**: React Router (data routers) with nested layouts for the global
+  shell, module spaces, and drawer-based detail panes.
+- **Internationalization**: i18next with English/Amharic namespaces; locale
+  switching aligns with each member’s `preferred_language`.
+- **Motion**: Framer Motion drives drawer/dial transitions and respects reduced
+  motion settings.
+- **Error & Telemetry**: Sentry browser SDK sends exception traces plus the
+  backend `trace_id` for correlation.
 
 ## Back-End Architecture
-- **Framework**: Frappe 15 running the `salitemiret` app.
-- **Database**: MariaDB 10.x hosts all DocTypes defined in the domain model.
-- **Caching & Jobs**: Redis provides background job queuing via Frappe workers.
-  Member imports and long-running status suggestions enqueue jobs with job IDs
-  surfaced to the UI.
-- **Email**: Outbound SMTP supports templated notifications (e.g., PR alerts when
-  a child turns 18).
-- **Session Management**: Authenticated via Frappe session cookies with CSRF
-  tokens enforced on state-changing requests. Session TTL is 8 hours of
-  inactivity with rolling refresh.
-- **Audit & Versioning**: DocType changes leverage Frappe Versioning plus a
-  custom `Audit Event` DocType to record semantic events (import started,
-  payment corrected, media approved).
+- **Framework**: FastAPI + uvicorn with typed routers under `server/app/routers`.
+- **Database**: PostgreSQL 15 (SQLAlchemy models in `server/app/models`). Alembic
+  migrations live under `server/alembic/versions`.
+- **Auth**: JWT (`/auth/login`) backed by `users` + `roles` tables. FastAPI
+  dependencies enforce personas (`require_roles`).
+- **Services**: Modules for members, sponsorships, newcomers, priests, payments,
+  children promotion, and licensing. Shared helpers live under `app/services`.
+- **Background Jobs**: APScheduler in-process jobs kick off child promotion
+  digests and finance reminders on startup (falls back to a no-op scheduler if
+  APScheduler isn’t installed).
+- **Static & Uploads**: `uploads/` directory mounted under `/static` for avatar
+  and CSV artifacts. Object storage integration (MinIO/S3) is provided via the
+  upload adapters in `app/services/files`.
+- **Observability**: Structured JSON logging via `logging.config`, trace IDs on
+  every response header, and optional OpenTelemetry capture.
 
 ## API Surface
-- REST resources exposed through `/api/resource/<DocType>` for CRUD operations
-  gated by Frappe role-based permissions.
-- Whitelisted methods for domain workflows:
-  - `members.download_template`
-  - `members.preview_import`
-  - `members.import_members`
-  - `members.status_suggestions`
-  - `members.approve_status`
-  - `media.public_feed`
-- Responses are wrapped with metadata including `trace_id`, `timestamp`, and
-  pagination cursors where applicable.
+All endpoints live under `/api` on Nginx and `/` on uvicorn. Key routes:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/auth/login` | Returns JWT (`access_token`) for subsequent Bearer auth. |
+| GET | `/auth/whoami` | Current user profile + role list. |
+| GET/POST/PUT | `/members` | List/create/update members with filter, pagination, chip inputs. |
+| GET | `/members/{id}` | Detailed member profile with household + finance context. |
+| POST | `/members/{id}/archive` | Soft-delete member (Admin/PR only). |
+| POST | `/members/{id}/contributions` | Append contribution payment history. |
+| GET/POST | `/members/import/*` | Upload/preview/import CSVs (streaming responses). |
+| GET/POST | `/members/files/*` | Avatar upload + download (signed URLs). |
+| GET/POST | `/sponsorships` | Manage sponsorship pledges, reminders, beneficiary links. |
+| GET/POST | `/newcomers` | Intake pipeline and conversion to members. |
+| GET/POST | `/priests` | Father confessor directory powering controlled selects. |
+| GET | `/children/eligible` | Child promotion feed powering daily notifications. |
+| GET/POST | `/payments` | Member contribution ledger + exports. |
+| GET | `/license/status` | System license check consumed by the middleware guard. |
+
+Swagger/OpenAPI docs are auto-generated at `/docs` and `/openapi.json`.
 
 ## Authentication & Authorization
-- **Auth Flow**: Login via Frappe session login API. CSRF tokens are read from
-  `/api/method/frappe.auth.get_logged_user` and stored by TanStack Query.
-- **Roles**: Deny-by-default RBAC configured in Frappe. Role profiles map to
-  personas listed in the product vision. Sensitive endpoints require explicit
-  method-level allow rules.
-- **2FA**: Optional TOTP enforced for Finance Clerks and PR Administrators.
-- **Session Security**: Cookies flagged `HttpOnly`, `Secure`, `SameSite=Lax`; TLS
-  termination handled by Nginx with HSTS.
+- **Login**: `POST /auth/login` accepts email/password, validates via Passlib,
+  and returns a short-lived JWT signed with `settings.JWT_SECRET`.
+- **Session Handling**: Frontend stores the token in memory/localStorage and
+  sends `Authorization: Bearer <token>` on every request.
+- **Roles**: `users_roles` join table; tokens embed `roles` claim. Dependency
+  `require_roles` enforces endpoints at runtime.
+- **2FA**: Planned TOTP enforcement for Finance/Admin personas (tracked in
+  roadmap).
+- **License Gate**: Middleware checks the local license file and blocks requests
+  until activation completes (`/license/activate`).
 
-## Infrastructure
-- **Reverse Proxy**: Nginx routes traffic to the React static bundle (served via
-  `frontend` container) and the Frappe backend (`frappe` container). TLS uses
-  Let's Encrypt certificates with automatic renewal.
-- **Containerization**: Docker Compose orchestrates services:
-  - `frontend`
-  - `frappe`
-  - `scheduler` (Frappe worker)
-  - `worker`
-  - `mariadb`
-  - `redis`
-  - `smtp`
-- **Storage**: Persistent volumes for MariaDB data, Redis snapshotting (AOF) for
-  resilience, and shared file storage for uploaded media assets.
-- **Observability**: Sentry DSNs configured for frontend and backend containers.
-  Structured logs are emitted to stdout in JSON and aggregated by the logging
-  stack (e.g., Loki in production).
+## Infrastructure & Runtime
+- **Reverse Proxy**: Nginx terminates TLS, serves the built SPA, and proxies
+  `/api` to uvicorn on localhost port 8000.
+- **Systemd Service**: `salitemihret-backend.service` activates the FastAPI app
+  inside `/opt/salitemihret/app/server/.venv` with `uvicorn app.main:app`.
+  Local parity uses `salitemihret-dev-backend`. Restart commands are documented
+  in `docs/deploy-pipeline.md`.
+- **Databases**: PostgreSQL runs as a managed service (RDS / self-hosted). Local
+  dev uses `postgresql://postgres:postgres@localhost:5432/saliteone`.
+- **Caches & Queues**: Redis optional; currently used for rate-limits and future
+  background workers (flagged in roadmap).
+- **File Storage**: Uploads stored on disk plus optional MinIO/S3 sync for
+  backups/export artifacts.
+- **Secrets**: Managed through `.env` locally and systemd EnvironmentFiles in
+  staging/prod. GitHub Actions inject secrets during CI deploy stages.
 
 ## Environments
 | Environment | Purpose | Data | Deployment |
 |-------------|---------|------|------------|
-| Local (Docker Compose) | Developer sandbox with seeded fixtures. | Sanitized fixtures only. | `docker compose up` with hot reload for frontend. |
-| Staging | Full integration testing, automated E2E suite, stakeholder demos. | Nightly anonymized snapshot from production. | GitHub Actions deploy on tags matching `staging-*`. |
-| Production | Live system for parish teams. | Authoritative records. | GitHub Actions deploy on tags matching `prod-*` after manual approval. |
+| Local | Developer sandbox (`make dev`, Vite `pnpm dev`). | Demo seed + sanitized fixtures. | Run uvicorn locally or reuse the dev systemd service. |
+| Integration (dev host) | Always-on shared environment mirroring prod topology. | Demo dataset w/ scrubbed PII. | GitHub Actions deploy to `salitemihret-dev-backend` + Nginx. |
+| Staging | Client-visible QA + UAT. | Nightly anonymized snapshot from prod. | GitHub Actions -> SSH runner, Alembic upgrade, systemd restart. |
+| Production | Live system for parish operations. | Authoritative records. | Manual approval in pipeline, zero-downtime Alembic migration, rolling restart. |
 
 ## Dependencies & Integrations
-- **External Services**: SMTP relay, Sentry, Let's Encrypt ACME.
-- **Internal Jobs**: Cron triggers for contribution streak evaluation, child
-  adulthood transitions, sponsorship renewal reminders, and nightly backups.
-- **File Delivery**: Error CSVs stored in S3-compatible object storage and linked
-  via signed URLs for download.
+- SMTP relay for notifications (SES/Postfix depending on env).
+- Sentry (frontend + backend) for error telemetry.
+- Let's Encrypt ACME for TLS certificates, auto-renewed via cron/systemd timers.
+- Optional MinIO/S3 for CSV exports, avatars, and audit evidence.
+- APScheduler + cron for recurring membership reminders and data hygiene.
 
 ## Deployment Workflow
-1. GitHub Actions pipeline builds frontend and backend images, runs tests, and
-   generates fixtures.
-2. Successful pipelines push images to the container registry and update Compose
-   manifests in the environment repository.
-3. Staging deployments run database migrations, seed anonymized data, and kick
-   off Cypress smoke tests.
-4. Production deployments require change approval, run migrations in safe mode,
-   and rotate encryption keys if necessary.
+1. CI (GitHub Actions) runs `pnpm test`, `pnpm build`, `pytest`, and `alembic upgrade --sql` dry runs.
+2. On success, artifacts are pushed; server deploy runs `git pull`, `pip install -r requirements.txt`, `alembic upgrade head`, and rebuilds the frontend.
+3. Restart systemd service: `sudo systemctl restart salitemihret-backend`.
+4. Rsync the Vite build to `/var/www/salitemihret/` and reload Nginx.
+5. Run smoke tests (`/health`, `/auth/login`, `/members?page=1`) and UI spot checks.
 
-## Disaster Recovery
-- Point-in-time recovery capability via MariaDB binlogs replicated to object
-  storage.
-- Hourly Redis snapshots ensure requeuable jobs.
-- S3-versioned media storage retains previous assets for 30 days.
-- Runbooks define RTO of 4 hours and RPO of 1 hour, validated quarterly.
+## Disaster Recovery & Backups
+- PostgreSQL uses daily base backups + WAL archiving (RPO ≤ 1 hour).
+- Uploaded files synced nightly to object storage (versioned bucket, 30-day retention).
+- Environment secrets stored in Bitwarden vault + infra repo (Ansible Vault) for recovery.
+- Runbooks define RTO ≤ 4 hours. Quarterly DR drills cover DB restore, Alembic
+  replays, and service reconfiguration.

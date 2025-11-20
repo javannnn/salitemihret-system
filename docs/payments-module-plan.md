@@ -25,7 +25,9 @@ Deliver the SPEC-PAY-001 payments ledger: immutable payment records with correct
   - `payments` (immutable ledger rows)
   - `payment_receipts` (receipt metadata, optional attachment URL)
 - SQLAlchemy models + Pydantic schemas for the above.
-- Seed script updates to populate baseline service types (Tithe, Contribution, SchoolFee, Sponsorship).
+- Seed script updates to populate baseline service types (Tithe, Contribution, SchoolFee, Sponsorship) and
+  a runtime guard that auto-creates any missing defaults when `/payments/service-types` is queried. This keeps
+  Finance Admin forms populated even if the reference data was never seeded.
 
 ### Phase 2 – Services & APIs
 

@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from app.models.user import User
 from app.schemas.sponsorship import (
     SponsorshipCreate,
     SponsorshipListResponse,
+    SponsorshipMetrics,
     SponsorshipOut,
     SponsorshipUpdate,
 )
@@ -28,6 +31,9 @@ def list_sponsorships(
     sponsor_id: int | None = Query(None),
     frequency: str | None = Query(None),
     q: str | None = Query(None),
+    has_newcomer: bool | None = Query(None, alias="has_newcomer"),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipListResponse:
@@ -40,7 +46,18 @@ def list_sponsorships(
         sponsor_id=sponsor_id,
         frequency=frequency,
         search=q,
+        has_newcomer=has_newcomer,
+        start_date=start_date,
+        end_date=end_date,
     )
+
+
+@router.get("/metrics", response_model=SponsorshipMetrics, status_code=status.HTTP_200_OK)
+def get_sponsorship_metrics(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> SponsorshipMetrics:
+    return sponsorships_service.get_sponsorship_metrics(db)
 
 
 @router.post("", response_model=SponsorshipOut, status_code=status.HTTP_201_CREATED)

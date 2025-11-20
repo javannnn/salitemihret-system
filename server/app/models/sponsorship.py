@@ -10,6 +10,17 @@ from app.core.db import Base
 SponsorshipStatus = Enum("Draft", "Active", "Suspended", "Completed", "Closed", name="sponsorship_status")
 SponsorshipFrequency = Enum("OneTime", "Monthly", "Quarterly", "Yearly", name="sponsorship_frequency")
 SponsorshipDecision = Enum("Approved", "Rejected", "Pending", name="sponsorship_decision")
+SponsorshipPledgeChannel = Enum("InPerson", "OnlinePortal", "Phone", "EventBooth", name="sponsorship_pledge_channel")
+SponsorshipReminderChannel = Enum("Email", "SMS", "Phone", "WhatsApp", name="sponsorship_reminder_channel")
+SponsorshipMotivation = Enum(
+    "HonorMemorial",
+    "CommunityOutreach",
+    "Corporate",
+    "ParishInitiative",
+    "Other",
+    name="sponsorship_motivation",
+)
+SponsorshipNotesTemplate = Enum("FollowUp", "PaymentIssue", "Gratitude", "Escalation", name="sponsorship_notes_template")
 
 
 class Sponsorship(Base):
@@ -22,6 +33,8 @@ class Sponsorship(Base):
     beneficiary_name = Column(String(255), nullable=False)
     father_of_repentance_id = Column(Integer, ForeignKey("priests.id", ondelete="SET NULL"), nullable=True)
     volunteer_service = Column(String(255), nullable=True)
+    volunteer_services = Column(Text, nullable=True)
+    volunteer_service_other = Column(String(255), nullable=True)
     payment_information = Column(String(255), nullable=True)
     last_sponsored_date = Column(Date, nullable=True)
     frequency = Column(SponsorshipFrequency, nullable=False, default="Monthly")
@@ -32,12 +45,16 @@ class Sponsorship(Base):
     status = Column(SponsorshipStatus, nullable=False, default="Draft", index=True)
     monthly_amount = Column(Numeric(12, 2), nullable=False)
     program = Column(String(120), nullable=True, index=True)
+    pledge_channel = Column(SponsorshipPledgeChannel, nullable=True)
+    reminder_channel = Column(SponsorshipReminderChannel, nullable=True, default="Email")
+    motivation = Column(SponsorshipMotivation, nullable=True)
     budget_month = Column(Integer, nullable=True)
     budget_year = Column(Integer, nullable=True)
     budget_amount = Column(Numeric(12, 2), nullable=True)
     budget_slots = Column(Integer, nullable=True)
     used_slots = Column(Integer, nullable=False, default=0)
     notes = Column(Text, nullable=True)
+    notes_template = Column(SponsorshipNotesTemplate, nullable=True)
     reminder_last_sent = Column(DateTime, nullable=True)
     reminder_next_due = Column(DateTime, nullable=True)
     assigned_staff_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

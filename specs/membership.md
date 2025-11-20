@@ -9,6 +9,20 @@
 - Household relationships allow linking spouses/children and propagating contact updates. *(BRD §Household Relations)*
 - Status history tracks changes with approvals and suggestion metadata. *(BRD §Status Timeline)*
 - Contribution streak metadata stored for automated pastoral nudges. *(BRD §Contribution Streaks)*
+- City/region/country selections now reference curated lookup DocTypes, eliminating inconsistent spelling in address filters. *(BRD §Membership Fields)*
+- Contact preference and communication channel fields store select/multiselect values rather than open text to keep outreach automation reliable. *(BRD §Engagement Preferences)*
+
+## Controlled Inputs & UI Patterns
+| Field/Group | Options | UI Pattern | Notes |
+|-------------|---------|-----------|-------|
+| Preferred language | en, am, ti, fr, ar | Segmented control with flag iconography | Default pulled from newcomer intake but editable from drawer. |
+| Marital status | Single, Married, Separated, Divorced, Widowed | Chip group (single select) | Drives spouse form display; no free text reason field. |
+| Contact preference | Phone, SMS, Email, WhatsApp, Signal | Icon chips (single select) | Required for every member; fallback to phone if unset via migration guard. |
+| Secondary channels | Same list as above | Multi-select pill list | Shows as inline badges to prevent comma-separated strings. |
+| Address hierarchy | Geo Country → Geo Region → Geo City | Cascading combobox with typeahead | All values come from lookup tables managed under Admin → Reference Data. |
+| Ministry & tag assignment | Predefined ministry/tag DocTypes | Tokenized multi-select with inline “+ Add” modal | Chips ensure consistent naming and styling in roster filters. |
+| Father Confessor | `Priest` DocType list | Search-select with inline create | Checkbox replaced with explicit selector; “None yet” option documents pending assignments. |
+| Contribution method | Cash, Direct Deposit, e-Transfer, Credit | Button group | Tied to finance automation; optional note replaced with structured finance exception selector. |
 
 ## Business Rules
 - Mandatory data: member ID/username, first name, last name, gender, preferred language. *(BRD §Membership Rules)*
@@ -17,6 +31,9 @@
 - Archive (soft delete) prevents new payments but preserves ledger references. *(BRD §Membership Archive)*
 - Contribution streak job notifies PR Admin after six consecutive month contributions. *(BRD §Contribution Streaks)*
 - Turning-18 automation queues reminder to transition from child programs. *(BRD §Age Milestones)*
+- Contact preference is now a required select; automation refuses to send reminders via unspecified channels and falls back to phone only if the member affirmatively opts out of digital options.
+- Address fields must be chosen from curated lookups; manual entry is limited to `Address Line 1` and postal code to minimize duplicates in filters.
+- Free-form ministry/tag creation is disabled for clerks; only Admin/PR roles can add new chips via the inline modal to protect analytics consistency.
 
 ## API Contract (MVP)
 | Method | Path | Description | Roles |

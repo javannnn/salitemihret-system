@@ -65,6 +65,7 @@ export type Member = {
   last_name: string;
   status: MemberStatus;
   gender?: string | null;
+  birth_date?: string | null;
   marital_status?: string | null;
   baptismal_name?: string | null;
   district?: string | null;
@@ -87,8 +88,55 @@ export type Member = {
   family_count: number;
   household_size_override?: number | null;
   has_father_confessor: boolean;
+  status_override?: boolean;
+  status_override_value?: MemberStatus | null;
+  status_override_reason?: string | null;
   created_at?: string;
   updated_at?: string;
+};
+
+export type MemberSundaySchoolParticipantStatus = "Up to date" | "Overdue" | "No payments yet" | "Not contributing";
+
+export type MemberSundaySchoolParticipant = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  member_username: string;
+  category: SundaySchoolCategory | string;
+  pays_contribution: boolean;
+  monthly_amount?: number | null;
+  payment_method?: string | null;
+  last_payment_at?: string | null;
+  status: MemberSundaySchoolParticipantStatus;
+};
+
+export type MemberSundaySchoolPayment = {
+  id: number;
+  amount: number;
+  currency: string;
+  method?: string | null;
+  memo?: string | null;
+  posted_at: string;
+  status: Payment["status"];
+  service_type_label: string;
+};
+
+export type MembershipHealth = {
+  effective_status: MemberStatus;
+  auto_status: MemberStatus;
+  override_active: boolean;
+  override_reason?: string | null;
+  last_paid_at?: string | null;
+  next_due_at?: string | null;
+  days_until_due?: number | null;
+  overdue_days?: number | null;
+};
+
+export type MembershipEvent = {
+  timestamp: string;
+  type: "Renewal" | "Overdue" | "Override";
+  label: string;
+  description?: string | null;
 };
 
 export type MemberDetail = Member & {
@@ -101,6 +149,10 @@ export type MemberDetail = Member & {
   ministries: Ministry[];
   father_confessor?: Priest | null;
   contribution_history: ContributionPayment[];
+  sunday_school_participants: MemberSundaySchoolParticipant[];
+  sunday_school_payments: MemberSundaySchoolPayment[];
+  membership_health: MembershipHealth;
+  membership_events: MembershipEvent[];
 };
 
 export type MemberSummary = {

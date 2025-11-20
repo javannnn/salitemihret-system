@@ -24,6 +24,7 @@ from app.schemas.member import (
     ALLOWED_MEMBER_GENDERS,
     ALLOWED_MEMBER_MARITAL_STATUSES,
     ALLOWED_MEMBER_STATUSES,
+    normalize_member_phone,
 )
 from app.services.audit import empty_member_snapshot, record_member_changes, snapshot_member
 from app.services.members_utils import apply_children, apply_spouse, ensure_priest, generate_username
@@ -218,7 +219,10 @@ def _clean_row(row_number: int, row: dict[str, str]) -> dict[str, Any]:
             if key == "phone":
                 if value is None:
                     raise ImportRowError(row_number, "phone cannot be empty")
-                cleaned[key] = value
+                try:
+                    cleaned[key] = normalize_member_phone(value)
+                except ValueError as exc:
+                    raise ImportRowError(row_number, str(exc)) from exc
             else:
                 cleaned[key] = value
 
@@ -301,6 +305,11 @@ def _clean_row(row_number: int, row: dict[str, str]) -> dict[str, Any]:
     spouse_gender = _clean_string(row.get("spouse_gender")) if "spouse_gender" in row else None
     spouse_country = _clean_string(row.get("spouse_country_of_birth")) if "spouse_country_of_birth" in row else None
     spouse_phone = _clean_string(row.get("spouse_phone")) if "spouse_phone" in row else None
+    if spouse_phone:
+        try:
+            spouse_phone = normalize_member_phone(spouse_phone)
+        except ValueError as exc:
+            raise ImportRowError(row_number, f"Invalid spouse phone: {exc}") from exc
     spouse_email = _clean_string(row.get("spouse_email")) if "spouse_email" in row else None
 
     spouse_fields_present = any(

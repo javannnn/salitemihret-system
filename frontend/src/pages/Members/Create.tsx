@@ -1,6 +1,7 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button } from "@/components/ui";
+import { PhoneInput } from "@/components/PhoneInput";
 import {
   ApiError,
   MemberDuplicateMatch,
@@ -10,6 +11,12 @@ import {
   findMemberDuplicates,
   getMembersMeta,
 } from "@/lib/api";
+import {
+  getCanonicalCanadianPhone,
+  hasValidCanadianPhone,
+  hasValidEmail,
+  normalizeEmailInput,
+} from "@/lib/validation";
 import { useToast } from "@/components/Toast";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { Trash2 } from "lucide-react";
@@ -17,6 +24,14 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { ShieldAlert } from "lucide-react";
 
 const STATUS_OPTIONS: MemberStatus[] = ["Active", "Inactive", "Pending", "Archived"];
+const FALLBACK_GENDERS = ["Male", "Female"];
+type QuickCreateDraft = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  status: MemberStatus;
+};
 
 type SpouseFormState = {
   first_name: string;
@@ -35,6 +50,11 @@ type ChildFormState = {
   birth_date: string;
   country_of_birth: string;
   notes: string;
+};
+
+type ContactFieldErrors = {
+  phone?: string;
+  email?: string;
 };
 
 const makeChildKey = () =>
@@ -62,6 +82,8 @@ export default function CreateMember() {
 
 function CreateMemberInner() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const quickCreateDraft = (location.state as { quickCreateDraft?: QuickCreateDraft } | null)?.quickCreateDraft;
   const toast = useToast();
   const permissions = usePermissions();
   const canEditStatus = permissions.editStatus;
@@ -70,14 +92,14 @@ function CreateMemberInner() {
   const [loading, setLoading] = useState(false);
   const [meta, setMeta] = useState<MembersMeta | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
-  const [form, setForm] = useState({
-    first_name: "",
+  const [form, setForm] = useState(() => ({
+    first_name: quickCreateDraft?.first_name ?? "",
     middle_name: "",
-    last_name: "",
+    last_name: quickCreateDraft?.last_name ?? "",
     baptismal_name: "",
-    email: "",
-    phone: "",
-    status: "Active" as MemberStatus,
+    email: quickCreateDraft?.email ?? "",
+    phone: quickCreateDraft?.phone ?? "",
+    status: (quickCreateDraft?.status ?? "Active") as MemberStatus,
     gender: "",
     marital_status: "",
     birth_date: "",
@@ -99,7 +121,13 @@ function CreateMemberInner() {
     household_size_override: "",
     tag_ids: [] as number[],
     ministry_ids: [] as number[],
-  });
+  }));
+
+  useEffect(() => {
+    if (quickCreateDraft) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [quickCreateDraft, navigate, location.pathname]);
   const [selectedHousehold, setSelectedHousehold] = useState<string>("");
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [fatherConfessorId, setFatherConfessorId] = useState<string>("");
@@ -108,6 +136,20 @@ function CreateMemberInner() {
   const exceptionReasons = meta?.contribution_exception_reasons ?? [];
   const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<ContactFieldErrors>({});
+  const genderOptions = useMemo(() => (meta?.genders?.length ? meta.genders : FALLBACK_GENDERS), [meta?.genders]);
+  const ensureSpouseState = useCallback(
+    (current?: SpouseFormState | null): SpouseFormState =>
+      current ?? {
+        first_name: "",
+        last_name: "",
+        gender: "",
+        country_of_birth: "",
+        phone: "",
+        email: "",
+      },
+    [],
+  );
 
   useEffect(() => {
     if (!permissions.createMembers) {
@@ -159,10 +201,10 @@ function CreateMemberInner() {
 
   useEffect(() => {
     const email = form.email.trim();
-    const phone = form.phone.trim();
+    const canonicalPhone = hasValidCanadianPhone(form.phone) ? form.phone : null;
     const first = form.first_name.trim();
     const last = form.last_name.trim();
-    const shouldCheck = !!email || !!phone || (!!first && !!last);
+    const shouldCheck = !!email || !!canonicalPhone || (!!first && !!last);
     if (!shouldCheck) {
       setDuplicateMatches([]);
       setDuplicateLoading(false);
@@ -173,7 +215,7 @@ function CreateMemberInner() {
     const timer = setTimeout(() => {
       findMemberDuplicates({
         email: email || undefined,
-        phone: phone || undefined,
+        phone: canonicalPhone || undefined,
         first_name: first || undefined,
         last_name: last || undefined,
       })
@@ -203,14 +245,24 @@ function CreateMemberInner() {
 
   const handleChange = (field: keyof typeof form) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      const value = event.target.type === "checkbox"
+      const rawValue = event.target.type === "checkbox"
         ? (event.target as HTMLInputElement).checked
         : event.target.value;
+      let value = rawValue;
+      if (typeof value === "string" && field === "email") {
+        value = normalizeEmailInput(value);
+        setFieldErrors((prev) => ({ ...prev, email: undefined }));
+      }
       setForm((prev) => ({
         ...prev,
         [field]: value,
       }));
     };
+
+  const handlePrimaryPhoneChange = (nextValue: string) => {
+    setFieldErrors((prev) => ({ ...prev, phone: undefined }));
+    setForm((prev) => ({ ...prev, phone: nextValue }));
+  };
 
   const handleContributionExceptionChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;
@@ -221,22 +273,20 @@ function CreateMemberInner() {
     }));
   };
 
-  const updateSpouseField = useCallback((field: keyof SpouseFormState, value: string) => {
-    setSpouseForm((prev) => {
-      if (!prev) {
-        return {
-          first_name: "",
-          last_name: "",
-          gender: "",
-          country_of_birth: "",
-          phone: "",
-          email: "",
-          [field]: value,
-        } as SpouseFormState;
+  const updateSpouseField = useCallback(
+    (field: keyof SpouseFormState, value: string) => {
+      let nextValue = value;
+      if (field === "email") {
+        nextValue = normalizeEmailInput(value);
       }
-      return { ...prev, [field]: value };
-    });
-  }, []);
+      setSpouseForm((prev) => ({ ...ensureSpouseState(prev), [field]: nextValue }));
+    },
+    [ensureSpouseState],
+  );
+
+  const handleSpousePhoneChange = (nextValue: string) => {
+    setSpouseForm((prev) => ({ ...ensureSpouseState(prev), phone: nextValue }));
+  };
 
   const updateChildField = useCallback((key: string, field: keyof Omit<ChildFormState, "key">, value: string) => {
     setChildrenForm((prev) => prev.map((child) => (child.key === key ? { ...child, [field]: value } : child)));
@@ -261,6 +311,25 @@ function CreateMemberInner() {
       return { ...prev, tag_ids: Array.from(next) };
     });
   };
+
+  const validateContacts = useCallback(() => {
+    const errors: ContactFieldErrors = {};
+    const canonicalPhone = getCanonicalCanadianPhone(form.phone);
+    if (!canonicalPhone) {
+      errors.phone = "Use +1 followed by 10 digits (e.g., +16475550123).";
+    }
+    const emailValue = form.email.trim();
+    const normalizedEmail = emailValue ? normalizeEmailInput(emailValue) : "";
+    if (normalizedEmail && !hasValidEmail(normalizedEmail)) {
+      errors.email = "Enter a valid email address.";
+    }
+    setFieldErrors(errors);
+    return {
+      valid: Object.keys(errors).length === 0,
+      canonicalPhone,
+      normalizedEmail: normalizedEmail || null,
+    };
+  }, [form.phone, form.email]);
 
   const toggleMinistry = (id: number) => {
     setForm((prev) => {
@@ -303,8 +372,9 @@ function CreateMemberInner() {
       toast.push("First and last name are required");
       return;
     }
-    if (!form.phone.trim()) {
-      toast.push("Phone number is required");
+    const contacts = validateContacts();
+    if (!contacts.valid || !contacts.canonicalPhone) {
+      toast.push("Enter a valid Canadian phone number before saving.");
       return;
     }
     if (form.has_father_confessor && !fatherConfessorId) {
@@ -340,10 +410,10 @@ function CreateMemberInner() {
         middle_name: trim(form.middle_name),
         last_name: form.last_name.trim(),
         baptismal_name: trim(form.baptismal_name),
-        email: trim(form.email),
-        phone: form.phone.trim(),
+        email: contacts.normalizedEmail,
+        phone: contacts.canonicalPhone,
         status: form.status,
-        gender: trim(form.gender),
+        gender: form.gender && genderOptions.includes(form.gender) ? form.gender : null,
         marital_status: trim(form.marital_status),
         birth_date: form.birth_date || null,
         join_date: form.join_date || null,
@@ -389,12 +459,22 @@ function CreateMemberInner() {
 
       if (form.marital_status === "Married") {
         const data = spouseForm!;
+        let spousePhone: string | null = null;
+        if (data.phone.trim()) {
+          const canonicalSpousePhone = getCanonicalCanadianPhone(data.phone);
+          if (!canonicalSpousePhone) {
+            toast.push("Spouse phone must be a valid Canadian number.");
+            setLoading(false);
+            return;
+          }
+          spousePhone = canonicalSpousePhone;
+        }
         payload.spouse = {
           first_name: data.first_name.trim(),
           last_name: data.last_name.trim(),
-          gender: data.gender || null,
+          gender: data.gender && genderOptions.includes(data.gender) ? data.gender : null,
           country_of_birth: trim(data.country_of_birth),
-          phone: trim(data.phone),
+          phone: spousePhone,
           email: trim(data.email),
         };
       }
@@ -403,7 +483,7 @@ function CreateMemberInner() {
         .map((child) => ({
           first_name: child.first_name.trim(),
           last_name: child.last_name.trim(),
-          gender: child.gender || null,
+          gender: child.gender && genderOptions.includes(child.gender) ? child.gender : null,
           birth_date: child.birth_date || null,
           country_of_birth: child.country_of_birth.trim() || null,
           notes: child.notes.trim() || null,
@@ -467,7 +547,7 @@ function CreateMemberInner() {
               <label className="text-xs uppercase text-mute">Gender</label>
               <Select value={form.gender} onChange={handleChange("gender")}>
                 <option value="">Not set</option>
-                {(meta?.genders ?? []).map((gender) => (
+                {genderOptions.map((gender) => (
                   <option key={gender} value={gender}>
                     {gender}
                   </option>
@@ -514,11 +594,25 @@ function CreateMemberInner() {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="text-xs uppercase text-mute">Email</label>
-              <Input value={form.email} onChange={handleChange("email")} type="email" />
+              <Input
+                value={form.email}
+                onChange={handleChange("email")}
+                type="email"
+                placeholder="name@example.com"
+                aria-invalid={fieldErrors.email ? "true" : undefined}
+              />
+              {fieldErrors.email && <p className="text-xs text-red-500 mt-1">{fieldErrors.email}</p>}
             </div>
             <div>
               <label className="text-xs uppercase text-mute">Phone</label>
-              <Input value={form.phone} onChange={handleChange("phone")} required />
+              <PhoneInput
+                value={form.phone}
+                onChange={handlePrimaryPhoneChange}
+                aria-invalid={fieldErrors.phone ? "true" : undefined}
+                required
+              />
+              <p className="text-xs text-mute mt-1">Canadian mobile numbers auto-format with +1.</p>
+              {fieldErrors.phone && <p className="text-xs text-red-500">{fieldErrors.phone}</p>}
             </div>
             <div>
               <label className="text-xs uppercase text-mute">District</label>
@@ -760,7 +854,7 @@ function CreateMemberInner() {
                     onChange={(event) => updateSpouseField("gender", event.target.value)}
                   >
                     <option value="">Not set</option>
-                    {(meta?.genders ?? []).map((gender) => (
+                    {genderOptions.map((gender) => (
                       <option key={gender} value={gender}>
                         {gender}
                       </option>
@@ -776,10 +870,7 @@ function CreateMemberInner() {
                 </div>
                 <div>
                   <label className="text-xs uppercase text-mute">Phone</label>
-                  <Input
-                    value={spouseForm?.phone ?? ""}
-                    onChange={(event) => updateSpouseField("phone", event.target.value)}
-                  />
+                  <PhoneInput value={spouseForm?.phone ?? ""} onChange={handleSpousePhoneChange} />
                 </div>
                 <div>
                   <label className="text-xs uppercase text-mute">Email</label>
@@ -843,7 +934,7 @@ function CreateMemberInner() {
                           onChange={(event) => updateChildField(child.key, "gender", event.target.value)}
                         >
                           <option value="">Not set</option>
-                          {(meta?.genders ?? []).map((gender) => (
+                          {genderOptions.map((gender) => (
                             <option key={gender} value={gender}>
                               {gender}
                             </option>

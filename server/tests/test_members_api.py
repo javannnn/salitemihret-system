@@ -162,3 +162,29 @@ def test_list_includes_archived_when_requested(client, authorize, admin_user, sa
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["status"] == "Archived"
+
+
+def test_member_spouse_patch_flow(client, authorize, registrar_user, sample_member, db_session):
+    authorize(registrar_user)
+    payload = {
+        "marital_status": "Married",
+        "spouse": {"first_name": "Saba", "last_name": "Kidane", "phone": "+16475550123"},
+    }
+    response = client.patch(f"/members/{sample_member.id}/spouse", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["full_name"] == "Saba Kidane"
+
+    member = db_session.get(Member, sample_member.id)
+    assert member.spouse is not None
+    assert member.marital_status == "Married"
+
+    clear_resp = client.patch(
+        f"/members/{sample_member.id}/spouse",
+        json={"marital_status": "Single", "spouse": None},
+    )
+    assert clear_resp.status_code == 200
+    assert clear_resp.json() is None
+    member = db_session.get(Member, sample_member.id)
+    assert member.spouse is None
+    assert member.marital_status == "Single"
