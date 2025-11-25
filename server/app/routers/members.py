@@ -51,6 +51,7 @@ from app.services.membership import (
 )
 from app.services.notifications import notify_contribution_change
 from app.services.sunday_school import SUNDAY_SCHOOL_SERVICE_CODE
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +460,27 @@ def get_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
     _attach_membership_metadata(member)
-    response = MemberDetailOut.from_orm(member)
+    try:
+        response = MemberDetailOut.from_orm(member)
+    except ValidationError as exc:
+        errors = exc.errors()
+        logger.exception(
+            "member serialization failed",
+            extra={"member_id": member_id, "errors": errors},
+        )
+        first = errors[0] if errors else {"loc": [], "msg": "Unknown validation error"}
+        loc = ".".join(str(part) for part in first.get("loc", []))
+        msg = first.get("msg", "Invalid data")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Member {member_id} has invalid data at {loc or 'unknown field'}: {msg}",
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.exception("member detail unexpected error", extra={"member_id": member_id})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Member {member_id} could not be loaded (unexpected error).",
+        ) from exc
 
     sunday_participants = (
         db.query(SundaySchoolEnrollment)

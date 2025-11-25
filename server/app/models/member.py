@@ -101,6 +101,7 @@ class Member(Base):
         order_by="MemberContributionPayment.paid_at.desc(), MemberContributionPayment.id.desc()",
     )
     abenet_enrollments = relationship("AbenetEnrollment", back_populates="parent")
+    user_link = relationship("UserMemberLink", back_populates="member", uselist=False)
 
     @property
     def family_count(self) -> int:

@@ -550,7 +550,7 @@ export default function SchoolsWorkspace() {
           <p className="text-sm text-mute">Manage Abenet literacy training and the upcoming Sunday School module.</p>
         </div>
       </div>
-      <div className="flex gap-3 border-b border-border">
+      <div data-tour="schools-tabs" className="flex gap-3 border-b border-border">
         {[
           { key: "abenet", label: "Abenet School" },
           { key: "sundayschool", label: "Sunday School" },
@@ -568,7 +568,7 @@ export default function SchoolsWorkspace() {
         ))}
       </div>
       {activeTab === "abenet" ? (
-        <div className="space-y-6">
+        <div className="space-y-6" data-tour="schools-abenet-list">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-semibold">Abenet School</h2>
@@ -576,6 +576,7 @@ export default function SchoolsWorkspace() {
             </div>
             {canManage && (
               <Button
+                data-tour="schools-enrollment"
                 onClick={() => {
                   resetEnrollmentModal();
                   setShowEnrollmentModal(true);
@@ -998,7 +999,7 @@ export default function SchoolsWorkspace() {
         )}
       </AnimatePresence>        </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6" data-tour="schools-sunday-list">
           <Card className="p-4 grid gap-4 md:grid-cols-4">
             <div>
               <p className="text-xs uppercase text-mute">Participants</p>
@@ -1189,135 +1190,18 @@ export default function SchoolsWorkspace() {
             )}
           </Card>
 
-          <Card className="p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">Content & Publishing</h3>
-                <p className="text-sm text-mute">Manage Mezmur, Lessons, and Art submissions before they go live.</p>
-              </div>
-              <div className="flex gap-2">
-                <Select value={contentTypeFilter} onChange={(event) => setContentTypeFilter(event.target.value as SundaySchoolContent["type"])}>
-                  <option value="Mezmur">Mezmur</option>
-                  <option value="Lesson">Lesson</option>
-                  <option value="Art">Art</option>
-                </Select>
-                <Select value={contentStatusFilter} onChange={(event) => setContentStatusFilter(event.target.value as SundaySchoolContent["status"] | "All")}>
-                  <option value="All">All statuses</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Approved">Approved</option>
-                  <option value="Rejected">Rejected</option>
-                </Select>
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <h4 className="text-sm font-semibold">New content</h4>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Title</label>
-                  <Input value={contentForm.title} onChange={(event) => setContentForm((prev) => ({ ...prev, title: event.target.value }))} />
-                </div>
-                {contentTypeFilter !== "Art" && (
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Body</label>
-                    <Textarea
-                      rows={3}
-                      value={contentForm.body || ""}
-                      onChange={(event) => setContentForm((prev) => ({ ...prev, body: event.target.value }))}
-                    />
-                  </div>
-                )}
-                {contentTypeFilter === "Art" ? (
-                  <div className="grid gap-3">
-                    <div>
-                      <label className="text-xs uppercase text-mute block mb-1">File path</label>
-                      <Input
-                        placeholder="/uploads/art.png"
-                        value={contentForm.file_path || ""}
-                        onChange={(event) => setContentForm((prev) => ({ ...prev, file_path: event.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Participant ID (optional)</label>
-                      <Input
-                        type="number"
-                        value={contentForm.participant_id ? String(contentForm.participant_id) : ""}
-                        onChange={(event) =>
-                          setContentForm((prev) => ({
-                            ...prev,
-                            participant_id: event.target.value ? Number(event.target.value) : undefined,
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Body</label>
-                    <Textarea
-                      rows={4}
-                      placeholder="Write the lesson or mezmur text…"
-                      value={contentForm.body || ""}
-                      onChange={(event) => setContentForm((prev) => ({ ...prev, body: event.target.value }))}
-                    />
-                  </div>
-                )}
-                <Button onClick={handleContentSubmit}>Save content</Button>
-              </div>
-              <div>
-                {contentLoading ? (
-                  <div className="text-sm text-mute flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading content…
-                  </div>
-                ) : (
-                  <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
-                    {contentList?.items?.map((content) => (
-                      <Card key={content.id} className="p-3 space-y-2 border border-border/70">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="font-semibold">{content.title}</p>
-                            <p className="text-xs text-mute">
-                              {content.type} • {content.status}
-                            </p>
-                            {content.participant && (
-                              <p className="text-xs text-mute">
-                                Linked to {content.participant.first_name} {content.participant.last_name}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {content.status === "Draft" && canManage && (
-                              <Button variant="ghost" className="text-xs" onClick={() => handleContentAction(content, "submit")}>
-                                Submit
-                              </Button>
-                            )}
-                            {content.status === "Pending" && (
-                              <div className="flex gap-2">
-                                <Button variant="ghost" className="text-xs text-green-600" onClick={() => handleContentAction(content, "approve")}>
-                                  Approve
-                                </Button>
-                                <Button variant="ghost" className="text-xs text-rose-600" onClick={() => handleContentAction(content, "reject")}>
-                                  Reject
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        {content.body && <p className="text-sm text-mute line-clamp-3">{content.body}</p>}
-                        {content.file_path && (
-                          <a href={content.file_path} target="_blank" rel="noreferrer" className="text-xs text-accent underline">
-                            View attachment
-                          </a>
-                        )}
-                        {content.rejection_reason && content.status === "Rejected" && (
-                          <p className="text-xs text-rose-600">Reason: {content.rejection_reason}</p>
-                        )}
-                      </Card>
-                    ))}
-                    {!contentList?.items.length && <p className="text-sm text-mute">No content for this filter.</p>}
-                  </div>
-                )}
+          <Card className="p-5 rounded-2xl border border-border bg-card/80 shadow-soft">
+            <div className="space-y-3 text-center">
+              <h3 className="text-lg font-semibold">Content & Publishing</h3>
+              <p className="text-sm text-mute max-w-3xl mx-auto">
+                To publish Mezmur, Lessons, or Art to the public site, please use the church website’s content tools. Sunday School content publishing from here will return once the website integration is ready.
+              </p>
+              <div className="flex justify-center">
+                <Button asChild>
+                  <a href="https://salitemihret.org" target="_blank" rel="noreferrer">
+                    Open church website
+                  </a>
+                </Button>
               </div>
             </div>
           </Card>

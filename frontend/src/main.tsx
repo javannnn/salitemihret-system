@@ -7,6 +7,7 @@ import "./index.css";
 import { ToastProvider } from "@/components/Toast";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { TourProvider } from "@/context/TourContext";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -19,7 +20,9 @@ createRoot(rootElement).render(
       <ThemeProvider>
         <ToastProvider>
           <AuthProvider>
-            <App />
+            <TourProvider>
+              <App />
+            </TourProvider>
           </AuthProvider>
         </ToastProvider>
       </ThemeProvider>

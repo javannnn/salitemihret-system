@@ -10,8 +10,8 @@ export function BetaBadge({ subtle = false }: { subtle?: boolean }) {
   const base =
     "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide";
   const palette = subtle
-    ? "border-amber-400/60 bg-amber-50/60 text-amber-700"
-    : "border-amber-500 bg-gradient-to-r from-amber-200/90 to-amber-100/70 text-amber-900 shadow-sm";
+    ? "border-amber-400/60 bg-amber-50/60 text-amber-700 dark:bg-amber-900/20 dark:border-amber-700/50 dark:text-amber-400"
+    : "border-amber-500 bg-gradient-to-r from-amber-200/90 to-amber-100/70 text-amber-900 shadow-sm dark:from-amber-900/40 dark:to-amber-800/30 dark:text-amber-100 dark:border-amber-700";
 
   return (
     <span className={`${base} ${palette}`} title={BETA_BADGE_SUBTEXT}>

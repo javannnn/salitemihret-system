@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal, engine
 from app.core.license import get_license_status
 from app.routers import auth as auth_router
+from app.routers import account as account_router
 from app.routers import children as children_router
 from app.routers import license as license_router
 from app.routers import members as members_router
@@ -26,6 +27,7 @@ from app.routers import households as households_router
 from app.routers import priests as priests_router
 from app.routers import payments as payments_router
 from app.routers import whoami as whoami_router
+from app.routers import users as users_router
 from app.routers import sponsorships as sponsorships_router
 from app.routers import sunday_school as sunday_school_router
 from app.routers import reports as reports_router
@@ -66,12 +68,14 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
+app.include_router(account_router.router)
 app.include_router(whoami_router.router)
 app.include_router(priests_router.router)
 app.include_router(children_router.router)
 app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
+app.include_router(users_router.router)
 app.include_router(households_router.router)
 app.include_router(payments_router.router)
 app.include_router(sponsorships_router.router)

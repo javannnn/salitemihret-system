@@ -26,6 +26,7 @@ type Props = {
   onClearDraft: (memberId: number) => void;
   onClose: () => void;
   onSaved: () => void;
+  ["data-tour"]?: string;
 };
 
 const MARITAL_STATUSES = ["Single", "Married", "Separated", "Divorced", "Widowed", "Other"];
@@ -49,6 +50,7 @@ export default function SpouseDrawer({
   onClearDraft,
   onClose,
   onSaved,
+  ...rest
 }: Props) {
   const toast = useToast();
   const [form, setForm] = useState<SpouseDraft>(EMPTY_FORM);
@@ -219,6 +221,7 @@ export default function SpouseDrawer({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 260, damping: 30 }}
+            {...rest}
           >
             <div className="flex items-center justify-between mb-4">
               <div>

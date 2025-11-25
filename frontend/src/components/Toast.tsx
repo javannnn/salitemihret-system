@@ -1,13 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { subscribeSessionExpired, subscribeSessionRestored } from "@/lib/session";
 
 interface ToastItem {
   id: string;
   message: string;
+  kind: "info" | "error";
 }
 
 interface ToastContextValue {
-  push: (message: string) => void;
+  push: (message: string, kind?: "info" | "error") => void;
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
@@ -23,14 +24,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }, []);
 
-  const push = useCallback((message: string) => {
+  const push = useCallback((message: string, kind: "info" | "error" = "info") => {
     if (muted) return;
-    const id = createId();
-    setToasts((prev) => [...prev, { id, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((item) => item.id !== id));
-    }, 3000);
+    setToasts((prev) => {
+      const hasDuplicate = prev.some((item) => item.message === message && item.kind === kind);
+      if (hasDuplicate) return prev;
+      const id = createId();
+      return [...prev, { id, message, kind }];
+    });
   }, [createId, muted]);
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) =>
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((item) => item.id !== toast.id));
+      }, 3500)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [toasts]);
 
   useEffect(() => {
     const unsubscribeExpired = subscribeSessionExpired(() => {
@@ -51,7 +63,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="bg-ink text-white px-4 py-2 rounded-xl shadow-soft text-sm"
+            className={`px-4 py-2 rounded-xl shadow-soft text-sm border ${
+              toast.kind === "error"
+                ? "bg-rose-950/90 text-rose-50 border-rose-700/60"
+                : "bg-slate-900/90 text-slate-50 border-slate-700/60"
+            }`}
           >
             {toast.message}
           </div>

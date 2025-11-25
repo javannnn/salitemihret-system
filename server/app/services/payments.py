@@ -119,6 +119,7 @@ def _apply_payment_filters(
     db: Session,
     query: Query,
     *,
+    reference: Optional[int] = None,
     member_id: Optional[int] = None,
     service_type_code: Optional[str] = None,
     start_date: Optional[date] = None,
@@ -126,6 +127,8 @@ def _apply_payment_filters(
     method: Optional[str] = None,
     status_filter: Optional[str] = None,
 ) -> Query:
+    if reference:
+        query = query.filter(Payment.id == reference)
     if member_id:
         query = query.filter(Payment.member_id == member_id)
     if service_type_code:
@@ -192,6 +195,7 @@ def list_payments(
     *,
     page: int = 1,
     page_size: int = 25,
+    reference: Optional[int] = None,
     member_id: Optional[int] = None,
     service_type_code: Optional[str] = None,
     start_date: Optional[date] = None,
@@ -202,6 +206,7 @@ def list_payments(
     query = _apply_payment_filters(
         db,
         _base_payment_query(db),
+        reference=reference,
         member_id=member_id,
         service_type_code=service_type_code,
         start_date=start_date,
@@ -329,6 +334,7 @@ def update_payment_status(db: Session, payment_id: int, payload: PaymentStatusUp
 def get_payments_for_export(
     db: Session,
     *,
+    reference: Optional[int] = None,
     member_id: Optional[int] = None,
     service_type_code: Optional[str] = None,
     start_date: Optional[date] = None,
@@ -339,6 +345,7 @@ def get_payments_for_export(
     query = _apply_payment_filters(
         db,
         _base_payment_query(db),
+        reference=reference,
         member_id=member_id,
         service_type_code=service_type_code,
         start_date=start_date,

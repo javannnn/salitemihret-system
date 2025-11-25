@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.auth.security import hash_password
+from app.services.user_accounts import generate_username_from_email
 from app.config import UPLOAD_DIR
 from app.core.config import settings
 from app.core.db import Base, SessionLocal, engine
@@ -44,6 +45,8 @@ ROLE_NAMES = [
     "Registrar",
     "Admin",
 ]
+
+SUPER_ADMIN_EMAILS = {"superadmin@example.com"}
 
 DEMO_USERS = [
     ("pradmin@example.com", "PR Admin", "Demo123!", ["PublicRelations"]),
@@ -425,7 +428,14 @@ def ensure_role(db: Session, name: str) -> Role:
 def ensure_user(db: Session, email: str, full_name: str, password: str, roles: list[str]) -> User:
     user = db.query(User).filter_by(email=email).first()
     if user is None:
-        user = User(email=email, full_name=full_name, hashed_password=hash_password(password))
+        username = generate_username_from_email(email, db)
+        user = User(
+            email=email,
+            full_name=full_name,
+            username=username,
+            hashed_password=hash_password(password),
+            is_active=True,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -433,6 +443,8 @@ def ensure_user(db: Session, email: str, full_name: str, password: str, roles: l
     user.roles.clear()
     for role_name in roles:
         user.roles.append(ensure_role(db, role_name))
+    if email in SUPER_ADMIN_EMAILS:
+        user.is_super_admin = True
     db.commit()
     return user
 

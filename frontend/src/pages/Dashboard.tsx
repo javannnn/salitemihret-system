@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ShieldAlert } from "lucide-react";
+import { Users, CreditCard, Activity, ArrowUpRight, Bell, GraduationCap, CalendarDays, Shield, Search } from "lucide-react";
 
 import { Card, Badge, Button } from "@/components/ui";
-import { whoami, WhoAmI } from "@/lib/auth";
 import {
   ApiError,
   ChildPromotionPreview,
   Member,
-  MemberStatus,
   Page,
-  api,
-  getPromotionPreview,
-  runChildPromotions,
-  getPaymentSummary,
+  Payment,
   PaymentSummaryResponse,
+  api,
+  getPaymentSummary,
+  getPromotionPreview,
+  listAdminUsers,
+  listHouseholds,
+  listPayments,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useAuth } from "@/context/AuthContext";
 
 type Summary = {
   total: number;
@@ -25,40 +28,56 @@ type Summary = {
   archived: number;
 };
 
-const STATUS_LABEL: Record<MemberStatus, string> = {
-  Active: "Active",
-  Inactive: "Inactive",
-  Archived: "Archived",
+type SmartSearchResult = {
+  id: string;
+  section: string;
+  title: string;
+  subtitle: string;
+  badge: string;
+  href?: string;
 };
 
-async function fetchCount(status?: MemberStatus) {
-  const params = new URLSearchParams({
-    page: "1",
-    page_size: "1",
-  });
-  if (status) {
-    params.set("status", status);
-  }
+const cardVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: (delay: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay, duration: 0.35, ease: [0.21, 0.47, 0.32, 0.98] },
+  }),
+};
+
+const fetchMemberCount = async (status?: string) => {
+  const params = new URLSearchParams({ page: "1", page_size: "1" });
+  if (status) params.set("status", status);
   const response = await api<Page<Member>>(`/members?${params.toString()}`);
   return response.total;
-}
+};
+
+const formatCurrencyValue = (value: number, currency = "USD") =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
 
 export default function Dashboard() {
-  const [me, setMe] = useState<WhoAmI | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [promotions, setPromotions] = useState<ChildPromotionPreview | null>(null);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
-  const [promoting, setPromoting] = useState(false);
   const [financeSummary, setFinanceSummary] = useState<PaymentSummaryResponse | null>(null);
   const [financeLoading, setFinanceLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<SmartSearchResult[]>([]);
+  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "empty" | "restricted" | "error">("idle");
+  const [searchMessage, setSearchMessage] = useState("Type at least two characters to search globally.");
+  const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
+  const [recentPaymentsStatus, setRecentPaymentsStatus] = useState<"idle" | "loading" | "ready" | "empty" | "restricted" | "error">("idle");
+
   const toast = useToast();
   const permissions = usePermissions();
-
-  useEffect(() => {
-    whoami()
-      .then(setMe)
-      .catch(() => toast.push("Failed to load profile"));
-  }, [toast]);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isSuperAdmin = user?.is_super_admin ?? false;
 
   useEffect(() => {
     if (!permissions.viewMembers) {
@@ -69,9 +88,9 @@ export default function Dashboard() {
     (async () => {
       try {
         const [total, active, archived] = await Promise.all([
-          fetchCount(),
-          fetchCount("Active"),
-          fetchCount("Archived"),
+          fetchMemberCount(),
+          fetchMemberCount("Active"),
+          fetchMemberCount("Archived"),
         ]);
         if (!cancelled) {
           setSummary({ total, active, archived });
@@ -79,9 +98,6 @@ export default function Dashboard() {
       } catch (error) {
         console.error(error);
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          if (!cancelled) {
-            setSummary(null);
-          }
           return;
         }
         toast.push("Failed to load member summary");
@@ -102,21 +118,15 @@ export default function Dashboard() {
     setPromotionsLoading(true);
     getPromotionPreview(30)
       .then((data) => {
-        if (!cancelled) {
-          setPromotions(data);
-        }
+        if (!cancelled) setPromotions(data);
       })
       .catch((error) => {
         console.error(error);
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          return;
-        }
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         toast.push("Failed to load promotion preview");
       })
       .finally(() => {
-        if (!cancelled) {
-          setPromotionsLoading(false);
-        }
+        if (!cancelled) setPromotionsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -133,54 +143,162 @@ export default function Dashboard() {
     setFinanceLoading(true);
     getPaymentSummary()
       .then((data) => {
-        if (!cancelled) {
-          setFinanceSummary(data);
-        }
+        if (!cancelled) setFinanceSummary(data);
       })
       .catch((error) => {
         console.error(error);
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          return;
-        }
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         toast.push("Failed to load finance summary");
       })
       .finally(() => {
-        if (!cancelled) {
-          setFinanceLoading(false);
-        }
+        if (!cancelled) setFinanceLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [permissions.viewPayments, toast]);
 
-  const handleRunPromotions = async () => {
-    if (!permissions.runPromotions) {
+  useEffect(() => {
+    if (!permissions.viewPayments) {
+      setRecentPayments([]);
+      setRecentPaymentsStatus("restricted");
       return;
     }
-    setPromoting(true);
-    try {
-      const result = await runChildPromotions();
-      if (result.promoted.length === 0) {
-        toast.push("No eligible children were promoted today.");
-      } else {
-        toast.push(`Promoted ${result.promoted.length} child${result.promoted.length === 1 ? "" : "ren"} to members.`);
-      }
-      const refreshed = await getPromotionPreview(30);
-      setPromotions(refreshed);
-    } catch (error) {
-      console.error(error);
-      toast.push("Failed to promote children");
-    } finally {
-      setPromoting(false);
+    let cancelled = false;
+    setRecentPaymentsStatus("loading");
+    listPayments({ page: 1, page_size: 6 })
+      .then((data) => {
+        if (cancelled) return;
+        setRecentPayments(data.items);
+        setRecentPaymentsStatus(data.items.length ? "ready" : "empty");
+      })
+      .catch((error) => {
+        console.error(error);
+        if (cancelled) return;
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          setRecentPaymentsStatus("restricted");
+        } else {
+          setRecentPaymentsStatus("error");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.viewPayments]);
+
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      setSearchStatus("idle");
+      setSearchMessage("Type at least two characters to search globally.");
+      setSearchResults([]);
+      return;
     }
-  };
+    const normalizedTerm = term.toLowerCase();
+    const tasks: Promise<SmartSearchResult[]>[] = [];
+    if (permissions.viewMembers) {
+      const params = new URLSearchParams({ page: "1", page_size: "5", search: term });
+      tasks.push(
+        api<Page<Member>>(`/members?${params.toString()}`).then((rs) =>
+          rs.items.map((member) => ({
+            id: `member-${member.id}`,
+            section: "Members",
+            title: `${member.first_name} ${member.last_name}`.trim(),
+            subtitle: `ID ${member.id} · ${member.username}`,
+            badge: member.status,
+            href: `/members/${member.id}/edit`,
+          }))
+        )
+      );
+      tasks.push(
+        listHouseholds({ q: term, page_size: 5 }).then((rs) =>
+          rs.items.map((household) => ({
+            id: `household-${household.id}`,
+            section: "Households",
+            title: household.name,
+            subtitle: household.head_member_name ? `Head: ${household.head_member_name}` : "No head assigned",
+            badge: `${household.members_count} members`,
+            href: `/members?household=${household.id}`,
+          }))
+        )
+      );
+    }
+    if (isSuperAdmin) {
+      tasks.push(
+        listAdminUsers({ search: term, limit: 5 }).then((rs) =>
+          rs.items.map((admin) => ({
+            id: `admin-${admin.id}`,
+            section: "Admin users",
+            title: admin.full_name || admin.username,
+            subtitle: `${admin.username} · ${admin.email}`,
+            badge: admin.is_super_admin ? "Super admin" : "Admin",
+            href: `/admin/users/${admin.id}`,
+          }))
+        )
+      );
+    }
+    if (permissions.viewPayments) {
+      tasks.push(
+        listPayments({ page: 1, page_size: 20 }).then((response) =>
+          response.items
+            .filter((payment) => {
+              const memberName = payment.member?.full_name || "";
+              const haystack = `${memberName} ${payment.memo ?? ""} ${payment.service_type.label} ${payment.service_type.code}`.toLowerCase();
+              return haystack.includes(term.toLowerCase());
+            })
+            .slice(0, 5)
+            .map((payment) => ({
+              id: `payment-${payment.id}`,
+              section: "Payments",
+              title: payment.member?.full_name || payment.service_type.label,
+              subtitle: `${payment.service_type.label} · ${payment.status}`,
+              badge: formatCurrencyValue(payment.amount, payment.currency),
+              href: "/payments",
+            }))
+        )
+      );
+    }
+    if (!tasks.length) {
+      setSearchStatus("restricted");
+      setSearchMessage("Global search is disabled for this role.");
+      setSearchResults([]);
+      return;
+    }
+    setSearchStatus("loading");
+    setSearchMessage("Searching records…");
+    setSearchResults([]);
+    let cancelled = false;
+    Promise.all(tasks)
+      .then((groups) => {
+        if (cancelled) return;
+        const flattened = groups
+          .flat()
+          .filter((item) => `${item.title} ${item.subtitle} ${item.badge}`.toLowerCase().includes(normalizedTerm));
+        if (flattened.length === 0) {
+          setSearchStatus("empty");
+          setSearchMessage("No matches found.");
+        } else {
+          setSearchStatus("ready");
+          setSearchMessage("Select a result to open details.");
+        }
+        setSearchResults(flattened);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error(error);
+        setSearchStatus("error");
+        setSearchMessage("We couldn't search right now. Try again later.");
+        setSearchResults([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchTerm, permissions.viewMembers, permissions.viewPayments, isSuperAdmin]);
 
   const completion = useMemo(() => {
     if (!summary) return 0;
     if (summary.total === 0) return 0;
-    const activeRatio = summary.active / summary.total;
-    return Math.round(activeRatio * 100);
+    return Math.round((summary.active / summary.total) * 100);
   }, [summary]);
 
   const readyCount = useMemo(() => {
@@ -189,252 +307,352 @@ export default function Dashboard() {
     return promotions.items.filter((item) => new Date(item.turns_on) <= today).length;
   }, [promotions]);
 
-  const sparklinePoints = useMemo(() => {
+  const statusBreakdown = useMemo(() => {
     if (!summary) return [];
-    const baseline = summary.total || 1;
-    const values = [summary.total * 0.6, summary.total * 0.7, summary.active, summary.total];
-    return values.map((value, index) => ({
-      x: (index / (values.length - 1)) * 100,
-      y: 100 - (value / baseline) * 100,
-    }));
+    const total = summary.total || 1;
+    const inactive = Math.max(summary.total - summary.active - summary.archived, 0);
+    return [
+      { label: "Active", value: summary.active, percent: Math.round((summary.active / total) * 100), color: "bg-emerald-500" },
+      { label: "Inactive", value: inactive, percent: Math.round((inactive / total) * 100), color: "bg-slate-400" },
+      { label: "Archived", value: summary.archived, percent: Math.round((summary.archived / total) * 100), color: "bg-slate-500" },
+    ];
   }, [summary]);
 
-  const topServices = useMemo(() => {
-    if (!financeSummary) return [];
-    return [...financeSummary.items]
-      .sort((a, b) => Number(b.total_amount) - Number(a.total_amount))
-      .slice(0, 3);
-  }, [financeSummary]);
+  const notifications = useMemo(() => {
+    const timestamp = `Updated ${new Date().toLocaleTimeString()}`;
+    const list = [] as { title: string; detail: string; time: string }[];
+    list.push({
+      title: "Member roster",
+      detail: summary ? `${summary.active} active · ${summary.total} total` : "Loading member metrics…",
+      time: timestamp,
+    });
+    list.push({
+      title: "Giving",
+      detail: financeSummary ? formatCurrencyValue(financeSummary.grand_total, financeSummary.items[0]?.currency ?? "USD") : "Fetching finance data…",
+      time: timestamp,
+    });
+    list.push({
+      title: "Promotions",
+      detail: promotions ? `${readyCount} ready · ${promotions.total} upcoming` : "Preparing promotion preview…",
+      time: timestamp,
+    });
+    return list;
+  }, [summary, financeSummary, promotions, readyCount]);
 
-  const financeSpark = useMemo(() => {
-    if (!financeSummary || financeSummary.items.length < 2) return [];
-    const values = financeSummary.items.map((item) => Number(item.total_amount));
-    const max = Math.max(...values) || 1;
-    return values.map((value, index) => ({
-      x: (index / (values.length - 1 || 1)) * 100,
-      y: 100 - (value / max) * 100,
-    }));
-  }, [financeSummary]);
+  const searchSections = useMemo(
+    () =>
+      Object.entries(
+        searchResults.reduce<Record<string, SmartSearchResult[]>>((acc, item) => {
+          acc[item.section] = acc[item.section] ? [...acc[item.section], item] : [item];
+          return acc;
+        }, {})
+      ).map(([section, entries]) => ({ section, entries })),
+    [searchResults]
+  );
+
+  const quickActions = useMemo(
+    () => [
+      { label: "Add new member", href: "/members/new", enabled: permissions.createMembers, description: "Open the member intake form." },
+      { label: "Record a payment", href: "/payments", enabled: permissions.managePayments, description: "Post a new contribution." },
+      {
+        label: "Open sponsorship board",
+        href: "/sponsorships",
+        enabled: permissions.manageSponsorships || permissions.viewSponsorships,
+        description: "Review sponsorship cases.",
+      },
+      { label: "User management", href: "/admin/users", enabled: isSuperAdmin, description: "Invite or manage admins." },
+    ],
+    [permissions.createMembers, permissions.managePayments, permissions.manageSponsorships, permissions.viewSponsorships, isSuperAdmin]
+  ).filter((action) => action.enabled);
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-mute">Signed in as</div>
-              <div className="text-xl font-semibold">{me?.full_name || me?.user || "…"}</div>
-            </div>
-            <Badge className="normal-case">{(me?.roles || []).join(", ") || "Guest"}</Badge>
+    <div className="relative">
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-40 left-10 h-72 w-72 rounded-full bg-gray-200/20 dark:bg-neutral-800/20 blur-3xl" />
+        <div className="absolute top-32 -right-10 h-80 w-80 rounded-full bg-gray-200/20 dark:bg-neutral-800/20 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-gray-200/20 dark:bg-neutral-800/20 blur-3xl" />
+      </div>
+
+      <div className="relative z-10 space-y-6 px-4 py-6">
+        <section className="rounded-3xl border border-white/80 bg-white/95 dark:bg-[#0A0A0A]/90 backdrop-blur-2xl p-6 shadow-sm space-y-4 dark:border-white/5">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-lg font-semibold tracking-tight text-ink">Global search</h2>
+            <p className="text-[12px] text-muted">Search members, admins, and payments from one place.</p>
           </div>
-          <div className="text-sm text-mute leading-relaxed">
-            Welcome back! Use the navigation to manage the parish member directory.
-          </div>
-        </Card>
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-mute">Membership health</div>
-              <div className="text-3xl font-semibold">
-                {permissions.viewMembers && summary ? summary.total.toLocaleString() : "—"}
-              </div>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3 rounded-full border border-border bg-card px-4 py-3 text-base text-ink shadow-sm">
+              <Search className="h-4 w-4 text-muted" />
+              <input
+                data-tour="dashboard-search"
+                className="flex-1 bg-transparent focus:outline-none placeholder:text-muted text-base text-ink"
+                placeholder="Search members, admins, payments..."
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+              <span className="rounded-full bg-accent/5 px-2 py-0.5 text-[11px] text-muted">
+                Type 2+ letters
+              </span>
             </div>
-            <div className="text-xs text-mute text-right">
-              Completion
-              <div className="text-lg font-semibold text-accent">
-                {permissions.viewMembers && summary ? `${completion}% active` : "—"}
-              </div>
-            </div>
-          </div>
-          {permissions.viewMembers ? (
-            <>
-              <div className="h-24 w-full">
-                <motion.svg
-                  key={completion}
-                  viewBox="0 0 100 100"
-                  className="h-full w-full text-accent/60"
-                >
-                  <polyline
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    points={sparklinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
-                  />
-                </motion.svg>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <div className="text-xs uppercase text-mute">Active</div>
-                  <div className="text-lg font-semibold text-accent">
-                    {summary ? summary.active.toLocaleString() : "…"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase text-mute">Archived</div>
-                  <div className="text-lg font-semibold">
-                    {summary ? summary.archived.toLocaleString() : "…"}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-mute leading-relaxed">
-              Membership metrics are hidden for your role. Contact a PR Admin if you need broader access.
-            </div>
-          )}
-        </Card>
-        <Card className="p-6 space-y-4">
-          <div className="text-xs uppercase tracking-wide text-mute">
-            Status distribution
-          </div>
-          {permissions.viewMembers ? (
-            <div className="space-y-3">
-              {(["Active", "Inactive", "Archived"] as MemberStatus[]).map((status) => {
-                const total = summary?.total || 1;
-                const value =
-                  status === "Active"
-                    ? summary?.active || 0
-                    : status === "Archived"
-                    ? summary?.archived || 0
-                    : total - (summary?.active || 0) - (summary?.archived || 0);
-                const pct = total ? Math.round((value / total) * 100) : 0;
-                return (
-                  <div key={status} className="flex items-center gap-3">
-                    <div className="w-20 text-xs text-mute">{STATUS_LABEL[status]}</div>
-                    <div className="flex-1 h-2 rounded-full bg-border overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.4, delay: 0.1 }}
-                        className="h-full rounded-full bg-accent"
-                      />
-                    </div>
-                    <div className="w-10 text-xs text-mute text-right">{pct}%</div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-mute leading-relaxed">
-              Status breakdown is limited to teams that oversee membership approvals.
-            </div>
-          )}
-        </Card>
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-mute">Financial snapshot</div>
-              <div className="text-3xl font-semibold">
-                {permissions.viewPayments && financeSummary
-                  ? `${financeSummary.grand_total.toLocaleString(undefined, { minimumFractionDigits: 2 })} CAD`
-                  : "—"}
-              </div>
-            </div>
-            <div className="text-xs text-mute text-right">
-              Top service
-              <div className="text-lg font-semibold text-accent">
-                {permissions.viewPayments && topServices[0]?.service_type_label
-                  ? topServices[0].service_type_label
-                  : "—"}
-              </div>
-            </div>
-          </div>
-          {permissions.viewPayments ? (
-            financeSummary && financeSummary.items.length > 0 ? (
-              <>
-                {financeSpark.length > 0 && (
-                  <div className="h-24 w-full">
-                    <motion.svg viewBox="0 0 100 100" className="h-full w-full text-accent/60">
-                      <polyline
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        points={financeSpark.map((point) => `${point.x},${point.y}`).join(" ")}
-                      />
-                    </motion.svg>
-                  </div>
-                )}
-                <div className="space-y-2 text-sm">
-                  {topServices.map((item) => (
-                    <div key={item.service_type_code} className="flex items-center justify-between">
-                      <span>{item.service_type_label}</span>
-                      <span className="font-semibold">
-                        {item.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {item.currency}
-                      </span>
+            <div className="min-h-[96px] rounded-2xl border border-dashed border-border bg-card/50 px-5 py-4 text-sm text-muted">
+              {searchStatus === "idle" && <p className="text-xs text-muted">{searchMessage}</p>}
+              {searchStatus === "loading" && <p className="text-xs text-muted">Searching…</p>}
+              {searchStatus === "restricted" && <p className="text-xs text-amber-600">{searchMessage}</p>}
+              {searchStatus === "error" && <p className="text-xs text-red-500">{searchMessage}</p>}
+              {searchStatus === "empty" && <p className="text-xs text-muted">{searchMessage}</p>}
+              {searchStatus === "ready" && (
+                <div className="space-y-4">
+                  {searchSections.map((section) => (
+                    <div key={section.section} className="space-y-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted">{section.section}</p>
+                      <ul className="space-y-2">
+                        {section.entries.map((entry) => (
+                          <li key={entry.id}>
+                            <button
+                              type="button"
+                              className="w-full rounded-xl border border-border bg-card px-3 py-2 text-left transition hover:bg-accent/5"
+                              onClick={() => entry.href && navigate(entry.href)}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-ink">{entry.title}</div>
+                                  <div className="text-[11px] text-muted">{entry.subtitle}</div>
+                                </div>
+                                <Badge className="normal-case text-[10px] bg-ink text-card">{entry.badge}</Badge>
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ))}
                 </div>
-              </>
-            ) : financeLoading ? (
-              <div className="text-sm text-mute">Loading finance data…</div>
-            ) : (
-              <div className="text-sm text-mute">No payments recorded yet.</div>
-            )
-          ) : (
-            <div className="text-sm text-mute leading-relaxed">
-              Finance metrics are available to Finance/Admin roles only.
+              )}
             </div>
-          )}
-        </Card>
-      </div>
-      {permissions.viewPromotions && promotions && (
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-mute">Children turning 18</div>
-              <div className="text-xl font-semibold">Upcoming promotions</div>
-            </div>
-            <Badge className="normal-case">Next 30 days</Badge>
           </div>
-          {promotionsLoading ? (
-            <div className="text-sm text-mute">Checking upcoming promotions…</div>
-          ) : promotions.items.length === 0 ? (
-            <div className="text-sm text-mute">No children are scheduled to turn 18 in the next 30 days.</div>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {promotions.items.slice(0, 5).map((item) => (
-                <li
-                  key={item.child_id}
-                  className="flex items-center justify-between border border-border rounded-xl px-3 py-2 bg-card/70"
+        </section>
+
+        <motion.section
+          initial="hidden"
+          animate="visible"
+          variants={cardVariants}
+          className="grid gap-4 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.2fr)]"
+        >
+          <motion.div
+            whileHover={{ y: -2 }}
+            className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/95 backdrop-blur-2xl p-5 shadow-sm dark:bg-[#0A0A0A]/90 dark:border-white/5"
+          >
+            <div className="absolute inset-0 opacity-70 pointer-events-none">
+              <div className="absolute -top-24 right-0 h-44 w-44 rounded-full bg-gray-100 dark:bg-neutral-800 blur-3xl" />
+            </div>
+            <div className="relative flex flex-col gap-3">
+              <div>
+                <p className="text-[11px] font-medium tracking-[0.18em] text-muted uppercase mb-1">Today overview</p>
+                <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-ink flex items-center gap-2">
+                  Parish health snapshot
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200 dark:ring-emerald-800">
+                    <ArrowUpRight className="h-3 w-3" />
+                    {summary ? `${completion}% active` : "—"}
+                  </span>
+                </h2>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3 text-xs">
+                <div className="flex items-center gap-3 rounded-2xl bg-ink text-card px-3 py-2.5 ring-1 ring-ink/10 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-card text-ink">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-card/80">Members</span>
+                    <span className="text-sm font-semibold">{summary ? `${summary.total} total` : "Requires permissions"}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 rounded-2xl bg-ink text-card px-3 py-2.5 ring-1 ring-ink/10 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-card text-ink">
+                    <CreditCard className="h-4 w-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-card/80">Last 30 days giving</span>
+                    <span className="text-sm font-semibold">
+                      {financeSummary ? formatCurrencyValue(financeSummary.grand_total, financeSummary.items[0]?.currency ?? "USD") : "Restricted"}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 rounded-2xl bg-ink text-card px-3 py-2.5 ring-1 ring-ink/10 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-card text-ink">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-card/80">Promotion readiness</span>
+                    <span className="text-sm font-semibold">
+                      {promotions ? `${readyCount} ready · ${promotions.total} upcoming` : "Loading…"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-3 text-xs text-muted">
+              {notifications.map((notification) => (
+                <div key={notification.title} className="flex items-start gap-2 rounded-2xl bg-card px-3 py-2 border border-border">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent/5 text-ink shadow-sm">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="font-semibold text-ink">{notification.title}</div>
+                    <div className="text-[11px] text-muted">{notification.detail}</div>
+                  </div>
+                  <div className="text-[10px] text-muted">{notification.time}</div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          <motion.div
+            data-tour="dashboard-quick-actions"
+            custom={0.18}
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-3xl border border-white/80 bg-white/90 backdrop-blur-2xl p-4 shadow-sm dark:bg-[#0A0A0A]/90 dark:border-white/5"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-xs font-semibold tracking-wide text-ink uppercase">Quick actions</h2>
+                <p className="text-[11px] text-muted">RBAC-aware shortcuts</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {quickActions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  className="w-full rounded-xl border border-border bg-card px-3 py-2 text-left text-sm text-ink hover:bg-accent/5 transition-colors flex items-center justify-between"
+                  onClick={() => action.href && navigate(action.href)}
                 >
                   <div>
-                    <div className="font-medium">{item.child_name}</div>
-                    <div className="text-xs text-mute">Turns 18 on {new Date(item.turns_on).toLocaleDateString()}</div>
+                    <div className="font-medium">{action.label}</div>
+                    <div className="text-[11px] text-muted">{action.description}</div>
                   </div>
-                  <div className="text-xs text-mute">Guardian: {item.parent_member_name}</div>
-                </li>
+                  <ArrowUpRight className="h-4 w-4" />
+                </button>
               ))}
-              {promotions.items.length > 5 && (
-                <li className="text-xs text-mute">+{promotions.items.length - 5} more</li>
-              )}
-            </ul>
-          )}
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-mute">{readyCount} eligible for promotion today.</div>
-            {permissions.runPromotions ? (
-              <Button
-                onClick={handleRunPromotions}
-                disabled={promotionsLoading || promoting || readyCount === 0}
-              >
-                {promoting ? "Promoting…" : "Promote eligible"}
-              </Button>
-            ) : (
-              <span className="text-xs text-mute">Contact an Admin to run promotions.</span>
-            )}
-          </div>
-        </Card>
-      )}
-      {!permissions.viewPromotions && (
-        <Card className="p-6 flex gap-3 items-start border-amber-200 bg-amber-50 text-amber-900">
-          <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
-          <div>
-            <div className="font-medium">Promotions hidden</div>
-            <div className="text-sm leading-relaxed">
-              Only Admin and Public Relations roles can preview or promote children turning 18.
             </div>
-          </div>
-        </Card>
-      )}
+          </motion.div>
+        </motion.section>
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          <motion.div
+            custom={0.27}
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-2xl bg-white/90 backdrop-blur-xl border border-white/80 p-4 shadow-sm dark:bg-[#0A0A0A]/85 dark:border-white/5"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-xs font-semibold tracking-wide text-ink uppercase">Status distribution</h2>
+                <p className="text-[11px] text-muted">Members by status</p>
+              </div>
+            </div>
+            {summary ? (
+              <div className="space-y-4 text-sm">
+                {statusBreakdown.map((status) => (
+                  <div key={status.label} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-ink">
+                        <span className={`h-2 w-2 rounded-full ${status.color}`} /> {status.label}
+                      </span>
+                      <span className="text-xs font-medium text-muted">{status.value} ({status.percent}%)</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-accent/10 overflow-hidden">
+                      <div className={`h-full ${status.color}`} style={{ width: `${status.percent}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted">Member metrics limited for this role.</div>
+            )}
+          </motion.div>
+
+          <motion.div
+            custom={0.3}
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-2xl bg-white/90 backdrop-blur-xl border border-white/80 p-4 shadow-sm dark:bg-[#0A0A0A]/85 dark:border-white/5"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-xs font-semibold tracking-wide text-ink uppercase">Upcoming promotions</h2>
+                <p className="text-[11px] text-muted">Children moving to membership</p>
+              </div>
+            </div>
+            {permissions.viewPromotions ? (
+              promotions ? (
+                promotions.items.length ? (
+                  <ul className="space-y-2 text-sm">
+                    {promotions.items.slice(0, 3).map((item) => (
+                      <li key={item.child_id} className="rounded-xl border border-border bg-card px-3 py-2">
+                        <div className="font-medium text-ink">{item.child_name}</div>
+                        <div className="text-[11px] text-muted flex items-center gap-2">
+                          <CalendarDays className="h-3 w-3 text-amber-500" />
+                          {new Date(item.turns_on).toLocaleDateString()}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-6 text-center text-sm text-muted">
+                    No eligible children in this window.
+                  </div>
+                )
+              ) : promotionsLoading ? (
+                <div className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-6 text-center text-sm text-muted">
+                  Loading promotion preview…
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-6 text-center text-sm text-muted">
+                  No promotion data available.
+                </div>
+              )
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-6 text-center text-sm text-muted">
+                Promotion metrics limited for this role.
+              </div>
+            )}
+          </motion.div>
+
+          <motion.div
+            custom={0.33}
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-2xl bg-white/90 backdrop-blur-xl border border-white/80 p-4 shadow-sm flex flex-col gap-3 dark:bg-[#0A0A0A]/85 dark:border-white/5"
+          >
+            <h2 className="text-xs font-semibold tracking-wide text-ink uppercase">Recent payments</h2>
+            {recentPaymentsStatus === "restricted" && <p className="text-sm text-muted">Payment activity is restricted.</p>}
+            {recentPaymentsStatus === "loading" && <p className="text-sm text-muted">Loading payments…</p>}
+            {recentPaymentsStatus === "error" && <p className="text-sm text-muted">Unable to load payments.</p>}
+            {recentPaymentsStatus === "empty" && <p className="text-sm text-muted">No recent payments recorded.</p>}
+            {recentPaymentsStatus === "ready" && (
+              <ul className="space-y-2 text-[11px]">
+                {recentPayments.map((payment) => (
+                  <li key={payment.id} className="flex items-start justify-between gap-3 rounded-2xl bg-card px-3 py-2 border border-border">
+                    <div>
+                      <div className="font-medium text-ink">{payment.member?.full_name || payment.service_type.label}</div>
+                      <div className="text-[11px] text-muted">{payment.service_type.label}</div>
+                    </div>
+                    <div className="text-right text-muted">
+                      <div className="font-semibold text-ink">{formatCurrencyValue(payment.amount, payment.currency)}</div>
+                      <div className="text-[10px]">{new Date(payment.posted_at).toLocaleString()}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </motion.div>
+        </section>
+
+      </div>
     </div>
   );
 }

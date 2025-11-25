@@ -11,6 +11,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def whoami(user: User = Depends(get_current_user)) -> WhoAmIResponse:
     return WhoAmIResponse(
         user=user.email,
+        username=user.username,
         full_name=user.full_name,
+        is_super_admin=user.is_super_admin,
         roles=[role.name for role in user.roles],
     )

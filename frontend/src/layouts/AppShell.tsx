@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { NavLink, Outlet, Navigate, useLocation } from "react-router-dom";
+import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ChevronDown, ShieldAlert } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck } from "lucide-react";
 
 import { logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea } from "@/components/ui";
@@ -12,12 +12,18 @@ import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } from "@/lib/api";
 import { subscribeSessionExpired } from "@/lib/session";
+import AccountProfile from "@/pages/Account/Profile";
+import { useTour } from "@/context/TourContext";
+import { TourOverlay } from "@/components/Tour/TourOverlay";
 
 export default function AppShell() {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const permissions = usePermissions();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const isSuperAdmin = user?.is_super_admin ?? false;
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
   const location = useLocation();
   const toast = useToast();
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatusResponse | null>(null);
@@ -26,25 +32,40 @@ export default function AppShell() {
   const [licenseToken, setLicenseToken] = useState("");
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const tour = useTour();
+
+  const initials = useMemo(() => {
+    const source = user?.full_name || user?.username || user?.user || "";
+    return source
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "U";
+  }, [user]);
 
   const navItems = useMemo(() => {
     const items = [
-      { label: "Dashboard", to: "/dashboard", visible: true },
-      { label: "Members", to: "/members", visible: permissions.viewMembers },
-      { label: "Payments", to: "/payments", visible: permissions.viewPayments },
+      { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, visible: true },
+      { label: "Members", to: "/members", icon: Users, visible: permissions.viewMembers },
+      { label: "Payments", to: "/payments", icon: CreditCard, visible: permissions.viewPayments },
       {
         label: "Sponsorships",
         to: "/sponsorships",
+        icon: HeartHandshake,
         visible: permissions.viewSponsorships || permissions.viewNewcomers,
       },
       {
         label: "Schools",
         to: "/schools",
+        icon: GraduationCap,
         visible: permissions.viewSchools,
       },
+      { label: "User Management", to: "/admin/users", icon: ShieldCheck, visible: isSuperAdmin },
     ];
     return items.filter((item) => item.visible);
   }, [
+    isSuperAdmin,
     permissions.viewMembers,
     permissions.viewPayments,
     permissions.viewSponsorships,
@@ -144,104 +165,208 @@ export default function AppShell() {
     licenseStatus?.state === "expired" || licenseStatus?.state === "invalid"
       ? "error"
       : licenseStatus?.state === "trial" || (licenseStatus?.days_remaining ?? 0) <= 30
-      ? "warning"
-      : "info";
+        ? "warning"
+        : "info";
 
   const licenseClasses =
     licenseIntent === "error"
-      ? "border-red-300 bg-red-50 text-red-900"
+      ? "border-red-300 bg-red-50 text-red-900 dark:bg-red-900/20 dark:border-red-800 dark:text-red-200"
       : licenseIntent === "warning"
-      ? "border-amber-300 bg-amber-50 text-amber-900"
-      : "border-emerald-300 bg-emerald-50 text-emerald-900";
+        ? "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-200"
+        : "border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-200";
+
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("sidebar_collapsed") === "1";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("sidebar_collapsed", isCollapsed ? "1" : "0");
+  }, [isCollapsed]);
+
+  const toggleSidebar = () => setIsCollapsed((prev) => !prev);
 
   return (
-    <div className="min-h-screen bg-bg text-ink lg:grid lg:grid-cols-[260px_1fr] transition-colors">
-      <aside className="border-r border-border bg-card/60 backdrop-blur-sm p-6 flex flex-col gap-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="text-xl font-semibold tracking-tight">SaliteOne</div>
-            <BetaBadge subtle />
+    <div className={`min-h-screen bg-bg text-ink lg:grid transition-all duration-300 ${isCollapsed ? "lg:grid-cols-[92px_1fr]" : "lg:grid-cols-[300px_1fr]"}`}>
+      <motion.aside
+        initial={false}
+        animate={{ width: isCollapsed ? 92 : 300 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="fixed lg:relative z-30 h-full border-r border-border bg-card/60 backdrop-blur-sm flex flex-col overflow-hidden"
+      >
+        <div className="flex items-center gap-3 p-6">
+          <div className="relative flex-shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xl shadow-lg">
+              S
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-card" />
           </div>
-          <div className="text-xs text-mute">Membership Console</div>
+
+          <AnimatePresence mode="wait">
+            {!isCollapsed && (
+              <motion.div
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="flex flex-col overflow-hidden whitespace-nowrap"
+              >
+                <div className="text-xl font-bold tracking-tight logo-shimmer">SaliteOne</div>
+                <div className="text-xs uppercase tracking-wider text-mute font-medium">Membership Console</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <button
+            onClick={toggleSidebar}
+            className="ml-auto h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
         </div>
-        <nav className="space-y-2 text-sm">
+
+        <nav data-tour="sidebar" className="flex-1 px-4 space-y-3 py-6 overflow-y-auto overflow-x-hidden">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                [
-                  "block px-3 py-2 rounded-xl transition",
-                  isActive
-                    ? "bg-accent text-accent-foreground shadow-soft"
-                    : "hover:bg-accent/10 hover:text-accent",
-                ].join(" ")
+                `relative group flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-200 overflow-hidden ${isActive
+                  ? "bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg dark:from-slate-800 dark:to-slate-900 ring-1 ring-white/10"
+                  : "text-mute hover:bg-accent/5 hover:text-ink"
+                } ${isCollapsed ? "justify-center" : ""}`
               }
             >
-              {item.label}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute left-0 top-1/2 -translate-y-1/2 h-10 w-1.5 rounded-r-full bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]"
+                    />
+                  )}
+
+                  <div className={`relative z-10 flex-shrink-0 transition-transform duration-200 ${isActive ? "scale-110" : "group-hover:scale-105"}`}>
+                    <item.icon size={28} className={isActive ? "text-white" : "text-current opacity-70"} />
+                  </div>
+
+                  {!isCollapsed && (
+                    <motion.span
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      className="text-lg font-medium truncate z-10"
+                    >
+                      {item.label}
+                    </motion.span>
+                  )}
+
+                  {isCollapsed && isActive && (
+                    <div className="absolute right-3 top-3 h-2 w-2 rounded-full bg-indigo-400 shadow-glow" />
+                  )}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
-        <Button className="w-full text-sm" onClick={logout}>
-          Sign out
-        </Button>
-      </aside>
-      <main className="relative">
-        <div className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur px-6 lg:px-10 py-4 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <div className="text-xs uppercase tracking-wide text-mute">Signed in as</div>
-            <div className="text-lg font-semibold">{user.full_name || user.user}</div>
+      </motion.aside>
+      <main className="relative min-w-0">
+        <div className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur px-6 lg:px-10 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <BetaBadge />
           </div>
-          <BetaBadge />
           <div className="flex items-center gap-3">
-            <button
-              className="h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:border-accent/50 hover:bg-accent/10 transition"
+            <motion.button
+              data-tour="theme-toggle"
+              className="h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:border-accent/50 hover:bg-accent/10 transition overflow-hidden"
               aria-label="Toggle theme"
               onClick={toggleTheme}
+              whileTap={{ scale: 0.95 }}
             >
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <div className="relative">
-              <Button variant="ghost" className="flex items-center gap-2" onClick={() => setMenuOpen((prev) => !prev)}>
-                <span className="text-sm font-medium">{user.user}</span>
-                <ChevronDown size={16} className={`transition-transform ${menuOpen ? "rotate-180" : ""}`} />
-              </Button>
-              <AnimatePresence>
-                {menuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 min-w-[200px] rounded-xl border border-border bg-card shadow-soft p-3 space-y-2"
-                  >
-                    <div className="text-xs text-mute uppercase">Roles</div>
-                    <div className="flex flex-wrap gap-2">
-                      {user.roles.map((role) => (
-                        <Badge key={role} className="normal-case">
-                          {role}
-                        </Badge>
-                      ))}
-                    </div>
-                    <Button
-                      variant="soft"
-                      className="w-full text-sm mt-2"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        logout();
-                      }}
-                    >
-                      Log out
-                    </Button>
-                  </motion.div>
-                )}
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={theme}
+                  initial={{ y: -20, opacity: 0, rotate: -90 }}
+                  animate={{ y: 0, opacity: 1, rotate: 0 }}
+                  exit={{ y: 20, opacity: 0, rotate: 90 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+                </motion.div>
               </AnimatePresence>
-            </div>
+            </motion.button>
+            <button
+              data-tour="avatar-menu"
+              className="relative h-12 w-12 flex items-center justify-center rounded-full bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500 text-white shadow-lg ring-2 ring-white/50 dark:from-slate-800 dark:via-slate-700 dark:to-slate-600"
+              onClick={() => setAccountMenuOpen((prev) => !prev)}
+              aria-label="Account menu"
+            >
+              <span className="text-sm font-semibold">{initials}</span>
+            </button>
           </div>
         </div>
+        <AnimatePresence>
+          {accountMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.15 }}
+              className="absolute top-16 right-6 z-30 w-56 rounded-2xl border border-border bg-card shadow-xl backdrop-blur"
+            >
+              <div className="px-4 py-3 border-b border-border">
+                <div className="text-sm font-semibold">{user?.full_name || user?.username || user?.user}</div>
+                <div className="text-xs text-mute">{user?.username || user?.user}</div>
+              </div>
+              <div className="p-2 space-y-1 text-sm">
+                <button
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-accent/10"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    setAccountModalOpen(true);
+                  }}
+                >
+                  My account
+                </button>
+                {tour.steps.length > 0 && (
+                  <button
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-accent/10"
+                    onClick={() => {
+                      setAccountMenuOpen(false);
+                      tour.startTour({ force: true, reset: true });
+                    }}
+                  >
+                    Show tour
+                  </button>
+                )}
+                {isSuperAdmin && (
+                  <button
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-accent/10"
+                    onClick={() => {
+                      setAccountMenuOpen(false);
+                      navigate("/admin/users");
+                    }}
+                  >
+                    User management
+                  </button>
+                )}
+                <button
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 hover:text-rose-600"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    logout();
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="px-6 lg:px-10 py-4 space-y-4">
           {licenseStatus && (
-            <Card className={`p-4 border ${licenseClasses}`}>
+            <Card data-tour="license-banner" className={`p-4 border ${licenseClasses}`}>
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <ShieldAlert size={18} />
@@ -249,8 +374,8 @@ export default function AppShell() {
                     {licenseStatus.state === "active"
                       ? "License active"
                       : licenseStatus.state === "trial"
-                      ? "Trial mode"
-                      : "License required"}
+                        ? "Trial mode"
+                        : "License required"}
                   </span>
                 </div>
                 <p className="text-sm">
@@ -309,6 +434,37 @@ export default function AppShell() {
           </AnimatePresence>
         </section>
       </main>
+      {accountModalOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={() => setAccountModalOpen(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white text-slate-900 shadow-2xl border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-white">
+                    <User size={16} />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">My Account</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Profile, password, and member link</p>
+                  </div>
+                </div>
+                <Button variant="ghost" onClick={() => setAccountModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+              <div className="overflow-y-auto p-4">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Button variant="ghost" onClick={() => tour.startTour({ force: true, reset: true })}>
+                    Relaunch main tour
+                  </Button>
+                </div>
+                <AccountProfile />
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
       {licenseModalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <Card className="w-full max-w-xl p-6 space-y-4">
@@ -379,6 +535,7 @@ export default function AppShell() {
           </>
         )}
       </AnimatePresence>
+      <TourOverlay />
     </div>
   );
 }

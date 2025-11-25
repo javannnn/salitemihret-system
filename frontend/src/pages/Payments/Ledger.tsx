@@ -31,6 +31,7 @@ const STATUS_BADGE_STYLES: Record<(typeof PAYMENT_STATUSES)[number], string> = {
 };
 
 type Filters = {
+  reference: string;
   service_type: string;
   member_id: string;
   start_date: string;
@@ -40,6 +41,7 @@ type Filters = {
 };
 
 const INITIAL_FILTERS: Filters = {
+  reference: "",
   service_type: "",
   member_id: "",
   start_date: "",
@@ -72,6 +74,7 @@ export default function PaymentsLedger() {
       setLoading(true);
       try {
         const appliedFilters = {
+          reference: filters.reference || undefined,
           service_type: filters.service_type || undefined,
           member_id: filters.member_id ? Number(filters.member_id) : undefined,
           start_date: filters.start_date || undefined,
@@ -114,6 +117,7 @@ export default function PaymentsLedger() {
     setReporting(true);
     try {
       const blob = await exportPaymentsReport({
+        reference: filters.reference || undefined,
         service_type: filters.service_type || undefined,
         member_id: filters.member_id ? Number(filters.member_id) : undefined,
         start_date: filters.start_date || undefined,
@@ -170,7 +174,9 @@ export default function PaymentsLedger() {
             {reporting ? "Preparing…" : "Export report"}
           </Button>
           {canRecordPayments && (
-            <Button onClick={() => setRecordDialogOpen(true)}>Record payment</Button>
+            <Button data-tour="payments-record" onClick={() => setRecordDialogOpen(true)}>
+              Record payment
+            </Button>
           )}
         </div>
       </div>
@@ -187,7 +193,7 @@ export default function PaymentsLedger() {
         </Card>
       )}
 
-      <Card className="p-4 space-y-4">
+      <Card className="p-4 space-y-4" data-tour="payments-filters">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Service type</label>
@@ -216,6 +222,14 @@ export default function PaymentsLedger() {
                 </option>
               ))}
             </Select>
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Reference #</label>
+            <Input
+              value={filters.reference}
+              onChange={(event) => setFilters((prev) => ({ ...prev, reference: event.target.value }))}
+              placeholder="e.g., PAY-1234"
+            />
           </div>
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Status</label>
@@ -268,29 +282,37 @@ export default function PaymentsLedger() {
         </div>
       </Card>
 
-      {(summary.length > 0 || grandTotal > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {summary.map((item) => (
-            <Card key={item.service_type_code} className="p-4">
-              <div className="text-xs uppercase text-mute">{item.service_type_label}</div>
+      <div data-tour="payments-summary" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {summary.length > 0 || grandTotal > 0 ? (
+          <>
+            {summary.map((item) => (
+              <Card key={item.service_type_code} className="p-4">
+                <div className="text-xs uppercase text-mute">{item.service_type_label}</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {item.currency} {item.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </div>
+              </Card>
+            ))}
+            <Card className="p-4">
+              <div className="text-xs uppercase text-mute">Grand total</div>
               <div className="text-2xl font-semibold mt-1">
-                {item.currency} {item.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                CAD {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </div>
             </Card>
-          ))}
+          </>
+        ) : (
           <Card className="p-4">
-            <div className="text-xs uppercase text-mute">Grand total</div>
-            <div className="text-2xl font-semibold mt-1">
-              CAD {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
+            <div className="text-xs uppercase text-mute">Finance summary</div>
+            <div className="text-sm text-mute">Totals appear once payments are available for this period.</div>
           </Card>
-        </div>
-      )}
+        )}
+      </div>
 
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto" data-tour="payments-table">
         <table className="min-w-full text-sm">
           <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
             <tr>
+              <th className="px-4 py-3 text-left">Ref</th>
               <th className="px-4 py-3 text-left">Posted</th>
               <th className="px-4 py-3 text-left">Member</th>
               <th className="px-4 py-3 text-left">Service</th>
@@ -306,6 +328,9 @@ export default function PaymentsLedger() {
             {loading &&
               Array.from({ length: 6 }).map((_, index) => (
                 <tr key={`loading-${index}`} className="border-b border-border/60">
+                  <td className="px-4 py-3">
+                    <div className="h-4 w-20 rounded bg-border animate-pulse" />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="h-4 w-24 rounded bg-border animate-pulse" />
                   </td>
@@ -337,7 +362,7 @@ export default function PaymentsLedger() {
               ))}
             {!loading && displayPayments.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
+                <td colSpan={10} className="px-4 py-6 text-center text-sm text-mute">
                   No payments match your filters yet.
                 </td>
               </tr>
@@ -345,6 +370,7 @@ export default function PaymentsLedger() {
             {!loading &&
               displayPayments.map((payment) => (
                 <tr key={payment.id} className="border-b border-border/60">
+                  <td className="px-4 py-3 font-mono text-xs text-mute">PAY-{String(payment.id).padStart(6, "0")}</td>
                   <td className="px-4 py-3">
                     {new Date(payment.posted_at).toLocaleString()}
                     {payment.correction_of_id && (
@@ -557,13 +583,17 @@ function RecordPaymentDialog({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (saving || !canRecordPayments) return;
+    if (saving) return;
     if (!form.amount || Number(form.amount) <= 0) {
       toast.push("Amount must be greater than zero");
       return;
     }
     if (!form.service_type_code) {
       toast.push("Select a service type");
+      return;
+    }
+    if (!canRecordPayments) {
+      toast.push("You do not have permission to record payments.");
       return;
     }
     setSaving(true);

@@ -851,7 +851,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4" data-tour="sponsorship-metrics">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Sponsorship Management</h1>
           <p className="text-sm text-mute">Pair sponsors with beneficiaries, track newcomer settlement, and monitor budgets.</p>
@@ -873,6 +873,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
           )}
           {permissions.manageSponsorships && (
             <Button
+              data-tour="sponsorship-wizard"
               onClick={() => {
                 resetSponsorshipForm();
                 setShowSponsorshipForm(true);
@@ -887,7 +888,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
       {canViewBoard && (
         <>
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-4" data-tour="sponsorship-filters">
             <MetricCard
               icon={Users}
               label="Active sponsors"
@@ -926,8 +927,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
             </Card>
           ) : null}
 
-          <Card className="p-0 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <Card className="p-0 overflow-hidden" data-tour="sponsorship-list">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3" data-tour="sponsorship-filters">
               <div className="flex items-center gap-3">
                 <Search className="h-4 w-4 text-mute" />
                 <Input

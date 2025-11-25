@@ -12,12 +12,13 @@ import {
   ShieldAlert,
   MoreVertical,
   ChevronDown,
-  Plus,
+  LayoutGrid,
+  List as ListIcon,
 } from "lucide-react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
 import { Badge, Button, Card, Input, Select } from "@/components/ui";
-import { PhoneInput } from "@/components/PhoneInput";
+import { ChromaGrid, ChromaGridItem } from "@/components/ui/ChromaGrid";
 import {
   API_BASE,
   ApiError,
@@ -33,7 +34,6 @@ import {
   exportMembers,
   getMembersMeta,
 } from "@/lib/api";
-import { getCanonicalCanadianPhone, hasValidEmail, normalizeEmailInput } from "@/lib/validation";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import ImportWizard from "./ImportWizard";
@@ -51,19 +51,6 @@ type Filters = {
   hasChildren: boolean;
   missingPhone: boolean;
   newThisMonth: boolean;
-};
-
-type QuickCreateForm = {
-  first_name: string;
-  last_name: string;
-  phone: string;
-  email: string;
-  status: MemberStatus;
-};
-
-type QuickCreateErrors = {
-  phone?: string;
-  email?: string;
 };
 
 const PAGE_SIZE = 15;
@@ -86,14 +73,6 @@ const INITIAL_FILTERS: Filters = {
   hasChildren: false,
   missingPhone: false,
   newThisMonth: false,
-};
-
-const QUICK_CREATE_DEFAULT: QuickCreateForm = {
-  first_name: "",
-  last_name: "",
-  phone: "",
-  email: "",
-  status: "Active",
 };
 
 function avatarUrl(path?: string | null) {
@@ -176,10 +155,6 @@ export default function MembersList() {
   const [newPriest, setNewPriest] = useState({ fullName: "", phone: "", email: "" });
   const [creatingPriest, setCreatingPriest] = useState(false);
   const [autoOpenedPriest, setAutoOpenedPriest] = useState(false);
-  const [newMemberModalOpen, setNewMemberModalOpen] = useState(false);
-  const [newMemberSaving, setNewMemberSaving] = useState(false);
-  const [newMemberForm, setNewMemberForm] = useState<QuickCreateForm>({ ...QUICK_CREATE_DEFAULT });
-  const [quickErrors, setQuickErrors] = useState<QuickCreateErrors>({});
   const [householdDrawerOpen, setHouseholdDrawerOpen] = useState(false);
   const [householdTargets, setHouseholdTargets] = useState<HouseholdTarget[]>([]);
   const [householdMode, setHouseholdMode] = useState<"bulk" | "single">("bulk");
@@ -187,6 +162,17 @@ export default function MembersList() {
   const [spouseDrawerOpen, setSpouseDrawerOpen] = useState(false);
   const [spouseMember, setSpouseMember] = useState<{ id: number | null; name: string }>({ id: null, name: "" });
   const spouseDraftsRef = useRef<Map<number, SpouseDraft>>(new Map());
+  const [viewMode, setViewMode] = useState<"list" | "grid">(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("members-view-mode");
+      return (saved === "grid" || saved === "list") ? saved : "list";
+    }
+    return "list";
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem("members-view-mode", viewMode);
+  }, [viewMode]);
 
   const syncSearchParams = useCallback(
     ({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage }: {
@@ -483,20 +469,20 @@ export default function MembersList() {
     }
   };
 
-const downloadCsv = async (
-  params: Record<string, string | number | undefined | null>,
-  filename = "members.csv"
-) => {
-  const blob = await exportMembers(params);
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-};
+  const downloadCsv = async (
+    params: Record<string, string | number | undefined | null>,
+    filename = "members.csv"
+  ) => {
+    const blob = await exportMembers(params);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const handleExport = async () => {
     if (!canExport) {
@@ -687,123 +673,6 @@ const downloadCsv = async (
     navigate(`/members/${memberId}/edit`);
   };
 
-  const validateQuickForm = useCallback(() => {
-    const errors: QuickCreateErrors = {};
-    const canonicalPhone = getCanonicalCanadianPhone(newMemberForm.phone);
-    if (!canonicalPhone) {
-      errors.phone = "Use +1 followed by 10 digits (e.g., +16475550123).";
-    }
-    const normalizedEmail = newMemberForm.email ? normalizeEmailInput(newMemberForm.email) : "";
-    if (normalizedEmail && !hasValidEmail(normalizedEmail)) {
-      errors.email = "Enter a valid email address.";
-    }
-    setQuickErrors(errors);
-    return {
-      isValid: Object.keys(errors).length === 0,
-      canonicalPhone,
-      normalizedEmail: normalizedEmail || null,
-    };
-  }, [newMemberForm.email, newMemberForm.phone]);
-
-  const closeNewMemberModal = () => {
-    setNewMemberModalOpen(false);
-    setNewMemberSaving(false);
-    setQuickErrors({});
-    setNewMemberForm({ ...QUICK_CREATE_DEFAULT });
-  };
-
-  const handleNewMemberChange = (field: keyof QuickCreateForm) =>
-    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-      let value = event.target.value;
-      if (field === "email") {
-        value = normalizeEmailInput(value);
-        setQuickErrors((prev) => ({ ...prev, email: undefined }));
-      }
-      setNewMemberForm((prev) => ({
-        ...prev,
-        [field]: field === "status" ? (value as MemberStatus) : value,
-      }));
-    };
-
-  const handleQuickPhoneChange = (value: string) => {
-    setQuickErrors((prev) => ({ ...prev, phone: undefined }));
-    setNewMemberForm((prev) => ({ ...prev, phone: value }));
-  };
-
-  const handleQuickCreateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (newMemberSaving) return;
-    if (!newMemberForm.first_name.trim() || !newMemberForm.last_name.trim()) {
-      toast.push("First and last name are required");
-      return;
-    }
-    const contacts = validateQuickForm();
-    if (!contacts.isValid || !contacts.canonicalPhone) {
-      toast.push("Enter a valid Canadian phone number before saving.");
-      return;
-    }
-    setNewMemberSaving(true);
-    try {
-      const payload = {
-        first_name: newMemberForm.first_name.trim(),
-        middle_name: null,
-        last_name: newMemberForm.last_name.trim(),
-        baptismal_name: null,
-        email: contacts.normalizedEmail,
-        phone: contacts.canonicalPhone,
-        status: newMemberForm.status,
-        gender: null,
-        marital_status: null,
-        birth_date: null,
-        join_date: null,
-        district: null,
-        address: null,
-        address_street: null,
-        address_city: null,
-        address_region: null,
-        address_postal_code: null,
-        address_country: null,
-        is_tither: false,
-        pays_contribution: true,
-        contribution_method: null,
-        contribution_amount: 75,
-        contribution_exception_reason: null,
-        notes: null,
-        has_father_confessor: false,
-        household_size_override: null,
-        household_id: null,
-        household_name: null,
-        tag_ids: [] as number[],
-        ministry_ids: [] as number[],
-        spouse: null,
-        children: [],
-      };
-      const created = await api<MemberDetail>("/members", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      toast.push("Member created");
-      closeNewMemberModal();
-      loadMembers(1);
-      navigate(`/members/${created.id}/edit`);
-    } catch (error) {
-      console.error(error);
-      if (error instanceof ApiError) {
-        toast.push(error.body || "Failed to create member");
-      } else {
-        toast.push("Failed to create member");
-      }
-    } finally {
-      setNewMemberSaving(false);
-    }
-  };
-
-  const handleOpenFullForm = () => {
-    const draft = { ...newMemberForm };
-    closeNewMemberModal();
-    navigate("/members/new", { state: { quickCreateDraft: draft } });
-  };
-
   const closeAssignModal = () => {
     setAssignModalOpen(false);
     setAssignContext(null);
@@ -878,12 +747,12 @@ const downloadCsv = async (
       setMeta((prev) =>
         prev
           ? {
-              ...prev,
-              father_confessors: [
-                ...prev.father_confessors.filter((option) => option.id !== created.id),
-                created,
-              ].sort((a, b) => a.full_name.localeCompare(b.full_name)),
-            }
+            ...prev,
+            father_confessors: [
+              ...prev.father_confessors.filter((option) => option.id !== created.id),
+              created,
+            ].sort((a, b) => a.full_name.localeCompare(b.full_name)),
+          }
           : prev
       );
       setSelectedPriestId(created.id);
@@ -996,60 +865,51 @@ const downloadCsv = async (
                           type="button"
                           role="menuitem"
                           className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                          setActionsMenuOpen(false);
-                          handleExport();
-                        }}
-                        disabled={exporting}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          {exporting ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4" />
-                          )}
-                          Export CSV
-                        </span>
-                      </button>
-                    )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            setActionsMenuOpen(false);
+                            handleExport();
+                          }}
+                          disabled={exporting}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            {exporting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                            Export CSV
+                          </span>
+                        </button>
+                      )}
                       {canImport && (
                         <button
                           type="button"
                           role="menuitem"
                           className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                          setActionsMenuOpen(false);
-                          setWizardOpen(true);
-                        }}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <UploadCloud className="h-4 w-4" />
-                          Import CSV
-                        </span>
-                      </button>
-                    )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            setActionsMenuOpen(false);
+                            setWizardOpen(true);
+                          }}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <UploadCloud className="h-4 w-4" />
+                            Import CSV
+                          </span>
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
             )}
             {canCreate && (
-              <motion.button
-                type="button"
-                onClick={() => setNewMemberModalOpen(true)}
-                whileHover={{ scale: 1.05, rotate: 5 }}
-                whileTap={{ scale: 0.95 }}
-                className="group relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-accent/60 bg-card shadow-soft transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2"
-                aria-label="Quick add member"
-              >
-                <span className="absolute inset-0 rounded-full bg-accent/10 opacity-0 transition group-hover:opacity-100" />
-                <Plus className="h-5 w-5 text-accent transition-transform duration-300 group-hover:rotate-90" />
-                <span className="absolute -bottom-6 text-[11px] uppercase tracking-wide text-mute">Quick add</span>
-              </motion.button>
+              <Button data-tour="member-create" onClick={() => navigate("/members/new")} className="h-12 rounded-full px-6">
+                Create member
+              </Button>
             )}
           </div>
         </div>
@@ -1062,6 +922,7 @@ const downloadCsv = async (
             <div className="relative flex-1 min-w-[220px]">
               <Search className="h-4 w-4 text-mute absolute left-3 top-1/2 -translate-y-1/2" />
               <Input
+                data-tour="members-search"
                 className="pl-9"
                 placeholder="Search by name, username, email, or phone…"
                 value={query}
@@ -1079,6 +940,7 @@ const downloadCsv = async (
             <Button
               type="button"
               variant="ghost"
+              data-tour="members-filters"
               onClick={() => {
                 setDraftFilters(filters);
                 setFilterOpen(true);
@@ -1095,6 +957,7 @@ const downloadCsv = async (
           </form>
         </Card>
 
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant={filters.status === "Archived" ? "solid" : "ghost"}
@@ -1118,7 +981,7 @@ const downloadCsv = async (
             <Button
               variant={filters.status === "Active" ? "solid" : "ghost"}
               onClick={() => {
-                const next = { ...filters, status: filters.status === "Active" ? "" : "Active" };
+                const next: Filters = { ...filters, status: filters.status === "Active" ? "" : "Active" };
                 setFilters(next);
                 setDraftFilters(next);
                 setPage(1);
@@ -1130,7 +993,7 @@ const downloadCsv = async (
             <Button
               variant={filters.hasChildren ? "solid" : "ghost"}
               onClick={() => {
-                const next = { ...filters, hasChildren: !filters.hasChildren };
+                const next: Filters = { ...filters, hasChildren: !filters.hasChildren };
                 setFilters(next);
                 setDraftFilters(next);
                 setPage(1);
@@ -1142,7 +1005,7 @@ const downloadCsv = async (
             <Button
               variant={filters.missingPhone ? "solid" : "ghost"}
               onClick={() => {
-                const next = { ...filters, missingPhone: !filters.missingPhone };
+                const next: Filters = { ...filters, missingPhone: !filters.missingPhone };
                 setFilters(next);
                 setDraftFilters(next);
                 setPage(1);
@@ -1154,7 +1017,7 @@ const downloadCsv = async (
             <Button
               variant={filters.newThisMonth ? "solid" : "ghost"}
               onClick={() => {
-                const next = { ...filters, newThisMonth: !filters.newThisMonth };
+                const next: Filters = { ...filters, newThisMonth: !filters.newThisMonth };
                 setFilters(next);
                 setDraftFilters(next);
                 setPage(1);
@@ -1164,28 +1027,48 @@ const downloadCsv = async (
               New this month
             </Button>
           </div>
-
-      {activeFilters.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {activeFilters.map((filter) => (
-            <Button
-              key={filter.key}
-              variant="soft"
-              className="text-xs"
-              onClick={() => clearFilter(filter.key)}
+          <div className="flex items-center border rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`p-2 ${viewMode === "list" ? "bg-accent text-accent-foreground" : "hover:bg-accent/10"}`}
+              title="List view"
             >
-              {filter.label}
-              <span className="ml-1">×</span>
-            </Button>
-          ))}
-          <Button variant="ghost" className="text-xs" onClick={clearAllFilters}>
-            Clear all filters
-          </Button>
+              <ListIcon className="h-4 w-4" />
+            </button>
+            <div className="w-px h-4 bg-border" />
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`p-2 ${viewMode === "grid" ? "bg-accent text-accent-foreground" : "hover:bg-accent/10"}`}
+              title="Grid view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-      )}
+
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeFilters.map((filter) => (
+              <Button
+                key={filter.key}
+                variant="soft"
+                className="text-xs"
+                onClick={() => clearFilter(filter.key)}
+              >
+                {filter.label}
+                <span className="ml-1">×</span>
+              </Button>
+            ))}
+            <Button variant="ghost" className="text-xs" onClick={clearAllFilters}>
+              Clear all filters
+            </Button>
+          </div>
+        )}
 
         {accessIssue ? (
-          <Card className="p-5 border-amber-200 bg-amber-50 text-amber-900 flex items-start gap-3">
+          <Card className="p-5 border-amber-200 bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-200 flex items-start gap-3">
             <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
             <div>
               <div className="font-medium">Limited access</div>
@@ -1194,379 +1077,435 @@ const downloadCsv = async (
           </Card>
         ) : (
           <>
-        {canBulk && anySelected && (
-          <Card className="p-4 flex flex-wrap gap-4 items-center justify-between border border-accent/30 bg-accent/5">
-            <div className="text-sm">
-              <strong>{selectedArray.length}</strong> member
-              {selectedArray.length === 1 ? "" : "s"} selected
-            </div>
-            <div className="flex flex-wrap gap-2 items-center">
-              {permissions.editSpiritual && (
-                <Button
-                  variant="soft"
-                  disabled={bulkWorking}
-                  onClick={handleBulkAssignFatherConfessor}
-                >
-                  Assign father confessor
-                </Button>
-              )}
-              <Button
-                variant="soft"
-                disabled={bulkWorking}
-                onClick={handleBulkSetHousehold}
-              >
-                Set household
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={bulkWorking}
-                onClick={handleBulkExportSelected}
-              >
-                <Download className="h-4 w-4" />
-                Export selected
-              </Button>
-              <Button
-                variant="ghost"
-                className="text-red-500 border-red-200 hover:bg-red-500/10"
-                disabled={bulkWorking}
-                onClick={handleBulkArchive}
-              >
-                <Trash2 className="h-4 w-4" />
-                Archive selected
-              </Button>
-            </div>
-          </Card>
-        )}
-
-        <Card className="relative overflow-visible">
-          <table className="min-w-full text-sm">
-            <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
-              <tr>
-                <th className="px-4 py-3 text-left w-12">
-                  {canBulk && rows.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={toggleSelectAll}
-                      className="text-accent"
+            {canBulk && anySelected && (
+              <Card className="p-4 flex flex-wrap gap-4 items-center justify-between border border-accent/30 bg-accent/5">
+                <div className="text-sm">
+                  <strong>{selectedArray.length}</strong> member
+                  {selectedArray.length === 1 ? "" : "s"} selected
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  {permissions.editSpiritual && (
+                    <Button
+                      variant="soft"
+                      disabled={bulkWorking}
+                      onClick={handleBulkAssignFatherConfessor}
                     >
-                      {selectedIds.size === rows.length ? (
-                        <CheckSquare className="h-4 w-4" />
-                      ) : (
-                        <Square className="h-4 w-4" />
-                      )}
-                    </button>
+                      Assign father confessor
+                    </Button>
                   )}
-                </th>
-                <th className="px-4 py-3 text-left">Member</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Family</th>
-                <th className="px-4 py-3 text-left">Giving</th>
-                <th className="px-4 py-3 text-left">Contact</th>
-                <th className="px-4 py-3 text-left">Location</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading &&
-                Array.from({ length: 6 }).map((_, index) => (
-                  <tr key={`skeleton-${index}`} className="border-b border-border/60">
-                    <td className="px-4 py-4">
-                      <div className="h-4 w-4 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-border animate-pulse" />
-                        <div className="space-y-2">
-                          <div className="h-3 w-32 rounded bg-border animate-pulse" />
-                          <div className="h-3 w-20 rounded bg-border animate-pulse" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="h-4 w-16 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="h-4 w-16 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="h-4 w-20 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="h-3 w-28 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="h-3 w-24 rounded bg-border animate-pulse" />
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <div className="h-8 w-20 rounded bg-border animate-pulse" />
-                    </td>
-                  </tr>
-                ))}
+                  <Button
+                    variant="soft"
+                    disabled={bulkWorking}
+                    onClick={handleBulkSetHousehold}
+                  >
+                    Set household
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={bulkWorking}
+                    onClick={handleBulkExportSelected}
+                  >
+                    <Download className="h-4 w-4" />
+                    Export selected
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="text-red-500 border-red-200 hover:bg-red-500/10"
+                    disabled={bulkWorking}
+                    onClick={handleBulkArchive}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Archive selected
+                  </Button>
+                </div>
+              </Card>
+            )}
 
-              {!loading &&
-                rows.map((member) => {
-                  const selected = selectedIds.has(member.id);
-                  const url = avatarUrl(member.avatar_path);
-                  return (
-                    <tr
-                      key={member.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleRowClick(member.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          handleRowClick(member.id);
+
+
+            {viewMode === "grid" ? (
+              <div className="min-h-[600px]">
+                {loading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <Loader2 className="h-8 w-8 animate-spin text-mute" />
+                  </div>
+                ) : rows.length === 0 ? (
+                  <div className="p-6 text-sm text-mute text-center bg-card rounded-xl border border-border">
+                    No members match your filters yet.
+                  </div>
+                ) : (
+                  <ChromaGrid
+                    items={rows.map((member) => {
+                      const statusColor =
+                        member.status === "Active"
+                          ? "#10B981"
+                          : member.status === "Archived"
+                            ? "#EF4444"
+                            : "#F59E0B";
+
+                      let age: number | string = "";
+                      if (member.birth_date) {
+                        const birthDate = new Date(member.birth_date);
+                        const today = new Date();
+                        let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                        const m = today.getMonth() - birthDate.getMonth();
+                        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                          calculatedAge--;
                         }
-                      }}
-                      className={`border-b border-border/60 last:border-none transition cursor-pointer hover:bg-accent/5 ${selected ? "bg-accent/10" : ""}`}
-                    >
-                      <td className="px-4 py-3">
-                        {canBulk && (
+                        age = calculatedAge;
+                      }
+
+                      return {
+                        image: avatarUrl(member.avatar_path) || `https://ui-avatars.com/api/?name=${member.first_name}+${member.last_name}&background=random`,
+                        title: `${member.first_name} ${member.last_name}`,
+                        subtitle: member.username,
+                        handle: member.username,
+                        borderColor: statusColor,
+                        gradient: `linear-gradient(145deg, ${statusColor}, #000)`,
+                        url: `/members/${member.id}/edit`,
+                        location: member.district || undefined,
+                        id: member.id,
+                        age: age,
+                        email: member.email || undefined,
+                        status: member.status
+                      };
+                    })}
+                    onItemClick={(item) => handleRowClick(item.id)}
+                  />
+                )}
+              </div>
+            ) : (
+              <Card className="relative overflow-visible">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
+                    <tr>
+                      <th className="px-4 py-3 text-left w-12">
+                        {canBulk && rows.length > 0 && (
                           <button
                             type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleSelect(member.id);
-                            }}
+                            onClick={toggleSelectAll}
                             className="text-accent"
                           >
-                            {selected ? (
+                            {selectedIds.size === rows.length ? (
                               <CheckSquare className="h-4 w-4" />
                             ) : (
                               <Square className="h-4 w-4" />
                             )}
                           </button>
                         )}
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-border overflow-hidden">
-                            {url ? (
-                              <img
-                                src={url}
-                                alt={`${member.first_name} ${member.last_name}`}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="h-full w-full flex items-center justify-center text-xs text-mute">
-                                {member.first_name.charAt(0)}
-                                {member.last_name.charAt(0)}
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <div className="font-medium">
-                              {member.first_name}{" "}
-                              {member.middle_name ? `${member.middle_name} ` : ""}
-                              {member.last_name}
-                            </div>
-                            <div className="text-xs text-mute">{member.username}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 align-top">
-                        <div className="flex flex-col gap-1">
-                          <Badge className="normal-case w-fit">{member.status}</Badge>
-                          {member.marital_status && (
-                            <span className="text-xs text-mute">
-                              {member.marital_status}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-sm text-mute align-top">
-                        <div className="font-medium">{member.family_count}</div>
-                        {member.household_size_override && (
-                          <div className="text-xs text-mute/70">
-                            Override: {member.household_size_override}
-                          </div>
-                        )}
-                        <div className="text-xs uppercase tracking-wide text-mute/70">
-                          {member.has_father_confessor ? "Father Confessor assigned" : "No Father Confessor"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-sm text-mute align-top">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.is_tither ? "bg-emerald-100 text-emerald-800" : "bg-border text-mute"}`}
-                          >
-                            Tithe {member.is_tither ? "Yes" : "No"}
-                          </span>
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.pays_contribution ? "bg-sky-100 text-sky-800" : "bg-border text-mute"}`}
-                          >
-                            Contribution {member.pays_contribution ? "Yes" : "No"}
-                          </span>
-                        </div>
-                        {(member.contribution_method || member.contribution_amount !== undefined) && (
-                          <div className="text-xs text-mute mt-1 flex items-center gap-1">
-                            <span>{member.contribution_method ?? "—"}</span>
-                            <span>
-                              · {member.contribution_currency} {member.contribution_amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                            {formatContributionException(member.contribution_exception_reason) && (
-                              <span className="text-amber-600">· {formatContributionException(member.contribution_exception_reason)} exception</span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-sm text-mute space-y-1 align-top">
-                        {member.email && <div>{member.email}</div>}
-                        <div>{member.phone}</div>
-                      </td>
-                      <td className="px-4 py-4 text-sm text-mute align-top">
-                        {member.district || "—"}
-                        {(member.address_city || member.address_region) && (
-                          <div className="text-xs text-mute/70">
-                            {[member.address_city, member.address_region]
-                              .filter(Boolean)
-                              .join(", ")}
-                          </div>
-                        )}
-                        {member.gender && (
-                          <div className="text-xs uppercase tracking-wide text-mute/70">
-                            {member.gender}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-right align-top relative">
-                        <div className="flex justify-end">
-                          <Button
-                            variant="ghost"
-                            className="p-2"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setRowMenu((prev) => (prev === member.id ? null : member.id));
-                            }}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        {rowMenu === member.id && (
-                          <div
-                            className="absolute right-4 mt-2 w-48 p-2 space-y-1 rounded-xl border border-border bg-card shadow-lg z-40"
-                            onMouseLeave={() => setRowMenu(null)}
-                          >
-                            <button
-                              type="button"
-                              className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                event.preventDefault();
-                                setRowMenu(null);
-                                handleRowClick(member.id);
-                              }}
-                            >
-                              View profile
-                            </button>
-                            {permissions.editCore && (
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  setRowMenu(null);
-                                  handleOpenHouseholdForMember(member);
-                                }}
-                              >
-                                Manage household
-                              </button>
-                            )}
-                            {permissions.editCore && (
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  setRowMenu(null);
-                                  handleOpenSpouseDrawer(member);
-                                }}
-                              >
-                                Manage spouse
-                              </button>
-                            )}
-                            {permissions.editSpiritual && (
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  openAssignModalForMember(member);
-                                }}
-                              >
-                                Assign father confessor
-                              </button>
-                            )}
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  handleExportSingle(member);
-                                }}
-                              >
-                                Export CSV
-                              </button>
-                            {canManage && (
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-600"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  handleArchiveSingle(member.id);
-                                }}
-                              >
-                                Archive member
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
+                      </th>
+                      <th className="px-4 py-3 text-left">Member</th>
+                      <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-left">Family</th>
+                      <th className="px-4 py-3 text-left">Giving</th>
+                      <th className="px-4 py-3 text-left">Contact</th>
+                      <th className="px-4 py-3 text-left">Location</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
-                  );
-                })}
-            </tbody>
-          </table>
+                  </thead>
+                  <tbody>
+                    {loading &&
+                      Array.from({ length: 6 }).map((_, index) => (
+                        <tr key={`skeleton-${index}`} className="border-b border-border/60">
+                          <td className="px-4 py-4">
+                            <div className="h-4 w-4 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-full bg-border animate-pulse" />
+                              <div className="space-y-2">
+                                <div className="h-3 w-32 rounded bg-border animate-pulse" />
+                                <div className="h-3 w-20 rounded bg-border animate-pulse" />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="h-4 w-16 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="h-4 w-16 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="h-4 w-20 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="h-3 w-28 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="h-3 w-24 rounded bg-border animate-pulse" />
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <div className="h-8 w-20 rounded bg-border animate-pulse" />
+                          </td>
+                        </tr>
+                      ))}
 
-          {!loading && rows.length === 0 && (
-            <div className="p-6 text-sm text-mute text-center">
-              No members match your filters yet.
-            </div>
-          )}
-        </Card>
+                    {!loading &&
+                      rows.map((member) => {
+                        const selected = selectedIds.has(member.id);
+                        const url = avatarUrl(member.avatar_path);
+                        return (
+                          <tr
+                            key={member.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handleRowClick(member.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handleRowClick(member.id);
+                              }
+                            }}
+                            className={`border-b border-border/60 last:border-none transition cursor-pointer hover:bg-accent/5 ${selected ? "bg-accent/10" : ""}`}
+                          >
+                            <td className="px-4 py-3">
+                              {canBulk && (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleSelect(member.id);
+                                  }}
+                                  className="text-accent"
+                                >
+                                  {selected ? (
+                                    <CheckSquare className="h-4 w-4" />
+                                  ) : (
+                                    <Square className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-full bg-border overflow-hidden">
+                                  {url ? (
+                                    <img
+                                      src={url}
+                                      alt={`${member.first_name} ${member.last_name}`}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="h-full w-full flex items-center justify-center text-xs text-mute">
+                                      {member.first_name.charAt(0)}
+                                      {member.last_name.charAt(0)}
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-medium">
+                                    {member.first_name}{" "}
+                                    {member.middle_name ? `${member.middle_name} ` : ""}
+                                    {member.last_name}
+                                  </div>
+                                  <div className="text-xs text-mute">{member.username}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 align-top">
+                              <div className="flex flex-col gap-1">
+                                <Badge className="normal-case w-fit">{member.status}</Badge>
+                                {member.marital_status && (
+                                  <span className="text-xs text-mute">
+                                    {member.marital_status}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-mute align-top">
+                              <div className="font-medium">{member.family_count}</div>
+                              {member.household_size_override && (
+                                <div className="text-xs text-mute/70">
+                                  Override: {member.household_size_override}
+                                </div>
+                              )}
+                              <div className="text-xs uppercase tracking-wide text-mute/70">
+                                {member.has_father_confessor ? "Father Confessor assigned" : "No Father Confessor"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-mute align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.is_tither ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-border text-mute"}`}
+                                >
+                                  Tithe {member.is_tither ? "Yes" : "No"}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.pays_contribution ? "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" : "bg-border text-mute"}`}
+                                >
+                                  Contribution {member.pays_contribution ? "Yes" : "No"}
+                                </span>
+                              </div>
+                              {(member.contribution_method || member.contribution_amount !== undefined) && (
+                                <div className="text-xs text-mute mt-1 flex items-center gap-1">
+                                  <span>{member.contribution_method ?? "—"}</span>
+                                  <span>
+                                    · {member.contribution_currency} {member.contribution_amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                  {formatContributionException(member.contribution_exception_reason) && (
+                                    <span className="text-amber-600">· {formatContributionException(member.contribution_exception_reason)} exception</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-sm text-mute space-y-1 align-top">
+                              {member.email && <div>{member.email}</div>}
+                              <div>{member.phone}</div>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-mute align-top">
+                              {member.district || "—"}
+                              {(member.address_city || member.address_region) && (
+                                <div className="text-xs text-mute/70">
+                                  {[member.address_city, member.address_region]
+                                    .filter(Boolean)
+                                    .join(", ")}
+                                </div>
+                              )}
+                              {member.gender && (
+                                <div className="text-xs uppercase tracking-wide text-mute/70">
+                                  {member.gender}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-right align-top relative">
+                              <div className="flex justify-end">
+                                <Button
+                                  data-tour="members-row-menu"
+                                  variant="ghost"
+                                  className="p-2"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setRowMenu((prev) => (prev === member.id ? null : member.id));
+                                  }}
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              {rowMenu === member.id && (
+                                <div
+                                  className="absolute right-4 mt-2 w-48 p-2 space-y-1 rounded-xl border border-border bg-card shadow-lg z-40"
+                                  onMouseLeave={() => setRowMenu(null)}
+                                >
+                                  <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      event.preventDefault();
+                                      setRowMenu(null);
+                                      handleRowClick(member.id);
+                                    }}
+                                  >
+                                    View profile
+                                  </button>
+                                  {permissions.editCore && (
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        setRowMenu(null);
+                                        handleOpenHouseholdForMember(member);
+                                      }}
+                                    >
+                                      Manage household
+                                    </button>
+                                  )}
+                                  {permissions.editCore && (
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        setRowMenu(null);
+                                        handleOpenSpouseDrawer(member);
+                                      }}
+                                    >
+                                      Manage spouse
+                                    </button>
+                                  )}
+                                  {permissions.editSpiritual && (
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        openAssignModalForMember(member);
+                                      }}
+                                    >
+                                      Assign father confessor
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      event.preventDefault();
+                                      handleExportSingle(member);
+                                    }}
+                                  >
+                                    Export CSV
+                                  </button>
+                                  {canManage && (
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-600"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        handleArchiveSingle(member.id);
+                                      }}
+                                    >
+                                      Archive member
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
 
-        {data && data.items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 justify-between">
-            <div className="text-sm text-mute">
-              Page {data.page} of {totalPages} · {data.total.toLocaleString()} members
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => loadMembers(Math.max(1, page - 1))}
-                disabled={page <= 1 || loading}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => loadMembers(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages || loading}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
+                {!loading && rows.length === 0 && (
+                  <div className="p-6 text-sm text-mute text-center">
+                    No members match your filters yet.
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {data && data.items.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 justify-between">
+                <div className="text-sm text-mute">
+                  Page {data.page} of {totalPages} · {data.total.toLocaleString()} members
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => loadMembers(Math.max(1, page - 1))}
+                    disabled={page <= 1 || loading}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => loadMembers(Math.min(totalPages, page + 1))}
+                    disabled={page >= totalPages || loading}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </>
         )}
-      </div>
+      </div >
 
       <AnimatePresence>
         {filterOpen && (
@@ -1734,249 +1673,148 @@ const downloadCsv = async (
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {newMemberModalOpen && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={closeNewMemberModal}
+      {
+        assignModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div
+              className="absolute inset-0 bg-ink/60 backdrop-blur-sm"
+              onClick={() => closeAssignModal()}
             />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center px-4"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-            >
-              <Card className="w-full max-w-lg p-6 space-y-4">
-                <form className="space-y-4" onSubmit={handleQuickCreateSubmit}>
+            <Card className="relative z-10 w-full max-w-lg p-6 space-y-5">
+              <form onSubmit={handleAssignSubmit} className="space-y-5">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">Quick add member</h2>
+                    <h2 className="text-lg font-semibold">Assign Father Confessor</h2>
                     <p className="text-sm text-mute">
-                      Capture the required fields now. Switch to the full form for additional details.
+                      {assignContext?.mode === "single"
+                        ? assignContext.memberName
+                        : `${selectedArray.length} members selected`}
                     </p>
                   </div>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs uppercase text-mute">First name *</label>
-                      <Input
-                        value={newMemberForm.first_name}
-                        onChange={handleNewMemberChange("first_name")}
-                        autoFocus
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute">Last name *</label>
-                      <Input
-                        value={newMemberForm.last_name}
-                        onChange={handleNewMemberChange("last_name")}
-                        required
-                      />
-                    </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Phone *</label>
-                    <PhoneInput
-                      value={newMemberForm.phone}
-                      onChange={handleQuickPhoneChange}
-                      aria-invalid={quickErrors.phone ? "true" : undefined}
-                      required
-                    />
-                    <p className="text-xs text-mute mt-1">Canadian numbers auto-prefix with +1.</p>
-                    {quickErrors.phone && <p className="text-xs text-red-500">{quickErrors.phone}</p>}
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Email</label>
-                    <Input
-                      value={newMemberForm.email}
-                      onChange={handleNewMemberChange("email")}
-                      type="email"
-                      placeholder="name@example.com"
-                      aria-invalid={quickErrors.email ? "true" : undefined}
-                    />
-                    {quickErrors.email && <p className="text-xs text-red-500 mt-1">{quickErrors.email}</p>}
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Status</label>
-                      <Select
-                        value={newMemberForm.status}
-                        onChange={handleNewMemberChange("status")}
+                  <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
+                    Close
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs uppercase text-mute">Search</label>
+                  <Input
+                    placeholder="Search father confessors…"
+                    value={priestSearch}
+                    onChange={(event) => setPriestSearch(event.target.value)}
+                    disabled={assignLoading || creatingPriest}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs uppercase text-mute">Father Confessor</label>
+                  <Select
+                    value={selectedPriestId === "" ? "" : String(selectedPriestId)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSelectedPriestId(value ? Number(value) : "");
+                      setAssignError("");
+                    }}
+                    disabled={assignLoading || creatingPriest}
+                  >
+                    <option value="">No assignment</option>
+                    {filteredPriests.map((priest) => (
+                      <option key={priest.id} value={priest.id}>
+                        {priest.full_name}
+                      </option>
+                    ))}
+                  </Select>
+                  {!filteredPriests.length && (
+                    <p className="text-xs text-mute">No father confessors match your search.</p>
+                  )}
+                </div>
+
+                {newPriestOpen ? (
+                  <div className="space-y-3 rounded-xl border border-border bg-card/70 p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium">Create new father confessor</div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setNewPriestOpen(false)}
+                        disabled={creatingPriest}
                       >
-                        {(meta?.statuses ?? ["Active", "Inactive", "Pending", "Archived"]).map((statusOption) => (
-                          <option key={statusOption} value={statusOption}>
-                            {statusOption}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  </div>
-                  <Card className="p-3 bg-accent/5 border-dashed">
-                    <p className="text-xs text-mute">
-                      New members start with the standard 75 CAD contribution. Finance roles can adjust exceptions later.
-                    </p>
-                  </Card>
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <Button type="button" variant="ghost" onClick={handleOpenFullForm}>
-                      View full form
-                    </Button>
-                    <div className="flex gap-2">
-                      <Button type="button" variant="ghost" onClick={closeNewMemberModal}>
                         Cancel
                       </Button>
-                      <Button type="submit" disabled={newMemberSaving}>
-                        {newMemberSaving ? "Saving…" : "Create & open"}
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase text-mute">Full name</label>
+                      <Input
+                        value={newPriest.fullName}
+                        onChange={(event) => setNewPriest((prev) => ({ ...prev, fullName: event.target.value }))}
+                        disabled={creatingPriest}
+                        placeholder="Abba Kidus"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs uppercase text-mute">Phone</label>
+                        <Input
+                          value={newPriest.phone}
+                          onChange={(event) => setNewPriest((prev) => ({ ...prev, phone: event.target.value }))}
+                          disabled={creatingPriest}
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Email</label>
+                        <Input
+                          value={newPriest.email}
+                          onChange={(event) => setNewPriest((prev) => ({ ...prev, email: event.target.value }))}
+                          disabled={creatingPriest}
+                          placeholder="Optional"
+                          type="email"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="soft"
+                        onClick={handleCreatePriest}
+                        disabled={creatingPriest}
+                      >
+                        {creatingPriest ? "Saving…" : "Save father confessor"}
                       </Button>
                     </div>
                   </div>
-                </form>
-              </Card>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {assignModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-ink/60 backdrop-blur-sm"
-            onClick={() => closeAssignModal()}
-          />
-          <Card className="relative z-10 w-full max-w-lg p-6 space-y-5">
-            <form onSubmit={handleAssignSubmit} className="space-y-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">Assign Father Confessor</h2>
-                  <p className="text-sm text-mute">
-                    {assignContext?.mode === "single"
-                      ? assignContext.memberName
-                      : `${selectedArray.length} members selected`}
-                  </p>
-                </div>
-                <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
-                  Close
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs uppercase text-mute">Search</label>
-                <Input
-                  placeholder="Search father confessors…"
-                  value={priestSearch}
-                  onChange={(event) => setPriestSearch(event.target.value)}
-                  disabled={assignLoading || creatingPriest}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs uppercase text-mute">Father Confessor</label>
-                <Select
-                  value={selectedPriestId === "" ? "" : String(selectedPriestId)}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setSelectedPriestId(value ? Number(value) : "");
-                    setAssignError("");
-                  }}
-                  disabled={assignLoading || creatingPriest}
-                >
-                  <option value="">No assignment</option>
-                  {filteredPriests.map((priest) => (
-                    <option key={priest.id} value={priest.id}>
-                      {priest.full_name}
-                    </option>
-                  ))}
-                </Select>
-                {!filteredPriests.length && (
-                  <p className="text-xs text-mute">No father confessors match your search.</p>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="soft"
+                    onClick={() => {
+                      setNewPriest({ fullName: priestSearch, phone: "", email: "" });
+                      setNewPriestOpen(true);
+                    }}
+                    disabled={assignLoading || creatingPriest}
+                  >
+                    + Create new father confessor
+                  </Button>
                 )}
-              </div>
+                <Button type="button" variant="ghost" onClick={() => setPriestDirectoryOpen(true)}>
+                  Manage father confessors
+                </Button>
 
-              {newPriestOpen ? (
-                <div className="space-y-3 rounded-xl border border-border bg-card/70 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">Create new father confessor</div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => setNewPriestOpen(false)}
-                      disabled={creatingPriest}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase text-mute">Full name</label>
-                    <Input
-                      value={newPriest.fullName}
-                      onChange={(event) => setNewPriest((prev) => ({ ...prev, fullName: event.target.value }))}
-                      disabled={creatingPriest}
-                      placeholder="Abba Kidus"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs uppercase text-mute">Phone</label>
-                      <Input
-                        value={newPriest.phone}
-                        onChange={(event) => setNewPriest((prev) => ({ ...prev, phone: event.target.value }))}
-                        disabled={creatingPriest}
-                        placeholder="Optional"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute">Email</label>
-                      <Input
-                        value={newPriest.email}
-                        onChange={(event) => setNewPriest((prev) => ({ ...prev, email: event.target.value }))}
-                        disabled={creatingPriest}
-                        placeholder="Optional"
-                        type="email"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="soft"
-                      onClick={handleCreatePriest}
-                      disabled={creatingPriest}
-                    >
-                      {creatingPriest ? "Saving…" : "Save father confessor"}
-                    </Button>
-                  </div>
+                {assignError && <div className="text-sm text-red-600">{assignError}</div>}
+
+                <div className="flex justify-end gap-3">
+                  <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={assignLoading || creatingPriest}>
+                    {assignLoading ? "Saving…" : "Save"}
+                  </Button>
                 </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="soft"
-                  onClick={() => {
-                    setNewPriest({ fullName: priestSearch, phone: "", email: "" });
-                    setNewPriestOpen(true);
-                  }}
-                  disabled={assignLoading || creatingPriest}
-                >
-                  + Create new father confessor
-                </Button>
-              )}
-              <Button type="button" variant="ghost" onClick={() => setPriestDirectoryOpen(true)}>
-                Manage father confessors
-              </Button>
-
-              {assignError && <div className="text-sm text-red-600">{assignError}</div>}
-
-              <div className="flex justify-end gap-3">
-                <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={assignLoading || creatingPriest}>
-                  {assignLoading ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </form>
-          </Card>
-        </div>
-      )}
+              </form>
+            </Card>
+          </div>
+        )
+      }
 
       <ImportWizard
         open={wizardOpen}
@@ -1988,6 +1826,7 @@ const downloadCsv = async (
         onClose={() => setHouseholdDrawerOpen(false)}
         targets={householdTargets}
         mode={householdMode}
+        data-tour="household-drawer"
         onAssigned={handleHouseholdAssigned}
       />
       <SpouseDrawer
@@ -1998,6 +1837,7 @@ const downloadCsv = async (
         onPersistDraft={(memberId, draft) => persistSpouseDraft(memberId, draft)}
         onClearDraft={(memberId) => clearSpouseDraft(memberId)}
         onClose={() => setSpouseDrawerOpen(false)}
+        data-tour="spouse-drawer"
         onSaved={handleSpouseSaved}
       />
       <PriestDirectoryModal

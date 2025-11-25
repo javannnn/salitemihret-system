@@ -2,6 +2,7 @@
 
 from app.routers import (  # noqa: F401
     auth,
+    account,
     newcomers,
     children,
     license,
@@ -16,4 +17,5 @@ from app.routers import (  # noqa: F401
     sunday_school,
     reports,
     whoami,
+    users,
 )

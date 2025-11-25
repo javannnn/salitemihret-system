@@ -51,3 +51,9 @@ def require_roles(*roles: str) -> Callable[[User], User]:
         return user
 
     return checker
+
+
+def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_super_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super Admin privileges required")
+    return user

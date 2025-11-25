@@ -19,7 +19,7 @@ LICENSE_STATE_PATH = LICENSE_DIR / "license_state.json"
 LICENSE_TOKEN_PATH = LICENSE_DIR / "license.key"
 LICENSE_PUBLIC_KEY_PATH = MODULE_DIR / "license_public_key.pem"
 
-DEFAULT_TRIAL_DAYS = int(os.getenv("LICENSE_TRIAL_DAYS", "365"))
+DEFAULT_TRIAL_DAYS = int(os.getenv("LICENSE_TRIAL_DAYS", "90"))
 LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY_PATH.read_text(encoding="utf-8").strip()
 
 

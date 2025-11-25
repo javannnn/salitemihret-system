@@ -1,0 +1,251 @@
+.chroma-grid {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 3), 320px);
+    grid-auto-rows: auto;
+    justify-content: center;
+    gap: 0.75rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+    box-sizing: border-box;
+
+    --x: 50%;
+    --y: 50%;
+    --r: 220px;
+}
+
+@media (max-width: 1124px) {
+    .chroma-grid {
+        grid-template-columns: repeat(auto-fit, minmax(320px, 320px));
+        gap: 0.5rem;
+        padding: 0.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .chroma-grid {
+        grid-template-columns: 320px;
+        gap: 0.75rem;
+        padding: 1rem;
+    }
+}
+
+.chroma-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    height: auto;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+    background: var(--card-gradient);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+
+    --mouse-x: 50%;
+    --mouse-y: 50%;
+    --spotlight-color: rgba(255, 255, 255, 0.15);
+}
+
+.chroma-card:hover {
+    border-color: var(--card-border);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+
+.chroma-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at var(--mouse-x) var(--mouse-y), var(--spotlight-color), transparent 70%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    z-index: 2;
+}
+
+.chroma-card:hover::before {
+    opacity: 1;
+}
+
+.chroma-img-wrapper {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    padding: 0;
+    box-sizing: border-box;
+    background: transparent;
+    transition: background 0.3s ease;
+    height: 200px;
+    overflow: hidden;
+}
+
+.chroma-img-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0;
+    display: block;
+    transition: transform 0.5s ease;
+}
+
+.chroma-card:hover .chroma-img-wrapper img {
+    transform: scale(1.05);
+}
+
+.chroma-info {
+    position: relative;
+    z-index: 1;
+    padding: 1.25rem;
+    color: #fff;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+}
+
+.chroma-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.chroma-info .name {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-tag {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.status-tag[data-status="Active"] {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #34d399;
+}
+
+.status-tag[data-status="Inactive"] {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+}
+
+.status-tag[data-status="Archived"] {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+
+.chroma-details {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+    color: #ccc;
+}
+
+.detail-item {
+    display: flex;
+    align-items: center;
+}
+
+.detail-item.email {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
+
+.chroma-info .role {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-top: 0.25rem;
+}
+
+.chroma-info .location {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: auto;
+}
+
+.chroma-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+    backdrop-filter: grayscale(1) brightness(0.78);
+    -webkit-backdrop-filter: grayscale(1) brightness(0.78);
+    background: rgba(0, 0, 0, 0.001);
+
+    mask-image: radial-gradient(circle var(--r) at var(--x) var(--y),
+            transparent 0%,
+            transparent 15%,
+            rgba(0, 0, 0, 0.1) 30%,
+            rgba(0, 0, 0, 0.22) 45%,
+            rgba(0, 0, 0, 0.35) 60%,
+            rgba(0, 0, 0, 0.5) 75%,
+            rgba(0, 0, 0, 0.68) 88%,
+            white 100%);
+    -webkit-mask-image: radial-gradient(circle var(--r) at var(--x) var(--y),
+            transparent 0%,
+            transparent 15%,
+            rgba(0, 0, 0, 0.1) 30%,
+            rgba(0, 0, 0, 0.22) 45%,
+            rgba(0, 0, 0, 0.35) 60%,
+            rgba(0, 0, 0, 0.5) 75%,
+            rgba(0, 0, 0, 0.68) 88%,
+            white 100%);
+}
+
+.chroma-fade {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    backdrop-filter: grayscale(1) brightness(0.78);
+    -webkit-backdrop-filter: grayscale(1) brightness(0.78);
+    background: rgba(0, 0, 0, 0.001);
+
+    mask-image: radial-gradient(circle var(--r) at var(--x) var(--y),
+            white 0%,
+            white 15%,
+            rgba(255, 255, 255, 0.9) 30%,
+            rgba(255, 255, 255, 0.78) 45%,
+            rgba(255, 255, 255, 0.65) 60%,
+            rgba(255, 255, 255, 0.5) 75%,
+            rgba(255, 255, 255, 0.32) 88%,
+            transparent 100%);
+    -webkit-mask-image: radial-gradient(circle var(--r) at var(--x) var(--y),
+            white 0%,
+            white 15%,
+            rgba(255, 255, 255, 0.9) 30%,
+            rgba(255, 255, 255, 0.78) 45%,
+            rgba(255, 255, 255, 0.65) 60%,
+            rgba(255, 255, 255, 0.5) 75%,
+            rgba(255, 255, 255, 0.32) 88%,
+            transparent 100%);
+
+    opacity: 1;
+    transition: opacity 0.25s ease;
+}

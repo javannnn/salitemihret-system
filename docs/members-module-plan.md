@@ -136,8 +136,9 @@
      - Section tabs (Identity / Membership / Contact / Family / Schools / Payments / Notes) jump to anchors on desktop and convert to a segmented control on mobile. Long subsections default to collapsed accordions to eliminate scroll fatigue.
      - Floating sticky save bar anchored to the viewport bottom surfaces “Unsaved changes” state plus Cancel / Save buttons.
      - Field layout refresh: consistent spacing rhythm (24px sections, 16px rows, 12px inputs), identity grid for first/middle/last/baptismal, username + gender + marital/membership status row, DOB with inline age calculation, membership date, contribution / tithe toggles, contact and address pairs, children rendered as a table with inline “Add child” CTA, spouse card tied to marital status.
-     - Avatar card shrinks to a tasteful circle, uses initials fallback, and clarifies accepted formats (“PNG/JPG/WEBP ≤5 MB”) with Upload / Remove buttons.
-     - Secondary actions consolidate into the right rail (Payments timeline, Sponsorships, Sunday School records, Abenet) instead of scattered buttons.
+      - Avatar card shrinks to a tasteful circle, uses initials fallback, and clarifies accepted formats (“PNG/JPG/WEBP ≤5 MB”) with Upload / Remove buttons.
+      - Secondary actions consolidate into the right rail (Payments timeline, Sponsorships, Sunday School records, Abenet) instead of scattered buttons.
+   - Creation experience: remove the legacy quick-add modal. Clicking “New member” now routes to `/members/new`, which loads the revamped detail page in “draft” mode (no member ID yet). Saving performs a POST, redirects to `/members/{id}/edit`, and only then enables avatar uploads, payments, and quick actions. Draft mode keeps validation/toast behavior consistent and tells the user “Save this member to unlock…” when actions are unavailable.
    - Household drawer to add/remove family members inline; surface derived family count.
    - Dedicated CRUD flows for households, father confessors, and spouse management:
      - Backend: `/households` router (list/search, create/update/delete, assign members), expanded `/priests` router (detail/update/archive), and a targeted `/members/{id}/spouse` endpoint so drawers can persist without resubmitting the full form. All reuse the existing membership RBAC scopes.

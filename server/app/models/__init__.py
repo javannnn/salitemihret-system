@@ -1,5 +1,5 @@
 from .role import Role  # noqa: F401
-from .user import User  # noqa: F401
+from .user import User, UserMemberLink, UserInvitation, UserAuditLog  # noqa: F401
 from .household import Household  # noqa: F401
 from .tag import Tag, member_tags  # noqa: F401
 from .ministry import Ministry, member_ministries  # noqa: F401

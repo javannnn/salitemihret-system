@@ -140,12 +140,18 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
   },
 };
 
-export function usePermissions(): PermissionMap & { hasRole: (role: string) => boolean } {
+export function usePermissions(): PermissionMap & { hasRole: (role: string) => boolean; isSuperAdmin: boolean } {
   const { user } = useAuth();
 
   return useMemo(() => {
     const roles = user?.roles ?? [];
+    const isSuperAdmin = Boolean(user?.is_super_admin);
     const merged: PermissionMap = { ...BASE_PERMISSIONS };
+    if (isSuperAdmin) {
+      Object.keys(merged).forEach((key) => {
+        (merged as Record<string, boolean>)[key] = true;
+      });
+    }
     roles.forEach((role) => {
       const overrides = ROLE_RULES[role];
       if (!overrides) {
@@ -165,7 +171,8 @@ export function usePermissions(): PermissionMap & { hasRole: (role: string) => b
 
     return {
       ...merged,
-      hasRole: (role: string) => roles.includes(role),
+      isSuperAdmin,
+      hasRole: (role: string) => roles.includes(role) || isSuperAdmin,
     };
   }, [user]);
 }

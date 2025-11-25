@@ -243,6 +243,89 @@ export type PaymentSummaryResponse = {
   grand_total: number;
 };
 
+export type AdminUserMemberSummary = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  username: string;
+  status?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  linked_user_id?: number | null;
+  linked_username?: string | null;
+};
+
+export type AdminUserSummary = {
+  id: number;
+  email: string;
+  username: string;
+  full_name?: string | null;
+  is_active: boolean;
+  is_super_admin: boolean;
+  roles: string[];
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  member?: AdminUserMemberSummary | null;
+};
+
+export type AdminUserListResponse = {
+  items: AdminUserSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  total_active: number;
+  total_inactive: number;
+  total_linked: number;
+  total_unlinked: number;
+};
+
+export type AdminUserAuditEntry = {
+  id: number;
+  action: string;
+  actor_email?: string | null;
+  actor_name?: string | null;
+  payload?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type InvitationCreatePayload = {
+  email: string;
+  full_name?: string;
+  username?: string;
+  roles?: string[];
+  member_id?: number;
+  message?: string;
+};
+
+export type InvitationResponse = {
+  id: number;
+  email: string;
+  username: string;
+  expires_at: string;
+  token: string;
+};
+
+export type AccountMemberSummary = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  status?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
+
+export type AccountProfile = {
+  email: string;
+  username: string;
+  full_name?: string | null;
+  roles: string[];
+  is_super_admin: boolean;
+  member?: AccountMemberSummary | null;
+  can_change_username: boolean;
+  next_username_change_at?: string | null;
+};
+
 export type SponsorshipProgram =
   | "Education"
   | "Nutrition"
@@ -598,7 +681,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, text || `Request failed (${res.status})`);
+    const message = text || `Request failed (${res.status})`;
+    throw new ApiError(res.status, message);
   }
 
   if (!text) {
@@ -1082,6 +1166,7 @@ export async function promoteChild(childId: number): Promise<ChildPromotionResul
 export type PaymentFilters = {
   page?: number;
   page_size?: number;
+  reference?: string | number;
   member_id?: number;
   service_type?: string;
   method?: string;
@@ -1105,6 +1190,75 @@ export async function listPayments(params: PaymentFilters = {}): Promise<Payment
       amount: Number(item.amount),
     })),
   };
+}
+
+export type ListAdminUsersParams = {
+  search?: string;
+  role?: string;
+  is_active?: boolean;
+  linked?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export async function listAdminUsers(params: ListAdminUsersParams = {}): Promise<AdminUserListResponse> {
+  const search = new URLSearchParams();
+  if (params.search) search.set("search", params.search);
+  if (params.role) search.set("role", params.role);
+  if (typeof params.is_active === "boolean") search.set("is_active", String(params.is_active));
+  if (typeof params.linked === "boolean") search.set("linked", String(params.linked));
+  if (typeof params.limit === "number") search.set("limit", String(params.limit));
+  if (typeof params.offset === "number") search.set("offset", String(params.offset));
+  const query = search.toString();
+  const path = query ? `/users?${query}` : "/users";
+  return api<AdminUserListResponse>(path);
+}
+
+export async function getAdminUser(userId: number): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}`);
+}
+
+export async function updateAdminUser(userId: number, payload: Partial<Pick<AdminUserSummary, "full_name" | "username" | "is_active" | "is_super_admin">>): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminUserRoles(userId: number, roles: string[]): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}/roles`, {
+    method: "POST",
+    body: JSON.stringify({ roles }),
+  });
+}
+
+export async function updateAdminUserMemberLink(userId: number, memberId: number | null, notes?: string): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}/member-link`, {
+    method: "POST",
+    body: JSON.stringify({ member_id: memberId, notes }),
+  });
+}
+
+export async function createUserInvitation(payload: InvitationCreatePayload): Promise<InvitationResponse> {
+  const normalizedRoles = payload.roles ?? [];
+  return api<InvitationResponse>("/users/invitations", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, roles: normalizedRoles }),
+  });
+}
+
+export async function resetAdminUserPassword(userId: number): Promise<InvitationResponse> {
+  return api<InvitationResponse>(`/users/${userId}/reset-password`, { method: "POST" });
+}
+
+export async function searchAdminMembers(query: string, limit = 8): Promise<AdminUserMemberSummary[]> {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  return api<AdminUserMemberSummary[]>(`/users/member-search?${params.toString()}`);
+}
+
+export async function getAdminUserAudit(userId: number, limit = 50): Promise<AdminUserAuditEntry[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return api<AdminUserAuditEntry[]>(`/users/${userId}/audit?${params.toString()}`);
 }
 
 type PaymentCreatePayload = {
@@ -1176,6 +1330,48 @@ export async function activateLicense(token: string): Promise<LicenseStatusRespo
     method: "POST",
     body: JSON.stringify({ token }),
   });
+}
+
+export type TokenResponse = { access_token: string; token_type: string };
+
+export async function inviteAccept(
+  token: string,
+  payload: { full_name?: string; username?: string; password: string }
+): Promise<TokenResponse> {
+  return api<TokenResponse>(`/auth/invitations/${encodeURIComponent(token)}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getAccountProfile(): Promise<AccountProfile> {
+  return api<AccountProfile>("/account/me");
+}
+
+export async function updateAccountProfile(payload: { full_name?: string; username?: string }): Promise<AccountProfile> {
+  return api<AccountProfile>("/account/me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAccountPassword(payload: { current_password: string; new_password: string }): Promise<void> {
+  await api<void>("/account/me/password", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function requestAccountMemberLink(payload: { member_id: number | null; notes?: string }): Promise<AccountProfile> {
+  return api<AccountProfile>("/account/me/member-link-request", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function searchAccountMembers(query: string, limit = 8): Promise<AccountMemberSummary[]> {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  return api<AccountMemberSummary[]>(`/account/me/member-search?${params.toString()}`);
 }
 export type SundaySchoolCategory = "Child" | "Youth" | "Adult";
 export type SundaySchoolPaymentMethod = "CASH" | "DIRECT_DEPOSIT" | "E_TRANSFER" | "CREDIT";

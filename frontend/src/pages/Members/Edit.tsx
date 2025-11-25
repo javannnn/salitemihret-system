@@ -42,17 +42,17 @@ import { usePermissions } from "@/hooks/usePermissions";
 
 const STATUS_OPTIONS: MemberStatus[] = ["Active", "Inactive", "Pending", "Archived"];
 const statusChipStyles: Record<MemberStatus, string> = {
-  Active: "bg-emerald-100 text-emerald-700 ring-emerald-200",
-  Inactive: "bg-slate-100 text-slate-600 ring-slate-300",
-  Pending: "bg-amber-100 text-amber-700 ring-amber-200",
-  Archived: "bg-slate-200 text-slate-600 ring-slate-300",
+  Active: "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800",
+  Inactive: "bg-slate-100 text-slate-600 ring-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700",
+  Pending: "bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800",
+  Archived: "bg-slate-200 text-slate-600 ring-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700",
 };
 
 const SUNDAY_STATUS_STYLES: Record<MemberSundaySchoolParticipantStatus, string> = {
-  "Up to date": "bg-emerald-50 text-emerald-700",
-  Overdue: "bg-rose-50 text-rose-700",
-  "No payments yet": "bg-amber-50 text-amber-700",
-  "Not contributing": "bg-slate-100 text-slate-600",
+  "Up to date": "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
+  Overdue: "bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300",
+  "No payments yet": "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
+  "Not contributing": "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
 };
 
 const SECTION_NAV_ITEMS = [
@@ -165,10 +165,76 @@ const createChildFormState = (initial?: Partial<ChildFormState>): ChildFormState
 const cloneMemberDetail = (value: MemberDetail): MemberDetail =>
   JSON.parse(JSON.stringify(value)) as MemberDetail;
 
-export default function EditMember() {
+const createBlankMemberDetail = (): MemberDetail => {
+  const nowIso = new Date().toISOString();
+  return {
+    id: 0,
+    username: "",
+    first_name: "",
+    middle_name: "",
+    last_name: "",
+    status: "Active",
+    gender: null,
+    birth_date: null,
+    join_date: null,
+    marital_status: null,
+    baptismal_name: null,
+    district: null,
+    phone: "",
+    email: null,
+    avatar_path: null,
+    address: null,
+    address_street: null,
+    address_city: null,
+    address_region: null,
+    address_postal_code: null,
+    address_country: null,
+    is_tither: false,
+    pays_contribution: true,
+    contribution_method: null,
+    contribution_amount: 75,
+    contribution_currency: "CAD",
+    contribution_exception_reason: null,
+    notes: null,
+    family_count: 1,
+    household_size_override: null,
+    has_father_confessor: false,
+    status_override: false,
+    status_override_value: null,
+    status_override_reason: null,
+    created_at: nowIso,
+    updated_at: nowIso,
+    created_by_id: null,
+    updated_by_id: null,
+    membership_health: {
+      effective_status: "Active",
+      auto_status: "Active",
+      override_active: false,
+      override_reason: null,
+      last_paid_at: null,
+      next_due_at: null,
+      days_until_due: null,
+      overdue_days: null,
+    },
+    membership_events: [],
+    contribution_history: [],
+    sunday_school_participants: [],
+    sunday_school_payments: [],
+    children: [],
+    tags: [],
+    ministries: [],
+    household: null,
+    spouse: null,
+    father_confessor: null,
+  };
+};
+
+type EditMemberProps = { mode?: "create" | "edit" };
+
+export default function EditMember({ mode = "edit" }: EditMemberProps) {
   return (
     <ProtectedRoute roles={["Registrar", "Admin", "PublicRelations", "Clerk", "OfficeAdmin", "FinanceAdmin"]}>
-      <EditMemberInner />
+      <EditMemberInner mode={mode} />
     </ProtectedRoute>
   );
 }
@@ -308,9 +374,9 @@ function AvatarCard({
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-5 text-center space-y-4 shadow-sm">
+    <div className="rounded-2xl border border-border bg-card p-5 text-center space-y-4 shadow-sm">
       <div className="relative mx-auto">
-        <div className="h-28 w-28 rounded-full border border-slate-200 bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center text-2xl font-semibold overflow-hidden shadow-sm">
+        <div className="h-28 w-28 rounded-full border border-border bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center text-2xl font-semibold overflow-hidden shadow-sm">
           {avatarUrl ? <img src={avatarUrl} alt="Member avatar" className="h-full w-full object-cover" /> : initials || "—"}
         </div>
       </div>
@@ -319,8 +385,8 @@ function AvatarCard({
           {uploading ? "Uploading…" : "Upload new photo"}
         </Button>
         <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onFileChange} />
-        <p className="text-[11px] text-slate-500">PNG, JPG or WEBP up to 5MB.</p>
-        {!canUpload && <p className="text-[11px] text-slate-500">Avatar updates require Registrar or Admin permissions.</p>}
+        <p className="text-[11px] text-mute">PNG, JPG or WEBP up to 5MB.</p>
+        {!canUpload && <p className="text-[11px] text-mute">Avatar updates require Registrar or Admin permissions.</p>}
       </div>
     </div>
   );
@@ -336,8 +402,8 @@ type QuickAction = {
 
 function QuickActionsCard({ actions }: { actions: QuickAction[] }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-5 space-y-3 shadow-sm">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Quick actions</h3>
+    <div className="rounded-2xl border border-border bg-card p-5 space-y-3 shadow-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-mute">Quick actions</h3>
       <div className="space-y-2">
         {actions.map((action) => (
           <button
@@ -345,23 +411,21 @@ function QuickActionsCard({ actions }: { actions: QuickAction[] }) {
             type="button"
             onClick={action.onClick}
             disabled={action.disabled}
-            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-              action.disabled ? "border-slate-100 text-slate-400 cursor-not-allowed" : "border-slate-200 hover:bg-slate-50"
-            }`}
+            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${action.disabled ? "border-border/50 text-mute/50 cursor-not-allowed" : "border-border hover:bg-accent/10"
+              }`}
           >
             <div className="flex items-center gap-3">
               <span
-                className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${
-                  action.disabled ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-slate-700"
-                }`}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${action.disabled ? "bg-accent/10 text-mute/50" : "bg-accent/10 text-ink"
+                  }`}
               >
                 {action.icon}
               </span>
               <div className="flex-1">
-                <div className="text-sm font-semibold text-slate-900">{action.label}</div>
-                {action.description && <p className="text-xs text-slate-500">{action.description}</p>}
+                <div className="text-sm font-semibold text-ink">{action.label}</div>
+                {action.description && <p className="text-xs text-mute">{action.description}</p>}
               </div>
-              <ArrowUpRight className="h-4 w-4 text-slate-400" />
+              <ArrowUpRight className="h-4 w-4 text-mute/50" />
             </div>
           </button>
         ))}
@@ -399,35 +463,35 @@ function SnapshotCard({
     ? `${sundaySummary.upToDate} up to date · ${sundaySummary.overdue} overdue`
     : "No participants yet";
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-5 space-y-4 shadow-sm text-sm">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Member snapshot</h3>
+    <div className="rounded-2xl border border-border bg-card p-5 space-y-4 shadow-sm text-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-mute">Member snapshot</h3>
       <div className="grid gap-3">
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 flex items-center justify-between">
+        <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2 flex items-center justify-between">
           <div>
-            <div className="text-[11px] uppercase text-slate-500">Age</div>
-            <div className="text-base font-semibold text-slate-900">{memberAge ?? "—"}</div>
+            <div className="text-[11px] uppercase text-mute">Age</div>
+            <div className="text-base font-semibold text-ink">{memberAge ?? "—"}</div>
           </div>
-          <div className="text-xs text-slate-500">Member since {membershipSince}</div>
+          <div className="text-xs text-mute">Member since {membershipSince}</div>
         </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-          <div className="text-[11px] uppercase text-slate-500">Contribution status</div>
-          <div className="font-semibold text-slate-900">
+        <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+          <div className="text-[11px] uppercase text-mute">Contribution status</div>
+          <div className="font-semibold text-ink">
             {isTither ? "Tither" : "Non-tither"} · {paysContribution ? "Contribution active" : "Contribution paused"}
           </div>
-          <div className="text-xs text-slate-500">Last ledger payment: {lastContributionDate}</div>
+          <div className="text-xs text-mute">Last ledger payment: {lastContributionDate}</div>
         </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-          <div className="text-[11px] uppercase text-slate-500">Sunday school</div>
-          <div className="font-semibold text-slate-900">
+        <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+          <div className="text-[11px] uppercase text-mute">Sunday school</div>
+          <div className="font-semibold text-ink">
             {sundayLinkedCount} linked · {sundayContributors} contributors
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-mute">
             {sundayStatusLabel} · Last payment {lastSundayPayment}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-          <div className="text-[11px] uppercase text-slate-500">Address</div>
-          <div className="font-semibold text-slate-900">{addressSummary}</div>
+        <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+          <div className="text-[11px] uppercase text-mute">Address</div>
+          <div className="font-semibold text-ink">{addressSummary}</div>
         </div>
       </div>
     </div>
@@ -442,7 +506,7 @@ function AuditTrailCard({
   auditEntries: MemberAuditEntry[];
 }) {
   return (
-    <div className="border rounded-lg p-4 space-y-3">
+    <div className="border rounded-lg p-4 space-y-3" data-tour="member-audit">
       <h3 className="text-sm font-semibold uppercase tracking-wide">Audit Trail</h3>
       {auditLoading ? (
         <div className="text-sm text-mute">Loading audit entries…</div>
@@ -485,7 +549,7 @@ const SectionCard = forwardRef<HTMLDivElement, SectionCardProps>(function Sectio
   ref
 ) {
   return (
-    <section ref={ref} id={id} className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+    <section ref={ref} id={id} className="rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex items-start justify-between gap-3 px-5 py-4">
         <div>
           <h3 className="text-sm font-semibold tracking-wide text-slate-700">{title}</h3>
@@ -498,7 +562,7 @@ const SectionCard = forwardRef<HTMLDivElement, SectionCardProps>(function Sectio
               <button
                 type="button"
                 onClick={onToggle}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-mute hover:bg-accent/10"
                 aria-label={collapsed ? "Expand section" : "Collapse section"}
               >
                 <ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
@@ -512,11 +576,13 @@ const SectionCard = forwardRef<HTMLDivElement, SectionCardProps>(function Sectio
   );
 });
 
-function EditMemberInner() {
+function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
   const { user, token } = useAuth();
+  const isCreateMode = mode === "create";
+  const memberId = id ? Number(id) : null;
   const permissions = usePermissions();
   const disableAll = !permissions.editCore && !permissions.editSpiritual && !permissions.editStatus;
   const disableCore = disableAll || !permissions.editCore;
@@ -532,6 +598,8 @@ function EditMemberInner() {
   const [metaLoading, setMetaLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [memberLoading, setMemberLoading] = useState(false);
+  const [memberLoadError, setMemberLoadError] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
@@ -592,6 +660,19 @@ function EditMemberInner() {
     },
     []
   );
+  const [payWarningPulse, setPayWarningPulse] = useState(false);
+  type ConfirmConfig = {
+    title?: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => void;
+    onCancel?: () => void;
+  };
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig | null>(null);
+
+  const openConfirm = (config: ConfirmConfig) => setConfirmConfig(config);
+  const closeConfirm = () => setConfirmConfig(null);
   const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
   const toggleSectionCollapse = useCallback((id: SectionId) => {
     setCollapsedSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -676,35 +757,35 @@ function EditMemberInner() {
       !member?.id
         ? []
         : [
-            {
-              label: "View payments",
-              description: "Open ledger timeline",
-              disabled: !permissions.viewPayments,
-              onClick: () => navigate(`/payments/members/${member.id}`),
-              icon: <CreditCard className="h-4 w-4" />,
-            },
-            {
-              label: "View sponsorships",
-              description: "Jump to sponsorship dashboard",
-              disabled: !permissions.viewSponsorships,
-              onClick: () => navigate("/sponsorships"),
-              icon: <UsersRound className="h-4 w-4" />,
-            },
-            {
-              label: "Sunday School records",
-              description: "Review linked participants",
-              disabled: !permissions.viewSchools,
-              onClick: () => navigate(`/schools/sunday-school?member=${member.id}`),
-              icon: <BookOpen className="h-4 w-4" />,
-            },
-            {
-              label: "Schools workspace",
-              description: "Open Abenet / Sunday School",
-              disabled: !permissions.viewSchools,
-              onClick: () => navigate("/schools"),
-              icon: <GraduationCap className="h-4 w-4" />,
-            },
-          ],
+          {
+            label: "View payments",
+            description: "Open ledger timeline",
+            disabled: !permissions.viewPayments,
+            onClick: () => navigate(`/payments/members/${member.id}`),
+            icon: <CreditCard className="h-4 w-4" />,
+          },
+          {
+            label: "View sponsorships",
+            description: "Jump to sponsorship dashboard",
+            disabled: !permissions.viewSponsorships,
+            onClick: () => navigate("/sponsorships"),
+            icon: <UsersRound className="h-4 w-4" />,
+          },
+          {
+            label: "Sunday School records",
+            description: "Review linked participants",
+            disabled: !permissions.viewSchools,
+            onClick: () => navigate(`/schools/sunday-school?member=${member.id}`),
+            icon: <BookOpen className="h-4 w-4" />,
+          },
+          {
+            label: "Schools workspace",
+            description: "Open Abenet / Sunday School",
+            disabled: !permissions.viewSchools,
+            onClick: () => navigate("/schools"),
+            icon: <GraduationCap className="h-4 w-4" />,
+          },
+        ],
     [member?.id, navigate, permissions.viewPayments, permissions.viewSchools, permissions.viewSponsorships]
   );
 
@@ -764,6 +845,17 @@ function EditMemberInner() {
   }, []);
 
   useEffect(() => {
+    if (!isCreateMode) {
+      return;
+    }
+    const draft = createBlankMemberDetail();
+    setMember(draft);
+    initializeFormsFromMember(draft);
+    baselineMemberRef.current = cloneMemberDetail(draft);
+    setHasUnsavedChanges(true);
+  }, [initializeFormsFromMember, isCreateMode]);
+
+  useEffect(() => {
     if (!token) {
       return;
     }
@@ -794,118 +886,139 @@ function EditMemberInner() {
     };
   }, [token, toast]);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await api<MemberDetail>(`/members/${id}`);
-        const normalized = cloneMemberDetail(data);
-        setMember(normalized);
-        initializeFormsFromMember(normalized);
-        baselineMemberRef.current = cloneMemberDetail(data);
-        setHasUnsavedChanges(false);
-      } catch (error) {
-        console.error(error);
-        toast.push("Failed to load member");
-      }
-    };
-    load();
-  }, [id, toast, initializeFormsFromMember]);
-
-useEffect(() => {
-  if (!member) return;
-  setNewPayment((prev) => ({
-    ...prev,
-    amount: (member.contribution_amount ?? 75).toFixed(2),
-    paid_at: new Date().toISOString().slice(0, 10),
-  }));
-}, [member?.id]);
-
-useEffect(() => {
-  if (!member?.id) {
-    setMemberPayments([]);
-    return;
-  }
-  loadMemberPayments(member.id);
-}, [member?.id, loadMemberPayments]);
-
-useEffect(() => {
-  if (!permissions.managePayments) {
-    setServiceTypes([]);
-    return;
-  }
-  let cancelled = false;
-  getPaymentServiceTypes()
-    .then((types) => {
-      if (!cancelled) {
-        setServiceTypes(types);
-      }
-    })
-    .catch((error) => {
+  const fetchMember = useCallback(async () => {
+    if (isCreateMode) return;
+    if (!memberId || Number.isNaN(memberId)) {
+      toast.push("Member not found");
+      navigate("/members");
+      return;
+    }
+    setMemberLoading(true);
+    setMemberLoadError(null);
+    try {
+      const data = await api<MemberDetail>(`/members/${memberId}`);
+      const normalized = cloneMemberDetail(data);
+      setMember(normalized);
+      initializeFormsFromMember(normalized);
+      baselineMemberRef.current = cloneMemberDetail(data);
+      setHasUnsavedChanges(false);
+    } catch (error) {
       console.error(error);
-      toast.push("Failed to load service types");
-    });
-  return () => {
-    cancelled = true;
-  };
-}, [permissions.managePayments, toast]);
+      if (error instanceof ApiError) {
+        const friendly = parseApiErrorMessage(error.body) || error.message || `Server error (${error.status})`;
+        setMemberLoadError(friendly);
+        toast.push(friendly, "error");
+      } else if (error instanceof Error) {
+        setMemberLoadError(error.message);
+        toast.push(error.message, "error");
+      } else {
+        setMemberLoadError("Failed to load member");
+        toast.push("Failed to load member", "error");
+      }
+    } finally {
+      setMemberLoading(false);
+    }
+  }, [initializeFormsFromMember, isCreateMode, memberId, navigate, toast]);
 
-useEffect(() => {
-  if (!defaultContributionCode) {
-    return;
-  }
-  setNewPayment((prev) =>
-    prev.service_type_code ? prev : { ...prev, service_type_code: defaultContributionCode }
-  );
-}, [defaultContributionCode]);
+  useEffect(() => {
+    fetchMember();
+  }, [fetchMember]);
 
-useEffect(() => {
-  if (!member) {
-    setDuplicateMatches([]);
-    return;
-  }
-  const email = (member.email || "").trim();
-  const phone = (member.phone || "").trim();
-  const first = (member.first_name || "").trim();
-  const last = (member.last_name || "").trim();
-  const shouldCheck = !!email || !!phone || (!!first && !!last);
-  if (!shouldCheck) {
-    setDuplicateMatches([]);
-    setDuplicateLoading(false);
-    return;
-  }
-  let cancelled = false;
-  setDuplicateLoading(true);
-  const timer = setTimeout(() => {
-    findMemberDuplicates({
-      email: email || undefined,
-      phone: phone || undefined,
-      first_name: first || undefined,
-      last_name: last || undefined,
-      exclude_member_id: member.id,
-    })
-      .then((items) => {
+  useEffect(() => {
+    if (!member) return;
+    setNewPayment((prev) => ({
+      ...prev,
+      amount: (member.contribution_amount ?? 75).toFixed(2),
+      paid_at: new Date().toISOString().slice(0, 10),
+    }));
+  }, [member?.id]);
+
+  useEffect(() => {
+    if (!member?.id) {
+      setMemberPayments([]);
+      return;
+    }
+    loadMemberPayments(member.id);
+  }, [member?.id, loadMemberPayments]);
+
+  useEffect(() => {
+    if (!permissions.managePayments) {
+      setServiceTypes([]);
+      return;
+    }
+    let cancelled = false;
+    getPaymentServiceTypes()
+      .then((types) => {
         if (!cancelled) {
-          setDuplicateMatches(items);
+          setServiceTypes(types);
         }
       })
       .catch((error) => {
         console.error(error);
-        if (!cancelled) {
-          toast.push("Failed to check duplicates");
-          setDuplicateMatches([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDuplicateLoading(false);
-        }
+        toast.push("Failed to load service types");
       });
-  }, 400);
-  return () => {
-    cancelled = true;
-    clearTimeout(timer);
-  };
-}, [member?.id, member?.email, member?.phone, member?.first_name, member?.last_name, toast]);
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.managePayments, toast]);
+
+  useEffect(() => {
+    if (!defaultContributionCode) {
+      return;
+    }
+    setNewPayment((prev) =>
+      prev.service_type_code ? prev : { ...prev, service_type_code: defaultContributionCode }
+    );
+  }, [defaultContributionCode]);
+
+  useEffect(() => {
+    if (!member) {
+      setDuplicateMatches([]);
+      return;
+    }
+    const email = (member.email || "").trim();
+    const phone = (member.phone || "").trim();
+    const first = (member.first_name || "").trim();
+    const last = (member.last_name || "").trim();
+    const shouldCheck = !!email || !!phone || (!!first && !!last);
+    if (!shouldCheck) {
+      setDuplicateMatches([]);
+      setDuplicateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDuplicateLoading(true);
+    const timer = setTimeout(() => {
+      findMemberDuplicates({
+        email: email || undefined,
+        phone: phone || undefined,
+        first_name: first || undefined,
+        last_name: last || undefined,
+        exclude_member_id: member.id,
+      })
+        .then((items) => {
+          if (!cancelled) {
+            setDuplicateMatches(items);
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+          if (!cancelled) {
+            toast.push("Failed to check duplicates");
+            setDuplicateMatches([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setDuplicateLoading(false);
+          }
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [member?.id, member?.email, member?.phone, member?.first_name, member?.last_name, toast]);
 
   const refreshAudit = async (memberId: number) => {
     if (!canViewAudit) {
@@ -929,7 +1042,12 @@ useEffect(() => {
   };
 
   useEffect(() => {
-    if (!id) {
+    if (isCreateMode) {
+      setAuditEntries([]);
+      setAuditLoading(false);
+      return;
+    }
+    if (!memberId || Number.isNaN(memberId)) {
       return;
     }
     if (!canViewAudit) {
@@ -937,10 +1055,8 @@ useEffect(() => {
       setAuditLoading(false);
       return;
     }
-    const memberId = Number(id);
-    if (Number.isNaN(memberId)) return;
     refreshAudit(memberId);
-  }, [id, canViewAudit]);
+  }, [canViewAudit, isCreateMode, memberId]);
 
   useEffect(() => {
     if (!member) return;
@@ -963,7 +1079,7 @@ useEffect(() => {
     }
   }, [member?.marital_status]);
 
-  const canDelete = user?.roles.some((role) => role === "Admin" || role === "PublicRelations");
+  const canDelete = !isCreateMode && (user?.roles.some((role) => role === "Admin" || role === "PublicRelations") ?? false);
 
   const handleChange =
     (field: keyof MemberDetail) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -1025,7 +1141,24 @@ useEffect(() => {
         return;
       }
       if (field === "pays_contribution" && !checked) {
-        toast.push("Membership contribution is mandatory.");
+        setPayWarningPulse(true);
+        setTimeout(() => setPayWarningPulse(false), 1200);
+        openConfirm({
+          title: "Turn off membership contribution?",
+          message:
+            "Membership contribution is normally required. If you turn this off, please ensure you have approval and a note explaining why.",
+          confirmLabel: "Yes, turn off",
+          danger: true,
+          onConfirm: () => {
+            setMember((prev) => (prev ? { ...prev, pays_contribution: false } : prev));
+            markDirty();
+            closeConfirm();
+          },
+          onCancel: () => {
+            setMember((prev) => (prev ? { ...prev, pays_contribution: true } : prev));
+            closeConfirm();
+          },
+        });
         return;
       }
       setMember((prev) => (prev ? { ...prev, [field]: checked } : prev));
@@ -1279,11 +1412,12 @@ useEffect(() => {
         payload.household_size_override = member.household_size_override ?? null;
         payload.tag_ids = member.tags.map((tag) => tag.id);
         payload.ministry_ids = member.ministries.map((ministry) => ministry.id);
+        payload.status = member.status;
       }
 
       if (!disableFinance) {
         payload.is_tither = member.is_tither;
-        payload.pays_contribution = true;
+        payload.pays_contribution = member.pays_contribution;
         payload.contribution_method = trimOrNull(member.contribution_method);
         payload.contribution_amount = normalizedContribution;
         payload.contribution_exception_reason = member.contribution_exception_reason || null;
@@ -1343,8 +1477,10 @@ useEffect(() => {
           .filter((child) => child.first_name && child.last_name);
       }
 
-      const updated = await api<MemberDetail>(`/members/${member.id}`, {
-        method: "PATCH",
+      const endpoint = isCreateMode ? "/members" : `/members/${member.id}`;
+      const method = isCreateMode ? "POST" : "PATCH";
+      const updated = await api<MemberDetail>(endpoint, {
+        method,
         body: JSON.stringify(payload),
       });
       const normalized = cloneMemberDetail(updated);
@@ -1353,7 +1489,10 @@ useEffect(() => {
       baselineMemberRef.current = cloneMemberDetail(updated);
       setHasUnsavedChanges(false);
       await refreshAudit(normalized.id);
-      toast.push("Changes saved");
+      toast.push(isCreateMode ? "Member created" : "Changes saved");
+      if (isCreateMode) {
+        navigate(`/members/${normalized.id}/edit`, { replace: true });
+      }
     } catch (error) {
       console.error(error);
       toast.push("Failed to update member");
@@ -1363,20 +1502,28 @@ useEffect(() => {
   };
 
   const handleDelete = async () => {
-    if (!member || !canDelete) return;
-    const confirmed = window.confirm("Archive this member? This hides them from active lists.");
-    if (!confirmed) return;
-    setDeleting(true);
-    try {
-      await api(`/members/${member.id}`, { method: "DELETE" });
-      toast.push("Member archived");
-      navigate("/members");
-    } catch (error) {
-      console.error(error);
-      toast.push("Failed to archive member");
-    } finally {
-      setDeleting(false);
-    }
+    if (!member || !member.id || !canDelete) return;
+    openConfirm({
+      title: "Archive member?",
+      message: "Archiving will hide this member from active lists. You can restore later if needed.",
+      confirmLabel: "Yes, archive",
+      danger: true,
+      onConfirm: async () => {
+        setDeleting(true);
+        try {
+          await api(`/members/${member.id}`, { method: "DELETE" });
+          toast.push("Member archived");
+          navigate("/members");
+        } catch (error) {
+          console.error(error);
+          toast.push("Failed to archive member");
+        } finally {
+          setDeleting(false);
+          closeConfirm();
+        }
+      },
+      onCancel: closeConfirm,
+    });
   };
 
   const buildAvatarUrl = (path?: string | null) => {
@@ -1434,9 +1581,12 @@ useEffect(() => {
   const membershipEvents = member.membership_events ?? [];
   const overrideDisabled = disableAll || !canOverrideStatus;
   const effectiveStatus = membershipHealth?.effective_status ?? member.status;
+  const displayName = `${member.first_name} ${member.last_name}`.trim() || "New member";
   const initials = `${(member.first_name?.[0] ?? "").toUpperCase()}${(member.last_name?.[0] ?? "").toUpperCase()}`;
   const statusChipClass = statusChipStyles[effectiveStatus] ?? "bg-slate-100 text-slate-600 ring-slate-200";
-  const headerSubtitle = `Username: ${member.username} · Member ID: ${member.id}`;
+  const headerSubtitle = isCreateMode
+    ? "New member · Username will be generated when saved"
+    : `Username: ${member.username} · Member ID: ${member.id}`;
   const statusDescription = membershipHealth
     ? membershipHealth.override_active
       ? `Manual override · Auto status ${membershipHealth.auto_status}`
@@ -1469,8 +1619,8 @@ useEffect(() => {
   const unsavedLabel = hasUnsavedChanges ? "Unsaved changes" : "All changes saved";
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+    <div className="min-h-screen bg-bg text-ink flex flex-col">
+      <header className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full px-3">
@@ -1479,17 +1629,15 @@ useEffect(() => {
             </Button>
             <div className="flex flex-col">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-lg font-semibold tracking-tight">
-                  {member.first_name} {member.last_name}
-                </h1>
+                <h1 className="text-lg font-semibold tracking-tight">{displayName}</h1>
                 <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${statusChipClass}`}>
                   {effectiveStatus}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">{headerSubtitle}</p>
+              <p className="text-xs text-mute">{headerSubtitle}</p>
               {statusDescription && (
                 <p
-                  className={`text-xs ${membershipHealth?.override_active ? "text-amber-600" : "text-slate-500"}`}
+                  className={`text-xs ${membershipHealth?.override_active ? "text-amber-600" : "text-mute"}`}
                 >
                   {statusDescription}
                 </p>
@@ -1503,7 +1651,13 @@ useEffect(() => {
                 Archive
               </Button>
             )}
-            <Button type="submit" form="member-form" disabled={updating || !canSubmit} className="rounded-full px-5">
+            <Button
+              data-tour="member-save"
+              type="submit"
+              form="member-form"
+              disabled={updating || !canSubmit}
+              className="rounded-full px-5"
+            >
               {updating ? "Saving…" : "Save changes"}
             </Button>
           </div>
@@ -1512,6 +1666,27 @@ useEffect(() => {
 
       <main className="flex-1">
         <div className="mx-auto max-w-6xl px-4 py-4 space-y-6">
+          {memberLoadError && (
+            <Card className="border border-rose-200 bg-rose-50 text-rose-900">
+              <div className="flex items-start gap-3">
+                <div className="text-sm">
+                  <div className="font-semibold">Unable to load member</div>
+                  <div className="text-sm leading-relaxed">{memberLoadError}</div>
+                </div>
+                <div className="ml-auto flex gap-2">
+                  <Button variant="ghost" onClick={fetchMember} disabled={memberLoading}>
+                    Retry
+                  </Button>
+                  <Button variant="ghost" onClick={() => navigate("/members")}>
+                    Back to list
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+          {memberLoading && !member && (
+            <Card className="p-4 text-sm text-mute">Loading member details…</Card>
+          )}
           {disableAll && (
             <div className="border border-amber-200 bg-amber-50 text-amber-900 rounded-lg p-4 flex items-start gap-3">
               <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
@@ -1524,16 +1699,15 @@ useEffect(() => {
             </div>
           )}
 
-          <nav className="border border-slate-200 bg-white rounded-full px-2 py-1 overflow-x-auto">
+          <nav className="border border-border bg-card rounded-full px-2 py-1 overflow-x-auto" data-tour="member-section-nav">
             <div className="flex gap-1">
               {SECTION_NAV_ITEMS.map((section) => (
                 <button
                   key={section.id}
                   type="button"
                   onClick={() => scrollToSection(section.id)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
-                    activeSection === section.id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${activeSection === section.id ? "bg-primary text-primary-foreground" : "text-mute hover:bg-accent/10"
+                    }`}
                 >
                   {section.label}
                 </button>
@@ -1544,1026 +1718,1034 @@ useEffect(() => {
           <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
             <div className="space-y-6">
               <form id="member-form" className="space-y-6" onSubmit={handleSubmit}>
-                  <SectionCard
-                    id="identity"
-                    ref={setSectionRef("identity")}
-                    title="Identity"
-                    subtitle="Core profile details and membership status"
-                    collapsed={collapsedSections.identity}
-                    onToggle={() => toggleSectionCollapse("identity")}
-                  >
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs uppercase text-mute">First name</label>
-                        <Input value={member.first_name} onChange={handleChange("first_name")} required disabled={disableCore} />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Last name</label>
-                        <Input value={member.last_name} onChange={handleChange("last_name")} required disabled={disableCore} />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Middle name</label>
-                        <Input value={member.middle_name ?? ""} onChange={handleChange("middle_name")} disabled={disableCore} />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Baptismal name</label>
-                        <Input value={member.baptismal_name ?? ""} onChange={handleChange("baptismal_name")} disabled={disableCore} />
-                      </div>
+                <SectionCard
+                  id="identity"
+                  ref={setSectionRef("identity")}
+                  title="Identity"
+                  subtitle="Core profile details and membership status"
+                  collapsed={collapsedSections.identity}
+                  onToggle={() => toggleSectionCollapse("identity")}
+                >
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">First name</label>
+                      <Input value={member.first_name} onChange={handleChange("first_name")} required disabled={disableCore} />
                     </div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs uppercase text-mute">Username</label>
-                        <Input value={member.username} disabled readOnly />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Gender</label>
-                        <Select
-                          value={member.gender ?? ""}
-                          onChange={(event) => {
-                            if (disableCore) return;
-                            setMember((prev) => (prev ? { ...prev, gender: event.target.value || null } : prev));
-                            markDirty();
-                          }}
-                          disabled={disableCore}
-                        >
-                          <option value="">Not set</option>
-                          <option value="Male">Male</option>
-                          <option value="Female">Female</option>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Marital status</label>
-                        <Select
-                          value={member.marital_status ?? ""}
-                          onChange={(event) => {
-                            if (disableCore) return;
-                            setMember((prev) => (prev ? { ...prev, marital_status: event.target.value || null } : prev));
-                            markDirty();
-                          }}
-                          disabled={disableCore}
-                        >
-                          <option value="">Not set</option>
-                          {(meta?.marital_statuses ?? []).map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Last name</label>
+                      <Input value={member.last_name} onChange={handleChange("last_name")} required disabled={disableCore} />
                     </div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs uppercase text-mute">Date of birth</label>
-                        <Input
-                          type="date"
-                          value={member.birth_date ?? ""}
-                          onChange={(event) => {
-                            if (disableCore) return;
-                            setMember((prev) => (prev ? { ...prev, birth_date: event.target.value || null } : prev));
-                            markDirty();
-                          }}
-                          disabled={disableCore}
-                        />
-                        <p className="text-xs text-mute mt-1">{memberAge !== null ? `${memberAge} years old` : "Age calculated automatically"}</p>
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase text-mute">Membership date</label>
-                        <Input
-                          type="date"
-                          value={member.join_date ?? ""}
-                          onChange={(event) => {
-                            if (disableCore) return;
-                            setMember((prev) => (prev ? { ...prev, join_date: event.target.value || null } : prev));
-                            markDirty();
-                          }}
-                          disabled={disableCore}
-                        />
+                    <div>
+                      <label className="text-xs uppercase text-mute">Middle name</label>
+                      <Input value={member.middle_name ?? ""} onChange={handleChange("middle_name")} disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Baptismal name</label>
+                      <Input value={member.baptismal_name ?? ""} onChange={handleChange("baptismal_name")} disabled={disableCore} />
+                    </div>
                   </div>
-                </div>
-              </SectionCard>
-              <SectionCard
-                id="membership"
-                ref={setSectionRef("membership")}
-                title="Membership health"
-                subtitle="Status follows monthly contribution payments"
-                collapsed={collapsedSections.membership}
-                onToggle={() => toggleSectionCollapse("membership")}
-              >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <div className="text-xs uppercase text-mute">Effective status</div>
-                    <div className="text-base font-semibold text-slate-900">{effectiveStatus}</div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Username</label>
+                      <Input value={member.username} disabled readOnly />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Gender</label>
+                      <Select
+                        value={member.gender ?? ""}
+                        onChange={(event) => {
+                          if (disableCore) return;
+                          setMember((prev) => (prev ? { ...prev, gender: event.target.value || null } : prev));
+                          markDirty();
+                        }}
+                        disabled={disableCore}
+                      >
+                        <option value="">Not set</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Marital status</label>
+                      <Select
+                        value={member.marital_status ?? ""}
+                        onChange={(event) => {
+                          if (disableCore) return;
+                          setMember((prev) => (prev ? { ...prev, marital_status: event.target.value || null } : prev));
+                          markDirty();
+                        }}
+                        disabled={disableCore}
+                      >
+                        <option value="">Not set</option>
+                        {(meta?.marital_statuses ?? []).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase text-mute">Auto status</div>
-                    <div className="text-sm text-slate-700">{membershipHealth?.auto_status ?? "—"}</div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Date of birth</label>
+                      <Input
+                        type="date"
+                        value={member.birth_date ?? ""}
+                        onChange={(event) => {
+                          if (disableCore) return;
+                          setMember((prev) => (prev ? { ...prev, birth_date: event.target.value || null } : prev));
+                          markDirty();
+                        }}
+                        disabled={disableCore}
+                      />
+                      <p className="text-xs text-mute mt-1">{memberAge !== null ? `${memberAge} years old` : "Age calculated automatically"}</p>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Membership date</label>
+                      <Input
+                        type="date"
+                        value={member.join_date ?? ""}
+                        onChange={(event) => {
+                          if (disableCore) return;
+                          setMember((prev) => (prev ? { ...prev, join_date: event.target.value || null } : prev));
+                          markDirty();
+                        }}
+                        disabled={disableCore}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase text-mute">Last payment</div>
-                    <div>{lastContributionLabel}</div>
+                </SectionCard>
+                <SectionCard
+                  id="membership"
+                  ref={setSectionRef("membership")}
+                  title="Membership health"
+                  subtitle="Status follows monthly contribution payments"
+                  collapsed={collapsedSections.membership}
+                  onToggle={() => toggleSectionCollapse("membership")}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="text-xs uppercase text-mute">Effective status</div>
+                      <div className="text-base font-semibold text-ink">{effectiveStatus}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-mute">Auto status</div>
+                      <div className="text-sm text-ink">{membershipHealth?.auto_status ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-mute">Last payment</div>
+                      <div>{lastContributionLabel}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-mute">Next due</div>
+                      <div>{nextContributionLabel}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase text-mute">Next due</div>
-                    <div>{nextContributionLabel}</div>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase text-slate-500">Next payment</div>
-                    <div className="text-base font-semibold text-slate-900">{nextContributionLabel}</div>
-                  </div>
-                  <div
-                    className={`text-sm font-semibold ${
-                      membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                  <div className="rounded-xl border border-border bg-card/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase text-mute">Next payment</div>
+                      <div className="text-base font-semibold text-ink">{nextContributionLabel}</div>
+                    </div>
+                    <div
+                      className={`text-sm font-semibold ${membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
                         ? membershipHealth.days_until_due >= 0
-                          ? "text-emerald-700"
-                          : "text-rose-700"
-                        : "text-slate-500"
-                    }`}
-                  >
-                    {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                      ? membershipHealth.days_until_due >= 0
-                        ? `${membershipHealth.days_until_due} days remaining`
-                        : `${Math.abs(membershipHealth.days_until_due)} days overdue`
-                      : "No schedule"}
-                  </div>
-                </div>
-                {membershipHealth?.override_active && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    Manual override active
-                    {member.status_override_reason ? ` — ${member.status_override_reason}` : ""}
-                  </div>
-                )}
-                {membershipHealth?.overdue_days && membershipHealth.overdue_days > 0 && (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
-                    Contribution overdue by {membershipHealth.overdue_days} days. Record a payment to reactivate status.
-                  </div>
-                )}
-                {canOverrideStatus && (
-                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs uppercase text-mute">Manual override</label>
-                      <label className="flex items-center gap-2 text-xs text-slate-600">
-                        <input
-                          type="checkbox"
-                          className="accent-accent"
-                          checked={member.status_override ?? false}
-                          onChange={(event) => handleOverrideToggle(event.target.checked)}
-                          disabled={overrideDisabled}
-                        />
-                        Keep status fixed regardless of payments
-                      </label>
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-rose-700 dark:text-rose-400"
+                        : "text-mute"
+                        }`}
+                    >
+                      {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                        ? membershipHealth.days_until_due >= 0
+                          ? `${membershipHealth.days_until_due} days remaining`
+                          : `${Math.abs(membershipHealth.days_until_due)} days overdue`
+                        : "No schedule"}
                     </div>
-                    {member.status_override && (
-                      <>
-                        <Select
-                          value={member.status_override_value ?? effectiveStatus}
-                          onChange={(event) => handleOverrideStatusChange(event.target.value as MemberStatus)}
-                          disabled={overrideDisabled}
-                        >
-                          {STATUS_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </Select>
-                        <Input
-                          value={member.status_override_reason ?? ""}
-                          onChange={(event) => handleOverrideReasonChange(event.target.value)}
-                          placeholder="Reason (optional)"
-                          disabled={overrideDisabled}
-                        />
-                      </>
-                    )}
-                    <p className="text-[11px] text-slate-500">
-                      Overrides should be used sparingly. Status will return to automatic once overrides are disabled.
-                    </p>
                   </div>
-                )}
-              </SectionCard>
-                  <SectionCard
-                    id="sundaySchool"
-                    ref={setSectionRef("sundaySchool")}
-                    title="Sunday school"
-                    subtitle="Linked participants and contribution health"
-                    collapsed={collapsedSections.sundaySchool}
-                    onToggle={() => toggleSectionCollapse("sundaySchool")}
-                    actions={
-                      permissions.manageSchools ? (
-                        <Button
-                          type="button"
-                          variant="soft"
-                          className="rounded-full px-3 py-1 text-xs font-semibold"
-                          onClick={() => navigate("/schools/sunday-school")}
-                        >
-                          Add participant
-                        </Button>
-                      ) : undefined
-                    }
-                  >
-                    <div className="grid gap-3 sm:grid-cols-4 text-sm">
-                      <div className="rounded-xl bg-slate-50 p-3 text-center">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Linked</p>
-                        <p className="text-lg font-semibold text-slate-900">{sundayParticipants.length}</p>
-                      </div>
-                      <div className="rounded-xl bg-emerald-50 p-3 text-center">
-                        <p className="text-[11px] uppercase tracking-wide text-emerald-700">Up to date</p>
-                        <p className="text-lg font-semibold text-emerald-700">{sundayStatusSummary.upToDate}</p>
-                      </div>
-                      <div className="rounded-xl bg-amber-50 p-3 text-center">
-                        <p className="text-[11px] uppercase tracking-wide text-amber-700">Pending</p>
-                        <p className="text-lg font-semibold text-amber-700">{sundayStatusSummary.pending}</p>
-                      </div>
-                      <div className="rounded-xl bg-rose-50 p-3 text-center">
-                        <p className="text-[11px] uppercase tracking-wide text-rose-700">Overdue</p>
-                        <p className="text-lg font-semibold text-rose-700">{sundayStatusSummary.overdue}</p>
-                      </div>
+                  {membershipHealth?.override_active && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      Manual override active
+                      {member.status_override_reason ? ` — ${member.status_override_reason}` : ""}
                     </div>
-                    {!sundayParticipants.length ? (
-                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                        No Sunday School participants linked yet. Use the Sunday School workspace to enroll a child, youth, or adult.
+                  )}
+                  {membershipHealth?.overdue_days && membershipHealth.overdue_days > 0 && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                      Contribution overdue by {membershipHealth.overdue_days} days. Record a payment to reactivate status.
+                    </div>
+                  )}
+                  {canOverrideStatus && (
+                    <div className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-xs uppercase text-mute">Manual override</label>
+                        <label className="flex items-center gap-2 text-xs text-mute">
+                          <input
+                            type="checkbox"
+                            className="accent-accent"
+                            checked={member.status_override ?? false}
+                            onChange={(event) => handleOverrideToggle(event.target.checked)}
+                            disabled={overrideDisabled}
+                          />
+                          Keep status fixed regardless of payments
+                        </label>
                       </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {sundayParticipants.map((participant) => (
-                          <div key={participant.id} className="rounded-xl border border-slate-200 bg-white/70 p-4 space-y-3">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold text-slate-900">
-                                  {participant.first_name} {participant.last_name}
-                                </div>
-                                <p className="text-xs text-slate-500">
-                                  {participant.category} · Username {participant.member_username}
-                                </p>
+                      {member.status_override && (
+                        <>
+                          <Select
+                            value={member.status_override_value ?? effectiveStatus}
+                            onChange={(event) => handleOverrideStatusChange(event.target.value as MemberStatus)}
+                            disabled={overrideDisabled}
+                          >
+                            {STATUS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </Select>
+                          <Input
+                            value={member.status_override_reason ?? ""}
+                            onChange={(event) => handleOverrideReasonChange(event.target.value)}
+                            placeholder="Reason (optional)"
+                            disabled={overrideDisabled}
+                          />
+                        </>
+                      )}
+                      <p className="text-[11px] text-mute">
+                        Overrides should be used sparingly. Status will return to automatic once overrides are disabled.
+                      </p>
+                    </div>
+                  )}
+                </SectionCard>
+                <SectionCard
+                  id="sundaySchool"
+                  ref={setSectionRef("sundaySchool")}
+                  title="Sunday school"
+                  subtitle="Linked participants and contribution health"
+                  collapsed={collapsedSections.sundaySchool}
+                  onToggle={() => toggleSectionCollapse("sundaySchool")}
+                  actions={
+                    permissions.manageSchools ? (
+                      <Button
+                        type="button"
+                        variant="soft"
+                        className="rounded-full px-3 py-1 text-xs font-semibold"
+                        onClick={() => navigate("/schools/sunday-school")}
+                      >
+                        Add participant
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  <div className="grid gap-3 sm:grid-cols-4 text-sm">
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3 text-center">
+                      <p className="text-[11px] uppercase tracking-wide text-mute">Linked</p>
+                      <p className="text-lg font-semibold text-ink">{sundayParticipants.length}</p>
+                    </div>
+                    <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-3 text-center">
+                      <p className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Up to date</p>
+                      <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{sundayStatusSummary.upToDate}</p>
+                    </div>
+                    <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 p-3 text-center">
+                      <p className="text-[11px] uppercase tracking-wide text-amber-700 dark:text-amber-400">Pending</p>
+                      <p className="text-lg font-semibold text-amber-700 dark:text-amber-400">{sundayStatusSummary.pending}</p>
+                    </div>
+                    <div className="rounded-xl bg-rose-50 dark:bg-rose-900/20 p-3 text-center">
+                      <p className="text-[11px] uppercase tracking-wide text-rose-700 dark:text-rose-400">Overdue</p>
+                      <p className="text-lg font-semibold text-rose-700 dark:text-rose-400">{sundayStatusSummary.overdue}</p>
+                    </div>
+                  </div>
+                  {!sundayParticipants.length ? (
+                    <div className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-6 text-sm text-mute">
+                      No Sunday School participants linked yet. Use the Sunday School workspace to enroll a child, youth, or adult.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {sundayParticipants.map((participant) => (
+                        <div key={participant.id} className="rounded-xl border border-border bg-card/70 p-4 space-y-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-ink">
+                                {participant.first_name} {participant.last_name}
                               </div>
-                              <span
-                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                  SUNDAY_STATUS_STYLES[participant.status]
-                                }`}
-                              >
-                                {participant.status}
-                              </span>
+                              <p className="text-xs text-mute">
+                                {participant.category} · Username {participant.member_username}
+                              </p>
                             </div>
-                            <dl className="grid gap-3 text-sm sm:grid-cols-3">
-                              <div>
-                                <dt className="text-xs uppercase text-slate-500">Monthly amount</dt>
-                                <dd className="font-medium">
-                                  {participant.monthly_amount !== null && participant.monthly_amount !== undefined
-                                    ? `${member.contribution_currency} ${participant.monthly_amount.toFixed(2)}`
-                                    : "—"}
-                                </dd>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${SUNDAY_STATUS_STYLES[participant.status]
+                                }`}
+                            >
+                              {participant.status}
+                            </span>
+                          </div>
+                          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                            <div>
+                              <dt className="text-xs uppercase text-mute">Monthly amount</dt>
+                              <dd className="font-medium">
+                                {participant.monthly_amount !== null && participant.monthly_amount !== undefined
+                                  ? `${member.contribution_currency} ${participant.monthly_amount.toFixed(2)}`
+                                  : "—"}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs uppercase text-mute">Preferred method</dt>
+                              <dd className="font-medium">{participant.payment_method || "—"}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs uppercase text-mute">Last payment</dt>
+                              <dd className="font-medium">{formatDate(participant.last_payment_at)}</dd>
+                            </div>
+                          </dl>
+                          <p className="text-xs text-mute">
+                            {participant.pays_contribution
+                              ? "Contribution enabled for this participant."
+                              : "Marked as not contributing to Sunday School fees."}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {permissions.viewPayments && sundayPayments.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-mute">Recent payments</h4>
+                      <div className="space-y-2">
+                        {sundayPayments.slice(0, 3).map((payment) => (
+                          <div
+                            key={payment.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/50 px-3 py-2 text-sm"
+                          >
+                            <div>
+                              <div className="font-medium text-ink">{payment.service_type_label}</div>
+                              <div className="text-xs text-mute">{new Date(payment.posted_at).toLocaleDateString()}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-semibold">
+                                {payment.currency}{" "}
+                                {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </div>
-                              <div>
-                                <dt className="text-xs uppercase text-slate-500">Preferred method</dt>
-                                <dd className="font-medium">{participant.payment_method || "—"}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-xs uppercase text-slate-500">Last payment</dt>
-                                <dd className="font-medium">{formatDate(participant.last_payment_at)}</dd>
-                              </div>
-                            </dl>
-                            <p className="text-xs text-slate-500">
-                              {participant.pays_contribution
-                                ? "Contribution enabled for this participant."
-                                : "Marked as not contributing to Sunday School fees."}
-                            </p>
+                              <div className="text-xs text-mute">{payment.method || "—"}</div>
+                            </div>
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+                  {permissions.viewSchools && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="rounded-full px-4"
+                      onClick={() => navigate(`/schools/sunday-school?member=${member.id}`)}
+                    >
+                      Open Sunday School workspace
+                    </Button>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  id="contact"
+                  ref={setSectionRef("contact")}
+                  title="Contact & address"
+                  subtitle="Primary communication info plus duplicate detection"
+                  data-tour="member-contact"
+                  collapsed={collapsedSections.contact}
+                  onToggle={() => toggleSectionCollapse("contact")}
+                >
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Email</label>
+                      <Input value={member.email ?? ""} onChange={handleChange("email")} type="email" disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Phone</label>
+                      <div className="flex gap-2">
+                        <span className="inline-flex items-center rounded-xl border border-border bg-card/50 px-3 text-sm font-semibold text-ink">
+                          {CANADA_FLAG} {CANADIAN_COUNTRY_CODE}
+                        </span>
+                        <Input
+                          value={phoneDisplay}
+                          onChange={(event) => handlePhoneInputChange(event.target.value)}
+                          required
+                          disabled={disableCore}
+                          placeholder="(613) 555-0199"
+                        />
+                      </div>
+                      {phoneAutoAdjusted && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+                          Auto-adjusted to Canadian format. Accept?
+                          <button
+                            type="button"
+                            className="font-semibold underline hover:text-amber-900"
+                            onClick={acceptAutoAdjustedPhone}
+                          >
+                            Accept
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">District</label>
+                      <Input value={member.district ?? ""} onChange={handleChange("district")} disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Address (line)</label>
+                      <Input value={member.address ?? ""} onChange={handleChange("address")} disabled={disableCore} />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Street</label>
+                      <Input value={member.address_street ?? ""} onChange={handleChange("address_street")} disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">City</label>
+                      <Input value={member.address_city ?? ""} onChange={handleChange("address_city")} disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Region / State</label>
+                      <Input value={member.address_region ?? ""} onChange={handleChange("address_region")} disabled={disableCore} />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Postal code</label>
+                      <Input value={member.address_postal_code ?? ""} onChange={handleChange("address_postal_code")} disabled={disableCore} />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Country</label>
+                      <Input value={member.address_country ?? ""} onChange={handleChange("address_country")} disabled={disableCore} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase text-mute">Potential duplicates</label>
+                    {!permissions.viewMembers ? (
+                      <Card className="p-3 text-sm text-mute">Duplicate checks require member directory access.</Card>
+                    ) : duplicateLoading ? (
+                      <Card className="p-3 text-sm text-mute">Checking for duplicates…</Card>
+                    ) : duplicateMatches.length === 0 ? (
+                      <Card className="p-3 text-sm text-mute">No duplicates detected with the current contact info.</Card>
+                    ) : (
+                      <Card className="p-3 space-y-3 border border-amber-200 bg-amber-50/80">
+                        {duplicateMatches.map((match) => (
+                          <div key={match.id} className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="font-medium">
+                                {match.first_name} {match.last_name}
+                              </div>
+                              <div className="text-xs text-mute">
+                                {match.email || "No email"} • {match.phone || "No phone"}
+                              </div>
+                              <div className="text-xs text-amber-800">Match on {match.reason}</div>
+                            </div>
+                            <Link to={`/members/${match.id}/edit`} className="text-sm text-accent underline">
+                              Open
+                            </Link>
+                          </div>
+                        ))}
+                      </Card>
                     )}
-                    {permissions.viewPayments && sundayPayments.length > 0 && (
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  id="household"
+                  ref={setSectionRef("household")}
+                  title="Household & faith"
+                  subtitle="Household membership and father confessor context"
+                  data-tour="member-household"
+                  collapsed={collapsedSections.household}
+                  onToggle={() => toggleSectionCollapse("household")}
+                >
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Household</label>
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                        <Select value={selectedHousehold} onChange={handleHouseholdSelect} className="md:w-64" disabled={disableCore}>
+                          <option value="">No household</option>
+                          {meta?.households.map((household) => (
+                            <option key={household.id} value={String(household.id)}>
+                              {household.name}
+                            </option>
+                          ))}
+                          <option value="new">Add new household…</option>
+                        </Select>
+                        {selectedHousehold === "new" && (
+                          <Input
+                            className="md:flex-1"
+                            value={newHouseholdName}
+                            onChange={(event) => {
+                              if (disableCore) return;
+                              setNewHouseholdName(event.target.value);
+                              markDirty();
+                            }}
+                            placeholder="Household name"
+                            disabled={disableCore}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Household size override</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={member.household_size_override ?? ""}
+                        onChange={(event) => {
+                          if (disableCore) return;
+                          const value = event.target.value;
+                          const parsed = Number(value);
+                          setMember((prev) =>
+                            prev
+                              ? {
+                                ...prev,
+                                household_size_override:
+                                  value === "" || Number.isNaN(parsed) ? null : parsed,
+                              }
+                              : prev
+                          );
+                          markDirty();
+                        }}
+                        disabled={disableCore}
+                      />
+                      <p className="text-xs text-mute mt-1">Current family count: {member.family_count}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase text-mute">Father confessor</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-accent"
+                        checked={member.has_father_confessor}
+                        onChange={(event) => {
+                          if (disableSpiritual) {
+                            return;
+                          }
+                          const checked = event.target.checked;
+                          setMember((prev) => (prev ? { ...prev, has_father_confessor: checked } : prev));
+                          if (!checked) {
+                            setFatherConfessorId("");
+                          }
+                          markDirty();
+                        }}
+                        disabled={disableSpiritual}
+                      />
+                      <span className="text-sm">Member has a father confessor</span>
+                    </div>
+                    {member.has_father_confessor && (
+                      <Select
+                        className="md:w-72"
+                        value={fatherConfessorId}
+                        onChange={(event) => {
+                          setFatherConfessorId(event.target.value);
+                          markDirty();
+                        }}
+                        required
+                        disabled={disableSpiritual}
+                      >
+                        <option value="">Select father confessor…</option>
+                        {(meta?.father_confessors ?? []).map((confessor) => (
+                          <option key={confessor.id} value={String(confessor.id)}>
+                            {confessor.full_name}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                    {disableSpiritual && (
+                      <p className="text-xs text-mute">Registrar or PR Admin must manage Father Confessor assignments.</p>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  id="giving"
+                  ref={setSectionRef("giving")}
+                  title="Giving & contributions"
+                  subtitle="Finance admins keep contribution data in sync here"
+                  data-tour="member-giving"
+                  collapsed={collapsedSections.giving}
+                  onToggle={() => toggleSectionCollapse("giving")}
+                >
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="accent-accent"
+                        checked={member.is_tither}
+                        onChange={toggleBoolean("is_tither")}
+                        disabled={disableFinance}
+                      />
+                      Tither
+                    </label>
+                    <label
+                      className={`flex items-center gap-2 text-sm transition ${payWarningPulse ? "animate-pulse ring-2 ring-amber-400 rounded-lg px-2 -mx-2" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-accent"
+                        checked={member.pays_contribution}
+                        onChange={toggleBoolean("pays_contribution")}
+                        disabled={disableFinance}
+                      />
+                      Pays membership contribution (required)
+                    </label>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Contribution method</label>
+                      <Select
+                        value={member.contribution_method ?? ""}
+                        onChange={(event) => {
+                          if (disableFinance) return;
+                          setMember((prev) => (prev ? { ...prev, contribution_method: event.target.value || null } : prev));
+                          markDirty();
+                        }}
+                        disabled={disableFinance}
+                      >
+                        <option value="">Not set</option>
+                        {(meta?.payment_methods ?? []).map((method) => (
+                          <option key={method} value={method}>
+                            {method}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Contribution amount</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={member.contribution_amount ?? ""}
+                        onChange={(event) => {
+                          if (disableFinance) return;
+                          const value = event.target.value;
+                          const parsed = Number(value);
+                          setMember((prev) =>
+                            prev
+                              ? {
+                                ...prev,
+                                contribution_amount:
+                                  value === "" || Number.isNaN(parsed) ? null : parsed,
+                              }
+                              : prev
+                          );
+                          markDirty();
+                        }}
+                        disabled={disableFinance || !member.contribution_exception_reason}
+                      />
+                      {!member.contribution_exception_reason ? (
+                        <p className="text-xs text-mute mt-1">Amount fixed at 75.00 CAD unless an exception is selected.</p>
+                      ) : (
+                        <p className="text-xs text-mute mt-1">Adjust the collected contribution for this member.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="md:w-72">
+                    <label className="text-xs uppercase text-mute">Contribution exception</label>
+                    <Select
+                      value={member.contribution_exception_reason ?? ""}
+                      onChange={(event) => handleContributionExceptionChange(event.target.value)}
+                      disabled={disableFinance}
+                    >
+                      <option value="">No exception (75 CAD)</option>
+                      {exceptionReasons.map((reason) => (
+                        <option key={reason} value={reason}>
+                          {reason === "LowIncome" ? "Low income" : reason}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  {disableFinance && (
+                    <p className="text-xs text-mute">
+                      Finance Admin permissions are required to adjust giving details.
+                    </p>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  id="payments"
+                  ref={setSectionRef("payments")}
+                  title="Financial activity"
+                  subtitle="Ledger history and quick entry"
+                  data-tour="member-payments"
+                  collapsed={collapsedSections.payments}
+                  onToggle={() => toggleSectionCollapse("payments")}
+                  actions={
+                    permissions.viewPayments && member?.id ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-tour="payment-timeline"
+                        onClick={() => navigate(`/payments/members/${member.id}`)}
+                      >
+                        View payment timeline
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-border bg-card/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs uppercase text-slate-500">Next contribution due</div>
+                        <div className="text-base font-semibold text-ink">{nextContributionLabel}</div>
+                      </div>
+                      <div
+                        className={`text-sm font-semibold ${membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                          ? membershipHealth.days_until_due >= 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : "text-rose-700 dark:text-rose-400"
+                          : "text-mute"
+                          }`}
+                      >
+                        {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
+                          ? membershipHealth.days_until_due >= 0
+                            ? `${membershipHealth.days_until_due} days`
+                            : `${Math.abs(membershipHealth.days_until_due)} days overdue`
+                          : "No schedule"}
+                      </div>
+                    </div>
+                    {membershipEvents.length > 0 && (
                       <div className="space-y-2">
-                        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Recent payments</h4>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-mute">Status activity</h4>
                         <div className="space-y-2">
-                          {sundayPayments.slice(0, 3).map((payment) => (
-                            <div
-                              key={payment.id}
-                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-                            >
-                              <div>
-                                <div className="font-medium text-slate-900">{payment.service_type_label}</div>
-                                <div className="text-xs text-slate-500">{new Date(payment.posted_at).toLocaleDateString()}</div>
+                          {membershipEvents.slice(0, 5).map((event) => (
+                            <div key={`${event.type}-${event.timestamp}`} className="rounded-xl border border-border px-3 py-2">
+                              <div className="flex items-center justify-between text-[11px] uppercase text-mute">
+                                <span>{formatDate(event.timestamp)}</span>
+                                <span>{event.type}</span>
                               </div>
-                              <div className="text-right">
-                                <div className="font-semibold">
-                                  {payment.currency}{" "}
-                                  {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                <div className="text-xs text-slate-500">{payment.method || "—"}</div>
-                              </div>
+                              <div className="text-sm font-semibold text-ink">{event.label}</div>
+                              {event.description && (
+                                <div className="text-xs text-mute">{event.description}</div>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
-                    {permissions.viewSchools && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="rounded-full px-4"
-                        onClick={() => navigate(`/schools/sunday-school?member=${member.id}`)}
-                      >
-                        Open Sunday School workspace
-                      </Button>
-                    )}
-                  </SectionCard>
-
-          <SectionCard
-            id="contact"
-            ref={setSectionRef("contact")}
-            title="Contact & address"
-            subtitle="Primary communication info plus duplicate detection"
-            collapsed={collapsedSections.contact}
-            onToggle={() => toggleSectionCollapse("contact")}
-          >
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Email</label>
-                <Input value={member.email ?? ""} onChange={handleChange("email")} type="email" disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Phone</label>
-                <div className="flex gap-2">
-                  <span className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
-                    {CANADA_FLAG} {CANADIAN_COUNTRY_CODE}
-                  </span>
-                  <Input
-                    value={phoneDisplay}
-                    onChange={(event) => handlePhoneInputChange(event.target.value)}
-                    required
-                    disabled={disableCore}
-                    placeholder="(613) 555-0199"
-                  />
-                </div>
-                {phoneAutoAdjusted && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-                    Auto-adjusted to Canadian format. Accept?
-                    <button
-                      type="button"
-                      className="font-semibold underline hover:text-amber-900"
-                      onClick={acceptAutoAdjustedPhone}
-                    >
-                      Accept
-                    </button>
                   </div>
-                )}
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">District</label>
-                <Input value={member.district ?? ""} onChange={handleChange("district")} disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Address (line)</label>
-                <Input value={member.address ?? ""} onChange={handleChange("address")} disabled={disableCore} />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Street</label>
-                <Input value={member.address_street ?? ""} onChange={handleChange("address_street")} disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">City</label>
-                <Input value={member.address_city ?? ""} onChange={handleChange("address_city")} disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Region / State</label>
-                <Input value={member.address_region ?? ""} onChange={handleChange("address_region")} disabled={disableCore} />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Postal code</label>
-                <Input value={member.address_postal_code ?? ""} onChange={handleChange("address_postal_code")} disabled={disableCore} />
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Country</label>
-                <Input value={member.address_country ?? ""} onChange={handleChange("address_country")} disabled={disableCore} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs uppercase text-mute">Potential duplicates</label>
-              {!permissions.viewMembers ? (
-                <Card className="p-3 text-sm text-mute">Duplicate checks require member directory access.</Card>
-              ) : duplicateLoading ? (
-                <Card className="p-3 text-sm text-mute">Checking for duplicates…</Card>
-              ) : duplicateMatches.length === 0 ? (
-                <Card className="p-3 text-sm text-mute">No duplicates detected with the current contact info.</Card>
-              ) : (
-                <Card className="p-3 space-y-3 border border-amber-200 bg-amber-50/80">
-                  {duplicateMatches.map((match) => (
-                    <div key={match.id} className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="font-medium">
-                          {match.first_name} {match.last_name}
-                        </div>
-                        <div className="text-xs text-mute">
-                          {match.email || "No email"} • {match.phone || "No phone"}
-                        </div>
-                        <div className="text-xs text-amber-800">Match on {match.reason}</div>
-                      </div>
-                      <Link to={`/members/${match.id}/edit`} className="text-sm text-accent underline">
-                        Open
-                      </Link>
+                  {!permissions.viewPayments ? (
+                    <p className="text-sm text-mute">Finance Admin permissions are required to view ledger payments.</p>
+                  ) : paymentsLoading ? (
+                    <p className="text-sm text-mute">Loading payment history…</p>
+                  ) : memberPayments.length === 0 ? (
+                    <p className="text-sm text-mute">No payments recorded in the ledger yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto border border-border rounded-lg">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Service</th>
+                            <th className="px-4 py-2 text-left">Amount</th>
+                            <th className="px-4 py-2 text-left">Method</th>
+                            <th className="px-4 py-2 text-left">Status</th>
+                            <th className="px-4 py-2 text-left">Memo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberPayments.map((payment) => (
+                            <tr key={payment.id} className="border-t border-border/60">
+                              <td className="px-4 py-2">{new Date(payment.posted_at).toLocaleDateString()}</td>
+                              <td className="px-4 py-2">{payment.service_type.label}</td>
+                              <td className="px-4 py-2">
+                                {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="px-4 py-2">{payment.method || "—"}</td>
+                              <td className="px-4 py-2">
+                                <Badge className="normal-case">{payment.status}</Badge>
+                              </td>
+                              <td className="px-4 py-2">{payment.memo || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  ))}
-                </Card>
-              )}
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            id="household"
-            ref={setSectionRef("household")}
-            title="Household & faith"
-            subtitle="Household membership and father confessor context"
-            collapsed={collapsedSections.household}
-            onToggle={() => toggleSectionCollapse("household")}
-          >
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Household</label>
-                <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                  <Select value={selectedHousehold} onChange={handleHouseholdSelect} className="md:w-64" disabled={disableCore}>
-                    <option value="">No household</option>
-                    {meta?.households.map((household) => (
-                      <option key={household.id} value={String(household.id)}>
-                        {household.name}
-                      </option>
-                    ))}
-                    <option value="new">Add new household…</option>
-                  </Select>
-                  {selectedHousehold === "new" && (
-                    <Input
-                      className="md:flex-1"
-                      value={newHouseholdName}
-                      onChange={(event) => {
-                        if (disableCore) return;
-                        setNewHouseholdName(event.target.value);
-                        markDirty();
-                      }}
-                      placeholder="Household name"
-                      disabled={disableCore}
-                    />
                   )}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Household size override</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={member.household_size_override ?? ""}
-                  onChange={(event) => {
-                    if (disableCore) return;
-                    const value = event.target.value;
-                    const parsed = Number(value);
-                    setMember((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            household_size_override:
-                              value === "" || Number.isNaN(parsed) ? null : parsed,
-                          }
-                        : prev
-                    );
-                    markDirty();
-                  }}
-                  disabled={disableCore}
-                />
-                <p className="text-xs text-mute mt-1">Current family count: {member.family_count}</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs uppercase text-mute">Father confessor</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="accent-accent"
-                  checked={member.has_father_confessor}
-                  onChange={(event) => {
-                    if (disableSpiritual) {
-                      return;
-                    }
-                    const checked = event.target.checked;
-                    setMember((prev) => (prev ? { ...prev, has_father_confessor: checked } : prev));
-                    if (!checked) {
-                      setFatherConfessorId("");
-                    }
-                    markDirty();
-                  }}
-                  disabled={disableSpiritual}
-                />
-                <span className="text-sm">Member has a father confessor</span>
-              </div>
-              {member.has_father_confessor && (
-                <Select
-                  className="md:w-72"
-                  value={fatherConfessorId}
-                  onChange={(event) => {
-                    setFatherConfessorId(event.target.value);
-                    markDirty();
-                  }}
-                  required
-                  disabled={disableSpiritual}
-                >
-                  <option value="">Select father confessor…</option>
-                  {(meta?.father_confessors ?? []).map((confessor) => (
-                    <option key={confessor.id} value={String(confessor.id)}>
-                      {confessor.full_name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-              {disableSpiritual && (
-                <p className="text-xs text-mute">Registrar or PR Admin must manage Father Confessor assignments.</p>
-              )}
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            id="giving"
-            ref={setSectionRef("giving")}
-            title="Giving & contributions"
-            subtitle="Finance admins keep contribution data in sync here"
-            collapsed={collapsedSections.giving}
-            onToggle={() => toggleSectionCollapse("giving")}
-          >
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="accent-accent"
-                  checked={member.is_tither}
-                  onChange={toggleBoolean("is_tither")}
-                  disabled={disableFinance}
-                />
-                Tither
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="accent-accent"
-                  checked
-                  readOnly
-                  disabled
-                />
-                Pays membership contribution (required)
-              </label>
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs uppercase text-mute">Contribution method</label>
-                <Select
-                  value={member.contribution_method ?? ""}
-                  onChange={(event) => {
-                    if (disableFinance) return;
-                    setMember((prev) => (prev ? { ...prev, contribution_method: event.target.value || null } : prev));
-                    markDirty();
-                  }}
-                  disabled={disableFinance}
-                >
-                  <option value="">Not set</option>
-                  {(meta?.payment_methods ?? []).map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Contribution amount</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={member.contribution_amount ?? ""}
-                  onChange={(event) => {
-                    if (disableFinance) return;
-                    const value = event.target.value;
-                    const parsed = Number(value);
-                    setMember((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            contribution_amount:
-                              value === "" || Number.isNaN(parsed) ? null : parsed,
-                          }
-                        : prev
-                    );
-                    markDirty();
-                  }}
-                  disabled={disableFinance || !member.contribution_exception_reason}
-                />
-                {!member.contribution_exception_reason ? (
-                  <p className="text-xs text-mute mt-1">Amount fixed at 75.00 CAD unless an exception is selected.</p>
-                ) : (
-                  <p className="text-xs text-mute mt-1">Adjust the collected contribution for this member.</p>
-                )}
-              </div>
-            </div>
-            <div className="md:w-72">
-              <label className="text-xs uppercase text-mute">Contribution exception</label>
-              <Select
-                value={member.contribution_exception_reason ?? ""}
-                onChange={(event) => handleContributionExceptionChange(event.target.value)}
-                disabled={disableFinance}
-              >
-                <option value="">No exception (75 CAD)</option>
-                {exceptionReasons.map((reason) => (
-                  <option key={reason} value={reason}>
-                    {reason === "LowIncome" ? "Low income" : reason}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {disableFinance && (
-              <p className="text-xs text-mute">
-                Finance Admin permissions are required to adjust giving details.
-              </p>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            id="payments"
-            ref={setSectionRef("payments")}
-            title="Financial activity"
-            subtitle="Ledger history and quick entry"
-            collapsed={collapsedSections.payments}
-            onToggle={() => toggleSectionCollapse("payments")}
-            actions={
-              permissions.viewPayments && member?.id ? (
-                <Button type="button" variant="ghost" onClick={() => navigate(`/payments/members/${member.id}`)}>
-                  View payment timeline
-                </Button>
-              ) : undefined
-            }
-          >
-            <div className="space-y-3">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase text-slate-500">Next contribution due</div>
-                  <div className="text-base font-semibold text-slate-900">{nextContributionLabel}</div>
-                </div>
-                <div
-                  className={`text-sm font-semibold ${
-                    membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                      ? membershipHealth.days_until_due >= 0
-                        ? "text-emerald-700"
-                        : "text-rose-700"
-                      : "text-slate-500"
-                  }`}
-                >
-                  {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                    ? membershipHealth.days_until_due >= 0
-                      ? `${membershipHealth.days_until_due} days`
-                      : `${Math.abs(membershipHealth.days_until_due)} days overdue`
-                    : "No schedule"}
-                </div>
-              </div>
-              {membershipEvents.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Status activity</h4>
-                  <div className="space-y-2">
-                    {membershipEvents.slice(0, 5).map((event) => (
-                      <div key={`${event.type}-${event.timestamp}`} className="rounded-xl border border-slate-200 px-3 py-2">
-                        <div className="flex items-center justify-between text-[11px] uppercase text-slate-500">
-                          <span>{formatDate(event.timestamp)}</span>
-                          <span>{event.type}</span>
-                        </div>
-                        <div className="text-sm font-semibold text-slate-900">{event.label}</div>
-                        {event.description && (
-                          <div className="text-xs text-slate-500">{event.description}</div>
-                        )}
+                  {permissions.managePayments && (
+                    <div className="grid md:grid-cols-6 gap-3">
+                      <div>
+                        <label className="text-xs uppercase text-mute">Service type</label>
+                        <Select
+                          value={newPayment.service_type_code}
+                          onChange={(event) => setNewPayment((prev) => ({ ...prev, service_type_code: event.target.value }))}
+                          disabled={savingPayment || serviceTypes.length === 0}
+                        >
+                          {serviceTypes.length === 0 && <option value="">Loading…</option>}
+                          {serviceTypes.map((type) => (
+                            <option key={type.code} value={type.code}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </Select>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            {!permissions.viewPayments ? (
-              <p className="text-sm text-mute">Finance Admin permissions are required to view ledger payments.</p>
-            ) : paymentsLoading ? (
-              <p className="text-sm text-mute">Loading payment history…</p>
-            ) : memberPayments.length === 0 ? (
-              <p className="text-sm text-mute">No payments recorded in the ledger yet.</p>
-            ) : (
-              <div className="overflow-x-auto border border-border rounded-lg">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Service</th>
-                      <th className="px-4 py-2 text-left">Amount</th>
-                      <th className="px-4 py-2 text-left">Method</th>
-                      <th className="px-4 py-2 text-left">Status</th>
-                      <th className="px-4 py-2 text-left">Memo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {memberPayments.map((payment) => (
-                      <tr key={payment.id} className="border-t border-border/60">
-                        <td className="px-4 py-2">{new Date(payment.posted_at).toLocaleDateString()}</td>
-                        <td className="px-4 py-2">{payment.service_type.label}</td>
-                        <td className="px-4 py-2">
-                          {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-4 py-2">{payment.method || "—"}</td>
-                        <td className="px-4 py-2">
-                          <Badge className="normal-case">{payment.status}</Badge>
-                        </td>
-                        <td className="px-4 py-2">{payment.memo || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {permissions.managePayments && (
-              <div className="grid md:grid-cols-6 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute">Service type</label>
-                  <Select
-                    value={newPayment.service_type_code}
-                    onChange={(event) => setNewPayment((prev) => ({ ...prev, service_type_code: event.target.value }))}
-                    disabled={savingPayment || serviceTypes.length === 0}
-                  >
-                    {serviceTypes.length === 0 && <option value="">Loading…</option>}
-                    {serviceTypes.map((type) => (
-                      <option key={type.code} value={type.code}>
-                        {type.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute">Amount</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={newPayment.amount}
-                    onChange={(event) => setNewPayment((prev) => ({ ...prev, amount: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute">Paid on</label>
-                  <Input
-                    type="date"
-                    value={newPayment.paid_at}
-                    onChange={(event) => setNewPayment((prev) => ({ ...prev, paid_at: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute">Method</label>
-                  <Select
-                    value={newPayment.method}
-                    onChange={(event) => setNewPayment((prev) => ({ ...prev, method: event.target.value }))}
-                  >
-                    <option value="">Select method</option>
-                    {(meta?.payment_methods ?? []).map((method) => (
-                      <option key={method} value={method}>
-                        {method}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute">Memo</label>
-                  <Input
-                    value={newPayment.note}
-                    onChange={(event) => setNewPayment((prev) => ({ ...prev, note: event.target.value }))}
-                    placeholder="Optional"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button type="button" onClick={handleRecordPayment} disabled={savingPayment || !newPayment.service_type_code}>
-                    {savingPayment ? "Recording…" : "Record payment"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            id="family"
-            ref={setSectionRef("family")}
-            title="Family"
-            subtitle="Spouse + children context stays synced with membership records"
-            collapsed={collapsedSections.family}
-            onToggle={() => toggleSectionCollapse("family")}
-          >
-            {member.marital_status === "Married" ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
-                <h4 className="text-xs uppercase text-mute tracking-wide">Spouse</h4>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs uppercase text-mute">First name</label>
-                    <Input value={spouseForm?.first_name ?? ""} onChange={(event) => updateSpouseField("first_name", event.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Last name</label>
-                    <Input value={spouseForm?.last_name ?? ""} onChange={(event) => updateSpouseField("last_name", event.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Gender</label>
-                    <Select value={spouseForm?.gender ?? ""} onChange={(event) => updateSpouseField("gender", event.target.value)}>
-                      <option value="">Not set</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Country of birth</label>
-                    <Input value={spouseForm?.country_of_birth ?? ""} onChange={(event) => updateSpouseField("country_of_birth", event.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Phone</label>
-                    <Input value={spouseForm?.phone ?? ""} onChange={(event) => updateSpouseField("phone", event.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Email</label>
-                    <Input value={spouseForm?.email ?? ""} onChange={(event) => updateSpouseField("email", event.target.value)} type="email" />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-mute">Spouse information is required only when marital status is set to Married.</p>
-            )}
-
-            <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h4 className="text-xs uppercase text-mute tracking-wide">Children</h4>
-                  <p className="text-[11px] text-slate-500">Track household dependents for Sunday School and sponsorship links.</p>
-                </div>
-                <Button type="button" variant="soft" onClick={addChild} className="rounded-full px-4">
-                  Add child
-                </Button>
-              </div>
-              {childrenForm.length === 0 ? (
-                <p className="text-xs text-mute">No children recorded.</p>
-              ) : (
-                <div className="space-y-4">
-                  {childrenForm.map((child) => (
-                    <div key={child.key} className="rounded-lg border border-slate-200/70 p-3 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <span className="text-xs uppercase text-mute">Child</span>
-                        <Button type="button" variant="ghost" className="text-red-500" onClick={() => removeChild(child.key)}>
-                          <Trash2 className="h-4 w-4" />
-                          Remove
+                      <div>
+                        <label className="text-xs uppercase text-mute">Amount</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={newPayment.amount}
+                          onChange={(event) => setNewPayment((prev) => ({ ...prev, amount: event.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Paid on</label>
+                        <Input
+                          type="date"
+                          value={newPayment.paid_at}
+                          onChange={(event) => setNewPayment((prev) => ({ ...prev, paid_at: event.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Method</label>
+                        <Select
+                          value={newPayment.method}
+                          onChange={(event) => setNewPayment((prev) => ({ ...prev, method: event.target.value }))}
+                        >
+                          <option value="">Select method</option>
+                          {(meta?.payment_methods ?? []).map((method) => (
+                            <option key={method} value={method}>
+                              {method}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute">Memo</label>
+                        <Input
+                          value={newPayment.note}
+                          onChange={(event) => setNewPayment((prev) => ({ ...prev, note: event.target.value }))}
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button type="button" onClick={handleRecordPayment} disabled={savingPayment || !newPayment.service_type_code}>
+                          {savingPayment ? "Recording…" : "Record payment"}
                         </Button>
                       </div>
-                      <div className="grid md:grid-cols-2 gap-3">
+                    </div>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  id="family"
+                  ref={setSectionRef("family")}
+                  title="Family"
+                  subtitle="Spouse + children context stays synced with membership records"
+                  collapsed={collapsedSections.family}
+                  onToggle={() => toggleSectionCollapse("family")}
+                >
+                  {member.marital_status === "Married" ? (
+                    <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3">
+                      <h4 className="text-xs uppercase text-mute tracking-wide">Spouse</h4>
+                      <div className="grid md:grid-cols-2 gap-4">
                         <div>
                           <label className="text-xs uppercase text-mute">First name</label>
-                          <Input value={child.first_name} onChange={(event) => updateChildField(child.key, "first_name", event.target.value)} />
+                          <Input value={spouseForm?.first_name ?? ""} onChange={(event) => updateSpouseField("first_name", event.target.value)} />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Last name</label>
-                          <Input value={child.last_name} onChange={(event) => updateChildField(child.key, "last_name", event.target.value)} />
+                          <Input value={spouseForm?.last_name ?? ""} onChange={(event) => updateSpouseField("last_name", event.target.value)} />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Gender</label>
-                          <Select value={child.gender} onChange={(event) => updateChildField(child.key, "gender", event.target.value)}>
+                          <Select value={spouseForm?.gender ?? ""} onChange={(event) => updateSpouseField("gender", event.target.value)}>
                             <option value="">Not set</option>
                             <option value="Male">Male</option>
                             <option value="Female">Female</option>
                           </Select>
                         </div>
                         <div>
-                          <label className="text-xs uppercase text-mute">Birth date</label>
-                          <Input type="date" value={child.birth_date} onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)} />
-                        </div>
-                      </div>
-                      <div className="grid md:grid-cols-2 gap-3">
-                        <div>
                           <label className="text-xs uppercase text-mute">Country of birth</label>
-                          <Input value={child.country_of_birth} onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)} />
+                          <Input value={spouseForm?.country_of_birth ?? ""} onChange={(event) => updateSpouseField("country_of_birth", event.target.value)} />
                         </div>
                         <div>
-                          <label className="text-xs uppercase text-mute">Notes</label>
-                          <Input value={child.notes} onChange={(event) => updateChildField(child.key, "notes", event.target.value)} />
+                          <label className="text-xs uppercase text-mute">Phone</label>
+                          <Input value={spouseForm?.phone ?? ""} onChange={(event) => updateSpouseField("phone", event.target.value)} />
+                        </div>
+                        <div>
+                          <label className="text-xs uppercase text-mute">Email</label>
+                          <Input value={spouseForm?.email ?? ""} onChange={(event) => updateSpouseField("email", event.target.value)} type="email" />
                         </div>
                       </div>
                     </div>
-                  ))}
+                  ) : (
+                    <p className="text-xs text-mute">Spouse information is required only when marital status is set to Married.</p>
+                  )}
+
+                  <div className="rounded-xl border border-border p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-xs uppercase text-mute tracking-wide">Children</h4>
+                        <p className="text-[11px] text-slate-500">Track household dependents for Sunday School and sponsorship links.</p>
+                      </div>
+                      <Button type="button" variant="soft" onClick={addChild} className="rounded-full px-4">
+                        Add child
+                      </Button>
+                    </div>
+                    {childrenForm.length === 0 ? (
+                      <p className="text-xs text-mute">No children recorded.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {childrenForm.map((child) => (
+                          <div key={child.key} className="rounded-lg border border-border/70 p-3 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <span className="text-xs uppercase text-mute">Child</span>
+                              <Button type="button" variant="ghost" className="text-red-500" onClick={() => removeChild(child.key)}>
+                                <Trash2 className="h-4 w-4" />
+                                Remove
+                              </Button>
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs uppercase text-mute">First name</label>
+                                <Input value={child.first_name} onChange={(event) => updateChildField(child.key, "first_name", event.target.value)} />
+                              </div>
+                              <div>
+                                <label className="text-xs uppercase text-mute">Last name</label>
+                                <Input value={child.last_name} onChange={(event) => updateChildField(child.key, "last_name", event.target.value)} />
+                              </div>
+                              <div>
+                                <label className="text-xs uppercase text-mute">Gender</label>
+                                <Select value={child.gender} onChange={(event) => updateChildField(child.key, "gender", event.target.value)}>
+                                  <option value="">Not set</option>
+                                  <option value="Male">Male</option>
+                                  <option value="Female">Female</option>
+                                </Select>
+                              </div>
+                              <div>
+                                <label className="text-xs uppercase text-mute">Birth date</label>
+                                <Input type="date" value={child.birth_date} onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)} />
+                              </div>
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs uppercase text-mute">Country of birth</label>
+                                <Input value={child.country_of_birth} onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)} />
+                              </div>
+                              <div>
+                                <label className="text-xs uppercase text-mute">Notes</label>
+                                <Input value={child.notes} onChange={(event) => updateChildField(child.key, "notes", event.target.value)} />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  id="ministries"
+                  ref={setSectionRef("ministries")}
+                  title="Tags & ministries"
+                  subtitle="Chip selectors keep roles + cohorts tidy"
+                  collapsed={collapsedSections.ministries}
+                  onToggle={() => toggleSectionCollapse("ministries")}
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-xs uppercase text-mute mb-2">Tags</h4>
+                      {metaLoading && <div className="text-xs text-mute">Loading tags…</div>}
+                      {!metaLoading && meta && meta.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {meta.tags.map((tag) => {
+                            const checked = member.tags.some((assigned) => assigned.id === tag.id);
+                            return (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => toggleTag(tag.id)}
+                                disabled={disableCore}
+                                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-card text-mute"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
+                              >
+                                {tag.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {!metaLoading && meta && meta.tags.length === 0 && (
+                        <div className="text-xs text-mute">No tags available yet.</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs uppercase text-mute mb-2">Ministries</h4>
+                      {metaLoading && <div className="text-xs text-mute">Loading ministries…</div>}
+                      {!metaLoading && meta && meta.ministries.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {meta.ministries.map((ministry) => {
+                            const checked = member.ministries.some((assigned) => assigned.id === ministry.id);
+                            return (
+                              <button
+                                key={ministry.id}
+                                type="button"
+                                onClick={() => toggleMinistry(ministry.id)}
+                                disabled={disableCore}
+                                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-card text-mute"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
+                              >
+                                {ministry.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {!metaLoading && meta && meta.ministries.length === 0 && (
+                        <div className="text-xs text-mute">No ministries available yet.</div>
+                      )}
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  id="notes"
+                  ref={setSectionRef("notes")}
+                  title="Notes"
+                  subtitle="Internal-only remarks visible to registrar roles"
+                  collapsed={collapsedSections.notes}
+                  onToggle={() => toggleSectionCollapse("notes")}
+                >
+                  <Textarea rows={3} value={member.notes ?? ""} onChange={handleChange("notes")} disabled={disableCore} />
+                </SectionCard>
+
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={updating || !canSubmit}>
+                    {updating ? "Saving…" : "Save changes"}
+                  </Button>
                 </div>
-              )}
+              </form>
+              <SummaryCards member={member} formatDate={formatDate} />
+              <AuditTrailCard auditLoading={auditLoading} auditEntries={auditEntries} />
             </div>
-          </SectionCard>
-
-          <SectionCard
-            id="ministries"
-            ref={setSectionRef("ministries")}
-            title="Tags & ministries"
-            subtitle="Chip selectors keep roles + cohorts tidy"
-            collapsed={collapsedSections.ministries}
-            onToggle={() => toggleSectionCollapse("ministries")}
-          >
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-xs uppercase text-mute mb-2">Tags</h4>
-                {metaLoading && <div className="text-xs text-mute">Loading tags…</div>}
-                {!metaLoading && meta && meta.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {meta.tags.map((tag) => {
-                      const checked = member.tags.some((assigned) => assigned.id === tag.id);
-                      return (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          onClick={() => toggleTag(tag.id)}
-                          disabled={disableCore}
-                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-white text-slate-600"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
-                        >
-                          {tag.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {!metaLoading && meta && meta.tags.length === 0 && (
-                  <div className="text-xs text-mute">No tags available yet.</div>
-                )}
-              </div>
-
-              <div>
-                <h4 className="text-xs uppercase text-mute mb-2">Ministries</h4>
-                {metaLoading && <div className="text-xs text-mute">Loading ministries…</div>}
-                {!metaLoading && meta && meta.ministries.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {meta.ministries.map((ministry) => {
-                      const checked = member.ministries.some((assigned) => assigned.id === ministry.id);
-                      return (
-                        <button
-                          key={ministry.id}
-                          type="button"
-                          onClick={() => toggleMinistry(ministry.id)}
-                          disabled={disableCore}
-                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${checked ? "border-accent bg-accent/10 text-accent" : "border-border bg-white text-slate-600"} ${disableCore ? "opacity-60 cursor-not-allowed" : "hover:bg-accent/10"}`}
-                        >
-                          {ministry.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {!metaLoading && meta && meta.ministries.length === 0 && (
-                  <div className="text-xs text-mute">No ministries available yet.</div>
-                )}
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            id="notes"
-            ref={setSectionRef("notes")}
-            title="Notes"
-            subtitle="Internal-only remarks visible to registrar roles"
-            collapsed={collapsedSections.notes}
-            onToggle={() => toggleSectionCollapse("notes")}
-          >
-            <Textarea rows={3} value={member.notes ?? ""} onChange={handleChange("notes")} disabled={disableCore} />
-          </SectionCard>
-
-          <div className="flex justify-end">
-            <Button type="submit" disabled={updating || !canSubmit}>
-              {updating ? "Saving…" : "Save changes"}
-            </Button>
-          </div>
-        </form>
-        <SummaryCards member={member} formatDate={formatDate} />
-        <AuditTrailCard auditLoading={auditLoading} auditEntries={auditEntries} />
-      </div>
-    <aside className="space-y-4">
-      <AvatarCard
-        avatarUrl={avatarUrl}
-        initials={initials}
-        canUpload={canUploadAvatar}
-        uploading={avatarUploading}
-        onUploadClick={handleAvatarPick}
-        inputRef={avatarInputRef}
-        onFileChange={handleAvatarChange}
-      />
-      <QuickActionsCard actions={quickActions} />
-      <SnapshotCard
-        memberAge={memberAge}
-        membershipSince={membershipSince}
-        sundayLinkedCount={sundayParticipants.length}
-        sundaySummary={sundayStatusSummary}
-        sundayContributors={sundayContributors}
-        lastContributionDate={lastContributionDateLabel}
-        lastSundayPayment={lastSundayPaymentLabel}
-        addressSummary={addressSummary}
-        isTither={member.is_tither}
-        paysContribution={member.pays_contribution}
-      />
-    </aside>
+            <aside className="space-y-4">
+              <AvatarCard
+                avatarUrl={avatarUrl}
+                initials={initials}
+                canUpload={canUploadAvatar}
+                uploading={avatarUploading}
+                onUploadClick={handleAvatarPick}
+                inputRef={avatarInputRef}
+                onFileChange={handleAvatarChange}
+              />
+              <QuickActionsCard actions={quickActions} />
+              <SnapshotCard
+                memberAge={memberAge}
+                membershipSince={membershipSince}
+                sundayLinkedCount={sundayParticipants.length}
+                sundaySummary={sundayStatusSummary}
+                sundayContributors={sundayContributors}
+                lastContributionDate={lastContributionDateLabel}
+                lastSundayPayment={lastSundayPaymentLabel}
+                addressSummary={addressSummary}
+                isTither={member.is_tither}
+                paysContribution={member.pays_contribution}
+              />
+            </aside>
           </div>
         </div>
       </main>
 
-      <footer className="sticky bottom-0 border-t border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+      <footer className="sticky bottom-0 border-t border-border bg-bg/90 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3 text-xs text-mute">
           <span>{unsavedLabel}</span>
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={handleCancelChanges} className="rounded-full px-4">
@@ -2575,6 +2757,53 @@ useEffect(() => {
           </div>
         </div>
       </footer>
+
+      {confirmConfig && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <Card className="relative z-10 w-full max-w-md border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-black">
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${confirmConfig.danger ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-800"} dark:bg-slate-800 dark:text-slate-100`}>
+                  !
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-ink dark:text-white">{confirmConfig.title || "Please confirm"}</p>
+                  <p className="text-sm text-mute">{confirmConfig.message}</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    confirmConfig.onCancel?.();
+                    closeConfirm();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant={confirmConfig.danger ? "outline" : "default"}
+                  className={confirmConfig.danger ? "border-amber-500 text-amber-700 hover:bg-amber-50 dark:border-amber-500/70 dark:text-amber-100 dark:hover:bg-amber-500/10" : "dark:border-slate-600 dark:bg-slate-800 dark:text-white"}
+                  onClick={() => confirmConfig.onConfirm()}
+                >
+                  {confirmConfig.confirmLabel || "Confirm"}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
+  const parseApiErrorMessage = (raw?: string | null) => {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.detail) return String(parsed.detail);
+    } catch {
+      // not JSON
+    }
+    return raw;
+  };

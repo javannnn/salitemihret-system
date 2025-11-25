@@ -1,6 +1,6 @@
 # Members Module UI Revamp Plan
 
-_Last updated: 2025-XX-XX_
+_Last updated: 2025-11-20_
 
 ## Objectives
 
@@ -51,13 +51,14 @@ _Last updated: 2025-XX-XX_
 
 ### 5. Interaction & State Management
 - [x] Track `hasUnsavedChanges`; trigger sticky footer status + disable save when necessary.
-- [ ] Ensure `handleSubmit`, validation logic, and API calls remain unchanged aside from layout reflow.
-- [ ] Maintain existing toasts, error handling, and permission-based disablement.
+- [x] Extend `handleSubmit` so the revamped editor supports both edits and brand-new drafts without regressing validation, override, or toast behavior.
+- [x] Maintain existing toasts, error handling, and permission-based disablement while layering in the new draft UX.
+- [x] Retire the quick-add modal in `Members/List.tsx` and route `/members/new` to the revamped editor in “draft” mode so creation happens in the full UI.
 
 ### 6. Documentation & Validation
-- [ ] Update this plan and `docs/members-module-plan.md` with completed steps.
-- [ ] Record progress in `docs/members-ui-revamp-progress.md`.
-- [ ] Run `pnpm build` (frontend) to verify compile success; smoke test key workflows.
+- [x] Update this plan and `docs/members-module-plan.md` with completed steps (layout shell, section refactors, creation flow).
+- [x] Record progress in `docs/members-ui-revamp-progress.md`.
+- [x] Run `pnpm build` (frontend) to verify compile success; smoke test key workflows.
 - [ ] Capture follow-up tasks (e.g., dedicated components, design tokens) for future iterations.
 
 ## Dependencies & Risks
@@ -69,3 +70,4 @@ _Last updated: 2025-XX-XX_
 - Keep all UI revamp work on feature branches (e.g., `feature/members-ui-revamp`). If the redesign needs to be abandoned, run `git checkout main` to return to the stable branch.
 - Each milestone should land in a discrete commit. To revert a problematic change use `git revert <commit_sha>` or `git checkout -- frontend/src/pages/Members/Edit.tsx` to restore the latest mainline version of that file.
 - Before large edits, tag the current state (`git tag members-ui-pre-revamp`) so you can `git reset --hard members-ui-pre-revamp` if necessary.
+- To undo the creation-flow overhaul specifically, revert the commits touching `frontend/src/pages/Members/Edit.tsx`, `frontend/src/pages/Members/List.tsx`, `frontend/src/pages/Members/Create.tsx`, and `frontend/src/App.tsx`. That immediately restores the legacy quick-add modal without disturbing other revamp work.

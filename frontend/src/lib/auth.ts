@@ -1,12 +1,18 @@
 import { api, API_BASE, getToken, setToken } from "@/lib/api";
 
-export type WhoAmI = { user: string; roles: string[]; full_name: string | null };
+export type WhoAmI = {
+  user: string;
+  username: string;
+  roles: string[];
+  is_super_admin: boolean;
+  full_name: string | null;
+};
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, recaptchaToken?: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, recaptcha_token: recaptchaToken }),
   });
 
   if (!res.ok) {

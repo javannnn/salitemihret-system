@@ -107,6 +107,7 @@ def list_payments(
     *,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
+    reference: str | None = Query(default=None),
     member_id: Optional[int] = Query(default=None),
     service_type: Optional[str] = Query(default=None),
     method: Optional[str] = Query(default=None),
@@ -116,10 +117,17 @@ def list_payments(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*VIEW_ROLES)),
 ) -> PaymentListResponse:
+    ref_id: int | None = None
+    if reference:
+        cleaned = "".join(ch for ch in reference if ch.isdigit())
+        if not cleaned:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reference must include digits")
+        ref_id = int(cleaned)
     return payments_service.list_payments(
         db,
         page=page,
         page_size=page_size,
+        reference=ref_id,
         member_id=member_id,
         service_type_code=service_type,
         method=method,
@@ -151,6 +159,7 @@ def list_payment_service_types(
 @router.get("/export.csv", status_code=status.HTTP_200_OK)
 def export_payments_report(
     *,
+    reference: str | None = Query(default=None),
     member_id: Optional[int] = Query(default=None),
     service_type: Optional[str] = Query(default=None),
     method: Optional[str] = Query(default=None),
@@ -160,8 +169,15 @@ def export_payments_report(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*VIEW_ROLES)),
 ) -> StreamingResponse:
+    ref_id: int | None = None
+    if reference:
+        cleaned = "".join(ch for ch in reference if ch.isdigit())
+        if not cleaned:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reference must include digits")
+        ref_id = int(cleaned)
     payments = payments_service.get_payments_for_export(
         db,
+        reference=ref_id,
         member_id=member_id,
         service_type_code=service_type,
         method=method,

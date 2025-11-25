@@ -24,11 +24,12 @@ type Props = {
   targets: HouseholdTarget[];
   mode: "bulk" | "single";
   onAssigned: () => void;
+  ["data-tour"]?: string;
 };
 
 type HouseholdMode = "existing" | "new";
 
-export default function HouseholdAssignDrawer({ open, onClose, targets, mode, onAssigned }: Props) {
+export default function HouseholdAssignDrawer({ open, onClose, targets, mode, onAssigned, ...rest }: Props) {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -238,6 +239,7 @@ export default function HouseholdAssignDrawer({ open, onClose, targets, mode, on
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 260, damping: 30 }}
+            {...rest}
           >
             <div className="flex items-center justify-between mb-4">
               <div>
