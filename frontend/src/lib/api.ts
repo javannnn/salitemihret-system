@@ -956,6 +956,33 @@ export async function uploadAvatar(memberId: number, file: File): Promise<Avatar
   return res.json();
 }
 
+export async function deleteAvatar(memberId: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/members/${memberId}/avatar`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new Error(message || "Avatar deletion failed");
+  }
+}
+
+export async function archiveMember(memberId: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/members/${memberId}/archive`, {
+    method: "POST",
+  });
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Failed to archive member");
+  }
+}
+
+
 export type MemberAuditEntry = {
   changed_at: string;
   actor: string;

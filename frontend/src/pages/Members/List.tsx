@@ -14,6 +14,8 @@ import {
   ChevronDown,
   LayoutGrid,
   List as ListIcon,
+  UserPlus,
+  Home,
 } from "lucide-react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
@@ -33,6 +35,8 @@ import {
   createPriest,
   exportMembers,
   getMembersMeta,
+  archiveMember,
+  searchMembers,
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
@@ -134,6 +138,28 @@ export default function MembersList() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
+
+
+  const handleArchive = async (id: number) => {
+    try {
+      await archiveMember(id);
+      toast.push("Member archived");
+      loadMembers(page);
+    } catch (error) {
+      console.error(error);
+      toast.push("Failed to archive member");
+    }
+  };
+
+  const handleSelect = (id: number) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
   const [accessIssue, setAccessIssue] = useState<{ status: number; message: string } | null>(null);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [draftFilters, setDraftFilters] = useState<Filters>(INITIAL_FILTERS);
@@ -1155,6 +1181,57 @@ export default function MembersList() {
                         age = calculatedAge;
                       }
 
+                      const isSelected = selectedIds.has(member.id);
+
+                      const actions = [
+                        {
+                          label: "Assign Father Confessor",
+                          icon: <UserPlus className="h-4 w-4" />,
+                          onClick: () => {
+                            setAssignContext({
+                              mode: "single",
+                              memberId: member.id,
+                              memberName: `${member.first_name} ${member.last_name}`
+                            });
+                            setAssignModalOpen(true);
+                          }
+                        },
+                        {
+                          label: "Set Household",
+                          icon: <Home className="h-4 w-4" />,
+                          onClick: () => {
+                            setHouseholdTargets([{
+                              id: member.id,
+                              name: `${member.first_name} ${member.last_name}`
+                            }]);
+                            setHouseholdMode("single");
+                            setHouseholdDrawerOpen(true);
+                          }
+                        },
+                        {
+                          label: "Export",
+                          icon: <Download className="h-4 w-4" />,
+                          onClick: async () => {
+                            try {
+                              await downloadCsv({ ids: String(member.id) }, `member-${member.id}.csv`);
+                              toast.push("Export ready");
+                            } catch (error) {
+                              console.error(error);
+                              toast.push("Failed to export member");
+                            }
+                          }
+                        },
+                        {
+                          label: "Archive",
+                          icon: <Trash2 className="h-4 w-4 text-red-500" />,
+                          onClick: () => {
+                            if (window.confirm(`Are you sure you want to archive ${member.first_name}?`)) {
+                              handleArchive(member.id);
+                            }
+                          }
+                        }
+                      ];
+
                       return {
                         image: avatarUrl(member.avatar_path) || `https://ui-avatars.com/api/?name=${member.first_name}+${member.last_name}&background=random`,
                         title: `${member.first_name} ${member.last_name}`,
@@ -1167,10 +1244,18 @@ export default function MembersList() {
                         id: member.id,
                         age: age,
                         email: member.email || undefined,
-                        status: member.status
+                        status: member.status,
+                        selected: isSelected,
+                        actions: actions
                       };
                     })}
-                    onItemClick={(item) => handleRowClick(item.id)}
+                    onItemClick={(item) => {
+                      if (item._isSelectionToggle) {
+                        handleSelect(item.id);
+                      } else {
+                        handleRowClick(item.id);
+                      }
+                    }}
                   />
                 )}
               </div>

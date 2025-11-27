@@ -19,7 +19,7 @@ export function Button({
   className = "",
   type = "button",
   ...props
-}: { variant?: ButtonVariant } & ComponentProps<"button">) {
+}: { variant?: ButtonVariant } & ComponentProps<"button"> & ComponentProps<"a">) {
   const base =
     "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2";
   const solid =
@@ -28,14 +28,24 @@ export function Button({
     "border-border hover:border-accent/40 hover:bg-accent/10 text-ink dark:text-accent-foreground/90";
   const soft =
     "border-transparent bg-accent/10 text-accent hover:bg-accent/20";
+  // @ts-ignore
   const disabled = props.disabled ? "opacity-50 cursor-not-allowed" : "";
   const variantClass =
     variant === "solid" ? solid : variant === "soft" ? soft : ghost;
 
+  if ("href" in props && props.href) {
+    return (
+      <a
+        {...(props as ComponentProps<"a">)}
+        className={`${base} ${variantClass} ${disabled} ${className}`}
+      />
+    );
+  }
+
   return (
     <button
       type={type}
-      {...props}
+      {...(props as ComponentProps<"button">)}
       className={`${base} ${variantClass} ${disabled} ${className}`}
     />
   );

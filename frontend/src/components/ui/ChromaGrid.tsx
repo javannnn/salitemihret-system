@@ -88,7 +88,16 @@ export const ChromaGrid = ({
         });
     };
 
-    const handleCardClick = (item: ChromaGridItem) => {
+    const handleCardClick = (e: React.MouseEvent, item: ChromaGridItem) => {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (onItemClick) {
+                // Special signal for selection toggle
+                onItemClick({ ...item, _isSelectionToggle: true });
+            }
+            return;
+        }
+
         if (onItemClick) {
             onItemClick(item);
         } else if (item.url) {
@@ -120,9 +129,9 @@ export const ChromaGrid = ({
             {data.map((c, i) => (
                 <article
                     key={i}
-                    className="chroma-card"
+                    className={`chroma-card ${c.selected ? 'selected' : ''}`}
                     onMouseMove={handleCardMove}
-                    onClick={() => handleCardClick(c)}
+                    onClick={(e) => handleCardClick(e, c)}
                     style={{
                         '--card-border': c.borderColor || 'transparent',
                         '--card-gradient': c.gradient,
@@ -132,6 +141,25 @@ export const ChromaGrid = ({
                     <div className="chroma-img-wrapper">
                         <img src={c.image} alt={c.title} loading="lazy" />
                     </div>
+
+                    {c.actions && c.actions.length > 0 && (
+                        <div className="chroma-actions">
+                            {c.actions.map((action: any, idx: number) => (
+                                <button
+                                    key={idx}
+                                    className="chroma-action-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        action.onClick();
+                                    }}
+                                    title={action.label}
+                                >
+                                    {action.icon}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <footer className="chroma-info">
                         <div className="chroma-header">
                             <h3 className="name">{c.title}</h3>
