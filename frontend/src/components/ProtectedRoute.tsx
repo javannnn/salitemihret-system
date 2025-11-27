@@ -2,6 +2,8 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "@/context/AuthContext";
 
+import SplashScreen from "./SplashScreen";
+
 export default function ProtectedRoute({
   roles,
   requireSuperAdmin = false,
@@ -15,7 +17,7 @@ export default function ProtectedRoute({
   const location = useLocation();
 
   if (loading) {
-    return <div className="p-6 text-sm text-mute">Loading…</div>;
+    return <SplashScreen />;
   }
 
   if (!token) {
@@ -23,7 +25,7 @@ export default function ProtectedRoute({
   }
 
   if (!user) {
-    return <div className="p-6 text-sm text-mute">Loading session…</div>;
+    return <SplashScreen />;
   }
 
   if (requireSuperAdmin && !user.is_super_admin) {

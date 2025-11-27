@@ -45,6 +45,7 @@ import HouseholdAssignDrawer, { HouseholdTarget } from "./components/HouseholdAs
 import PriestDirectoryModal from "./components/PriestDirectoryModal";
 import SpouseDrawer, { SpouseDraft } from "./components/SpouseDrawer";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 type Filters = {
   status: MemberStatus | "";
@@ -109,6 +110,7 @@ export default function MembersList() {
   const toast = useToast();
   const { user, token } = useAuth();
   const permissions = usePermissions();
+  const isMobile = useMediaQuery("(max-width: 1023px)");
 
   const canManage = permissions.editCore || permissions.editFinance || permissions.editSpiritual;
   const canCreate = permissions.createMembers;
@@ -942,7 +944,7 @@ export default function MembersList() {
 
         <Card className="p-4 space-y-4">
           <form
-            className="flex flex-wrap items-center gap-3"
+            className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center"
             onSubmit={handleSearch}
           >
             <div className="relative flex-1 min-w-[220px]">
@@ -955,38 +957,42 @@ export default function MembersList() {
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
-            <Select value={sort} onChange={handleSortChange} className="w-56">
+            <Select value={sort} onChange={handleSortChange} className="w-full sm:w-56">
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </Select>
-            <Button type="submit">Search</Button>
-            <Button
-              type="button"
-              variant="ghost"
-              data-tour="members-filters"
-              onClick={() => {
-                setDraftFilters(filters);
-                setFilterOpen(true);
-              }}
-            >
-              <Filter className="h-4 w-4" />
-              Filters
-              {activeFilters.length > 0 && (
-                <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] text-accent-foreground">
-                  {activeFilters.length}
-                </span>
-              )}
-            </Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button type="submit" className="flex-1 sm:flex-none">Search</Button>
+              <Button
+                type="button"
+                variant="ghost"
+                data-tour="members-filters"
+                className="flex-1 sm:flex-none"
+                onClick={() => {
+                  setDraftFilters(filters);
+                  setFilterOpen(true);
+                }}
+              >
+                <Filter className="h-4 w-4" />
+                Filters
+                {activeFilters.length > 0 && (
+                  <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] text-accent-foreground">
+                    {activeFilters.length}
+                  </span>
+                )}
+              </Button>
+            </div>
           </form>
         </Card>
 
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className={`flex items-center gap-2 ${isMobile ? "overflow-x-auto -mx-1 px-1 pb-1" : "flex-wrap"}`}>
             <Button
               variant={filters.status === "Archived" ? "solid" : "ghost"}
+              className="whitespace-nowrap"
               onClick={() => {
                 const isArchived = filters.status === "Archived";
                 const next: Filters = {
@@ -1006,6 +1012,7 @@ export default function MembersList() {
             </Button>
             <Button
               variant={filters.status === "Active" ? "solid" : "ghost"}
+              className="whitespace-nowrap"
               onClick={() => {
                 const next: Filters = { ...filters, status: filters.status === "Active" ? "" : "Active" };
                 setFilters(next);
@@ -1018,6 +1025,7 @@ export default function MembersList() {
             </Button>
             <Button
               variant={filters.hasChildren ? "solid" : "ghost"}
+              className="whitespace-nowrap"
               onClick={() => {
                 const next: Filters = { ...filters, hasChildren: !filters.hasChildren };
                 setFilters(next);
@@ -1030,6 +1038,7 @@ export default function MembersList() {
             </Button>
             <Button
               variant={filters.missingPhone ? "solid" : "ghost"}
+              className="whitespace-nowrap"
               onClick={() => {
                 const next: Filters = { ...filters, missingPhone: !filters.missingPhone };
                 setFilters(next);
@@ -1042,6 +1051,7 @@ export default function MembersList() {
             </Button>
             <Button
               variant={filters.newThisMonth ? "solid" : "ghost"}
+              className="whitespace-nowrap"
               onClick={() => {
                 const next: Filters = { ...filters, newThisMonth: !filters.newThisMonth };
                 setFilters(next);
@@ -1053,7 +1063,7 @@ export default function MembersList() {
               New this month
             </Button>
           </div>
-          <div className="flex items-center border rounded-lg overflow-hidden">
+          <div className="flex items-center border rounded-lg overflow-hidden self-start lg:self-auto">
             <button
               type="button"
               onClick={() => setViewMode("list")}
@@ -1161,6 +1171,12 @@ export default function MembersList() {
                   </div>
                 ) : (
                   <ChromaGrid
+                    className={isMobile ? "!gap-3" : ""}
+                    radius={isMobile ? 180 : 300}
+                    columns={isMobile ? 1 : 3}
+                    rows={isMobile ? 3 : 2}
+                    damping={isMobile ? 0.35 : 0.45}
+                    fadeOut={isMobile ? 0.4 : 0.6}
                     items={rows.map((member) => {
                       const statusColor =
                         member.status === "Active"
@@ -1260,8 +1276,9 @@ export default function MembersList() {
                 )}
               </div>
             ) : (
-              <Card className="relative overflow-visible">
-                <table className="min-w-full text-sm">
+              <Card className="relative overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[960px] text-sm">
                   <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
                     <tr>
                       <th className="px-4 py-3 text-left w-12">
@@ -1555,7 +1572,8 @@ export default function MembersList() {
                         );
                       })}
                   </tbody>
-                </table>
+                  </table>
+                </div>
 
                 {!loading && rows.length === 0 && (
                   <div className="p-6 text-sm text-mute text-center">

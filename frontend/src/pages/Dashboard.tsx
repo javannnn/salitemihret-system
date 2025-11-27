@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/context/AuthContext";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 type Summary = {
   total: number;
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isSuperAdmin = user?.is_super_admin ?? false;
+  const isMobile = useMediaQuery("(max-width: 1023px)");
 
   useEffect(() => {
     if (!permissions.viewMembers) {
@@ -365,6 +367,8 @@ export default function Dashboard() {
     [permissions.createMembers, permissions.managePayments, permissions.manageSponsorships, permissions.viewSponsorships, isSuperAdmin]
   ).filter((action) => action.enabled);
 
+  const mobileQuickActions = useMemo(() => quickActions.slice(0, 4), [quickActions]);
+
   return (
     <div className="relative">
       <div className="pointer-events-none fixed inset-0 z-0">
@@ -374,13 +378,29 @@ export default function Dashboard() {
       </div>
 
       <div className="relative z-10 space-y-6 px-4 py-6">
-        <section className="rounded-3xl border border-white/80 bg-white/95 dark:bg-[#0A0A0A]/90 backdrop-blur-2xl p-6 shadow-sm space-y-4 dark:border-white/5">
+        {isMobile && mobileQuickActions.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {mobileQuickActions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                className="flex items-center justify-between rounded-2xl border border-border bg-card/90 px-3 py-3 text-left text-sm shadow-soft"
+                onClick={() => action.href && navigate(action.href)}
+              >
+                <span className="font-medium text-ink">{action.label}</span>
+                <ArrowUpRight className="h-4 w-4 text-mute" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <section className="rounded-3xl border border-white/80 bg-white/95 dark:bg-[#0A0A0A]/90 backdrop-blur-2xl p-5 sm:p-6 shadow-sm space-y-4 dark:border-white/5">
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold tracking-tight text-ink">Global search</h2>
             <p className="text-[12px] text-muted">Search members, admins, and payments from one place.</p>
           </div>
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3 rounded-full border border-border bg-card px-4 py-3 text-base text-ink shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 rounded-2xl sm:rounded-full border border-border bg-card px-4 py-3 text-base text-ink shadow-sm">
               <Search className="h-4 w-4 text-muted" />
               <input
                 data-tour="dashboard-search"
@@ -439,7 +459,7 @@ export default function Dashboard() {
         >
           <motion.div
             whileHover={{ y: -2 }}
-            className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/95 backdrop-blur-2xl p-5 shadow-sm dark:bg-[#0A0A0A]/90 dark:border-white/5"
+            className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/95 backdrop-blur-2xl p-4 sm:p-5 shadow-sm dark:bg-[#0A0A0A]/90 dark:border-white/5"
           >
             <div className="absolute inset-0 opacity-70 pointer-events-none">
               <div className="absolute -top-24 right-0 h-44 w-44 rounded-full bg-gray-100 dark:bg-neutral-800 blur-3xl" />

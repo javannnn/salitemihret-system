@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Menu, X, Loader2 } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2 } from "lucide-react";
 
 import { logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea } from "@/components/ui";
@@ -14,6 +14,7 @@ import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } fr
 import { subscribeSessionExpired } from "@/lib/session";
 import { useTour } from "@/context/TourContext";
 import { TourOverlay } from "@/components/Tour/TourOverlay";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
 
@@ -34,7 +35,6 @@ export default function AppShell() {
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const tour = useTour();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const initials = useMemo(() => {
     const source = user?.full_name || user?.username || user?.user || "";
@@ -74,6 +74,16 @@ export default function AppShell() {
     permissions.viewNewcomers,
     permissions.viewSchools,
   ]);
+
+  const mobileNavItems = useMemo(() => (navItems.length ? navItems : [{ label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, visible: true }]), [navItems]);
+
+  const activeNavItem = useMemo(
+    () => navItems.find((item) => location.pathname.startsWith(item.to)),
+    [location.pathname, navItems]
+  );
+
+  const [licenseCollapsed, setLicenseCollapsed] = useState(false);
+  const isMobile = useMediaQuery("(max-width: 1023px)");
 
   if (loading) {
     return <div className="p-6 text-sm text-mute">Loading…</div>;
@@ -139,10 +149,9 @@ export default function AppShell() {
     setSessionExpired(false);
   }, [user]);
 
-  // Close mobile menu on route change
   useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
+    setLicenseCollapsed(isMobile);
+  }, [isMobile]);
 
   const handleLicenseActivate = async () => {
     if (!licenseToken.trim()) {
@@ -194,39 +203,14 @@ export default function AppShell() {
 
   const toggleSidebar = () => setIsCollapsed((prev) => !prev);
 
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
-
   return (
     <div className={`min-h-screen bg-bg text-ink lg:grid transition-all duration-300 ${isCollapsed ? "lg:grid-cols-[92px_1fr]" : "lg:grid-cols-[300px_1fr]"}`}>
-      {/* Mobile Backdrop */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
-            onClick={() => setMobileMenuOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
       <motion.aside
         initial={false}
         animate={{
-          width: isCollapsed ? 92 : 300,
-          x: isMobile ? (mobileMenuOpen ? 0 : "-100%") : 0
+          width: isCollapsed ? 92 : 300
         }}
-        // Reset transform on desktop to ensure visibility
-        style={{ x: undefined }}
-        className={`fixed inset-y-0 left-0 z-50 h-full border-r border-border bg-card/95 backdrop-blur-md flex flex-col overflow-hidden transition-transform duration-300 lg:translate-x-0 lg:static lg:bg-card/60 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+        className={`hidden lg:flex inset-y-0 left-0 z-50 h-full border-r border-border bg-card/95 backdrop-blur-md flex-col overflow-hidden transition-all duration-300 lg:static lg:bg-card/60`}
       >
         <div className="flex items-center gap-3 p-6">
           <div className="relative flex-shrink-0">
@@ -257,14 +241,6 @@ export default function AppShell() {
           >
             {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
-
-          <button
-            onClick={() => setMobileMenuOpen(false)}
-            className="ml-auto h-10 w-10 flex lg:hidden items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
-            aria-label="Close menu"
-          >
-            <X size={18} />
-          </button>
         </div>
 
         <nav data-tour="sidebar" className="flex-1 px-4 space-y-3 py-6 overflow-y-auto overflow-x-hidden">
@@ -272,7 +248,6 @@ export default function AppShell() {
             <NavLink
               key={item.to}
               to={item.to}
-              onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
                 `relative group flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-200 overflow-hidden ${isActive
                   ? "bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg dark:from-slate-800 dark:to-slate-900 ring-1 ring-white/10"
@@ -293,7 +268,7 @@ export default function AppShell() {
                     <item.icon size={28} className={isActive ? "text-white" : "text-current opacity-70"} />
                   </div>
 
-                  {(!isCollapsed || mobileMenuOpen) && (
+                  {!isCollapsed && (
                     <motion.span
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -304,7 +279,7 @@ export default function AppShell() {
                     </motion.span>
                   )}
 
-                  {isCollapsed && isActive && !mobileMenuOpen && (
+                  {isCollapsed && isActive && (
                     <div className="absolute right-3 top-3 h-2 w-2 rounded-full bg-indigo-400 shadow-glow" />
                   )}
                 </>
@@ -313,17 +288,21 @@ export default function AppShell() {
           ))}
         </nav>
       </motion.aside>
-      <main className="relative min-w-0">
+      <main className="relative min-w-0 pb-24 lg:pb-0">
         <div className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur px-4 lg:px-10 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <button
-              className="lg:hidden h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
-              onClick={() => setMobileMenuOpen(true)}
-              aria-label="Open menu"
-            >
-              <Menu size={20} />
-            </button>
-            <BetaBadge />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] uppercase tracking-wide text-mute lg:hidden">Workspace</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-base font-semibold truncate lg:hidden">{activeNavItem?.label ?? "Dashboard"}</span>
+                <div className="hidden lg:block">
+                  <BetaBadge />
+                </div>
+              </div>
+            </div>
+            <div className="lg:hidden">
+              <BetaBadge subtle />
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <motion.button
@@ -426,43 +405,54 @@ export default function AppShell() {
                         ? "Trial mode"
                         : "License required"}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setLicenseCollapsed((prev) => !prev)}
+                    className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] uppercase tracking-wide text-mute transition hover:bg-accent/5 lg:hidden"
+                    aria-expanded={!licenseCollapsed}
+                  >
+                    {licenseCollapsed ? "Details" : "Hide"}
+                    <ChevronDown className={`h-3 w-3 transition-transform ${licenseCollapsed ? "" : "rotate-180"}`} />
+                  </button>
                 </div>
-                <p className="text-sm">
-                  {licenseStatus.message}{" "}
-                  {licenseStatus.expires_at && (
-                    <span>
-                      Expires{" "}
-                      <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
-                    </span>
-                  )}
-                  {licenseStatus.days_remaining >= 0 && (
-                    <span className="ml-1">
-                      {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
-                    </span>
-                  )}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs uppercase tracking-wide">
-                    Mode: {licenseStatus.state.toUpperCase()}
-                  </span>
-                  {licenseStatus.customer && (
+                <div className={`${licenseCollapsed ? "hidden lg:block" : ""}`}>
+                  <p className="text-sm">
+                    {licenseStatus.message}{" "}
+                    {licenseStatus.expires_at && (
+                      <span>
+                        Expires{" "}
+                        <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
+                      </span>
+                    )}
+                    {licenseStatus.days_remaining >= 0 && (
+                      <span className="ml-1">
+                        {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
+                      </span>
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="text-xs uppercase tracking-wide">
-                      Licensed to: {licenseStatus.customer}
+                      Mode: {licenseStatus.state.toUpperCase()}
                     </span>
-                  )}
-                  {licenseLoading && <span className="text-xs text-mute">Refreshing…</span>}
-                  {canManageLicense && (
-                    <Button
-                      variant="ghost"
-                      className="text-xs"
-                      onClick={() => setLicenseModalOpen(true)}
-                    >
-                      {licenseStatus.state === "active" ? "Update license" : "Install license"}
+                    {licenseStatus.customer && (
+                      <span className="text-xs uppercase tracking-wide">
+                        Licensed to: {licenseStatus.customer}
+                      </span>
+                    )}
+                    {licenseLoading && <span className="text-xs text-mute">Refreshing…</span>}
+                    {canManageLicense && (
+                      <Button
+                        variant="ghost"
+                        className="text-xs"
+                        onClick={() => setLicenseModalOpen(true)}
+                      >
+                        {licenseStatus.state === "active" ? "Update license" : "Install license"}
+                      </Button>
+                    )}
+                    <Button variant="ghost" className="text-xs" onClick={refreshLicense}>
+                      Refresh
                     </Button>
-                  )}
-                  <Button variant="ghost" className="text-xs" onClick={refreshLicense}>
-                    Refresh
-                  </Button>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -486,9 +476,9 @@ export default function AppShell() {
       {accountModalOpen && (
         <>
           <div className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={() => setAccountModalOpen(false)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-white text-slate-900 shadow-2xl border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-14 sm:items-center">
+            <Card className="w-full max-w-5xl max-h-[90vh] h-[90vh] sm:h-auto flex flex-col overflow-hidden bg-white text-slate-900 shadow-2xl border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-white">
                     <User size={16} />
@@ -502,7 +492,7 @@ export default function AppShell() {
                   Close
                 </Button>
               </div>
-              <div className="overflow-y-auto p-4">
+              <div className="overflow-y-auto p-4 flex-1">
                 <div className="flex flex-wrap gap-2 mb-4">
                   <Button variant="ghost" onClick={() => tour.startTour({ force: true, reset: true })}>
                     Relaunch main tour
@@ -586,6 +576,31 @@ export default function AppShell() {
           </>
         )}
       </AnimatePresence>
+      {isMobile && !sessionExpired && (
+        <nav className="lg:hidden fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur px-2 pb-2 pt-1">
+          <div className="flex items-stretch gap-1 overflow-x-auto">
+            {mobileNavItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex-shrink-0 min-w-[80px] flex-1 rounded-xl px-2 py-1.5 text-xs font-medium transition ${isActive
+                    ? "bg-ink text-card shadow-soft"
+                    : "text-mute hover:bg-accent/5"
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <div className="flex flex-col items-center gap-1">
+                    <item.icon className={`h-5 w-5 ${isActive ? "" : "opacity-80"}`} />
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                )}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      )}
       <TourOverlay />
     </div>
   );

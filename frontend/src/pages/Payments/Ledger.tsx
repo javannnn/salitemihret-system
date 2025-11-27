@@ -885,13 +885,15 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center px-4"
+        className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 sm:py-10 overflow-y-auto"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
       >
         <div className="absolute inset-0 bg-ink/60 backdrop-blur-sm" onClick={onClose} />
-        <Card className="relative z-10 w-full max-w-xl p-6">{children}</Card>
+        <Card className="relative z-10 w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 mt-8 sm:mt-0">
+          {children}
+        </Card>
       </motion.div>
     </AnimatePresence>
   );

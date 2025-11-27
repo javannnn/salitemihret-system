@@ -5,6 +5,8 @@ import { Loader2 } from "lucide-react";
 import AppShell from "@/layouts/AppShell";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
+import SplashScreen from "@/components/SplashScreen";
+
 // Lazy load pages
 const LoginPage = lazy(() => import("@/pages/Auth/Login"));
 const Onboard = lazy(() => import("@/pages/Auth/Onboard"));
@@ -20,15 +22,9 @@ const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
 
-const PageLoader = () => (
-  <div className="flex h-screen w-full items-center justify-center bg-bg">
-    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-  </div>
-);
-
 export default function App() {
   return (
-    <Suspense fallback={<PageLoader />}>
+    <Suspense fallback={<SplashScreen />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/onboard" element={<Onboard />} />

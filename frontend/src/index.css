@@ -31,7 +31,7 @@ body,
 }
 
 body {
-  @apply bg-bg text-ink antialiased transition-colors duration-300;
+  @apply bg-bg text-ink antialiased transition-colors duration-300 overflow-x-hidden;
 }
 
 @keyframes shimmer {
