@@ -21,7 +21,9 @@ import {
   getPaymentServiceTypes,
   listPayments,
   uploadAvatar,
+  deleteAvatar,
 } from "@/lib/api";
+import { AvatarEditor } from "@/components/AvatarEditor";
 import { useToast } from "@/components/Toast";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
@@ -361,17 +363,17 @@ function AvatarCard({
   initials,
   canUpload,
   uploading,
-  onUploadClick,
-  inputRef,
-  onFileChange,
+  onChangeClick,
+  onRemoveClick,
+  removing,
 }: {
   avatarUrl: string | null;
   initials: string;
   canUpload: boolean;
   uploading: boolean;
-  onUploadClick: () => void;
-  inputRef: RefObject<HTMLInputElement>;
-  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onChangeClick: () => void;
+  onRemoveClick: () => void;
+  removing: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 text-center space-y-4 shadow-sm">
@@ -381,12 +383,26 @@ function AvatarCard({
         </div>
       </div>
       <div className="space-y-2">
-        <Button variant="soft" className="w-full rounded-full" onClick={onUploadClick} disabled={uploading || !canUpload}>
-          {uploading ? "Uploading…" : "Upload new photo"}
+        <Button
+          variant="soft"
+          className="w-full rounded-full"
+          onClick={onChangeClick}
+          disabled={uploading || removing || !canUpload}
+        >
+          {uploading ? "Uploading…" : avatarUrl ? "Change photo" : "Upload photo"}
         </Button>
-        <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onFileChange} />
-        <p className="text-[11px] text-mute">PNG, JPG or WEBP up to 5MB.</p>
-        {!canUpload && <p className="text-[11px] text-mute">Avatar updates require Registrar or Admin permissions.</p>}
+        {avatarUrl && canUpload && (
+          <Button
+            variant="ghost"
+            className="w-full rounded-full text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+            onClick={onRemoveClick}
+            disabled={uploading || removing}
+          >
+            {removing ? "Removing…" : "Remove photo"}
+          </Button>
+        )}
+        <p className="text-[11px] text-mute">PNG, JPG or WEBP up to 5MB</p>
+        {!canUpload && <p className="text-[11px] text-mute">Avatar updates require Registrar or Admin permissions</p>}
       </div>
     </div>
   );
@@ -601,6 +617,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [memberLoading, setMemberLoading] = useState(false);
   const [memberLoadError, setMemberLoadError] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarRemoving, setAvatarRemoving] = useState(false);
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
   const [auditEntries, setAuditEntries] = useState<MemberAuditEntry[]>([]);
@@ -808,7 +826,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     },
     [permissions.viewPayments, toast]
   );
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
 
   const initializeFormsFromMember = useCallback((details: MemberDetail) => {
     setSelectedHousehold(details.household ? String(details.household.id) : "");
@@ -1031,10 +1049,10 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       const entries = await getMemberAudit(memberId);
       setAuditEntries(entries);
     } catch (error) {
-      console.error(error);
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         return;
       }
+      console.error(error);
       toast.push("Failed to load audit trail");
     } finally {
       setAuditLoading(false);
@@ -1537,18 +1555,12 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     return `${API_BASE}/static/${path}`;
   };
 
-  const handleAvatarPick = () => {
-    if (!canUploadAvatar) return;
-    avatarInputRef.current?.click();
-  };
+  const handleAvatarSave = async (blob: Blob) => {
+    if (!member || !canUploadAvatar) return;
 
-  const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !member || !canUploadAvatar) {
-      return;
-    }
     setAvatarUploading(true);
     try {
+      const file = new File([blob], "avatar.jpg", { type: "image/jpeg" });
       const response = await uploadAvatar(member.id, file);
       const relative = response.avatar_url.startsWith("/static/")
         ? response.avatar_url.replace("/static/", "")
@@ -1558,10 +1570,41 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       refreshAudit(member.id);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to upload avatar");
+      if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        if (message.includes("too large") || message.includes("file size")) {
+          toast.push("Image file is too large. Please use an image under 5MB.");
+        } else if (message.includes("format") || message.includes("type")) {
+          toast.push("Invalid image format. Please use JPG, PNG, or WebP.");
+        } else {
+          toast.push("Failed to upload avatar. Please try again.");
+        }
+      } else {
+        toast.push("Failed to upload avatar");
+      }
     } finally {
       setAvatarUploading(false);
-      event.target.value = "";
+    }
+  };
+
+  const handleAvatarRemove = async () => {
+    if (!member || !canUploadAvatar) return;
+
+    if (!window.confirm("Are you sure you want to remove your avatar?")) {
+      return;
+    }
+
+    setAvatarRemoving(true);
+    try {
+      await deleteAvatar(member.id);
+      setMember((prev) => (prev ? { ...prev, avatar_path: null } : prev));
+      toast.push("Avatar removed");
+      refreshAudit(member.id);
+    } catch (error) {
+      console.error(error);
+      toast.push("Failed to remove avatar");
+    } finally {
+      setAvatarRemoving(false);
     }
   };
 
@@ -2722,9 +2765,9 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 initials={initials}
                 canUpload={canUploadAvatar}
                 uploading={avatarUploading}
-                onUploadClick={handleAvatarPick}
-                inputRef={avatarInputRef}
-                onFileChange={handleAvatarChange}
+                onChangeClick={() => setAvatarEditorOpen(true)}
+                onRemoveClick={handleAvatarRemove}
+                removing={avatarRemoving}
               />
               <QuickActionsCard actions={quickActions} />
               <SnapshotCard
@@ -2794,16 +2837,22 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           </Card>
         </div>
       )}
+      <AvatarEditor
+        isOpen={avatarEditorOpen}
+        onClose={() => setAvatarEditorOpen(false)}
+        onSave={handleAvatarSave}
+        currentAvatarUrl={avatarUrl}
+      />
     </div>
   );
 }
-  const parseApiErrorMessage = (raw?: string | null) => {
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed?.detail) return String(parsed.detail);
-    } catch {
-      // not JSON
-    }
-    return raw;
-  };
+const parseApiErrorMessage = (raw?: string | null) => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch {
+    // not JSON
+  }
+  return raw;
+};

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Menu, X, Loader2 } from "lucide-react";
 
 import { logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea } from "@/components/ui";
@@ -12,9 +12,10 @@ import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } from "@/lib/api";
 import { subscribeSessionExpired } from "@/lib/session";
-import AccountProfile from "@/pages/Account/Profile";
 import { useTour } from "@/context/TourContext";
 import { TourOverlay } from "@/components/Tour/TourOverlay";
+
+const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
 
 export default function AppShell() {
   const { user, loading } = useAuth();
@@ -33,6 +34,7 @@ export default function AppShell() {
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const tour = useTour();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const initials = useMemo(() => {
     const source = user?.full_name || user?.username || user?.user || "";
@@ -137,6 +139,11 @@ export default function AppShell() {
     setSessionExpired(false);
   }, [user]);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
   const handleLicenseActivate = async () => {
     if (!licenseToken.trim()) {
       toast.push("Paste the license token to continue.");
@@ -187,13 +194,39 @@ export default function AppShell() {
 
   const toggleSidebar = () => setIsCollapsed((prev) => !prev);
 
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   return (
     <div className={`min-h-screen bg-bg text-ink lg:grid transition-all duration-300 ${isCollapsed ? "lg:grid-cols-[92px_1fr]" : "lg:grid-cols-[300px_1fr]"}`}>
+      {/* Mobile Backdrop */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
       <motion.aside
         initial={false}
-        animate={{ width: isCollapsed ? 92 : 300 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="fixed lg:relative z-30 h-full border-r border-border bg-card/60 backdrop-blur-sm flex flex-col overflow-hidden"
+        animate={{
+          width: isCollapsed ? 92 : 300,
+          x: isMobile ? (mobileMenuOpen ? 0 : "-100%") : 0
+        }}
+        // Reset transform on desktop to ensure visibility
+        style={{ x: undefined }}
+        className={`fixed inset-y-0 left-0 z-50 h-full border-r border-border bg-card/95 backdrop-blur-md flex flex-col overflow-hidden transition-transform duration-300 lg:translate-x-0 lg:static lg:bg-card/60 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
         <div className="flex items-center gap-3 p-6">
           <div className="relative flex-shrink-0">
@@ -219,10 +252,18 @@ export default function AppShell() {
 
           <button
             onClick={toggleSidebar}
-            className="ml-auto h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
+            className="ml-auto h-10 w-10 hidden lg:flex items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+
+          <button
+            onClick={() => setMobileMenuOpen(false)}
+            className="ml-auto h-10 w-10 flex lg:hidden items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
+            aria-label="Close menu"
+          >
+            <X size={18} />
           </button>
         </div>
 
@@ -231,11 +272,12 @@ export default function AppShell() {
             <NavLink
               key={item.to}
               to={item.to}
+              onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
                 `relative group flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-200 overflow-hidden ${isActive
                   ? "bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg dark:from-slate-800 dark:to-slate-900 ring-1 ring-white/10"
                   : "text-mute hover:bg-accent/5 hover:text-ink"
-                } ${isCollapsed ? "justify-center" : ""}`
+                } ${isCollapsed ? "lg:justify-center" : ""}`
               }
             >
               {({ isActive }) => (
@@ -251,7 +293,7 @@ export default function AppShell() {
                     <item.icon size={28} className={isActive ? "text-white" : "text-current opacity-70"} />
                   </div>
 
-                  {!isCollapsed && (
+                  {(!isCollapsed || mobileMenuOpen) && (
                     <motion.span
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -262,7 +304,7 @@ export default function AppShell() {
                     </motion.span>
                   )}
 
-                  {isCollapsed && isActive && (
+                  {isCollapsed && isActive && !mobileMenuOpen && (
                     <div className="absolute right-3 top-3 h-2 w-2 rounded-full bg-indigo-400 shadow-glow" />
                   )}
                 </>
@@ -272,8 +314,15 @@ export default function AppShell() {
         </nav>
       </motion.aside>
       <main className="relative min-w-0">
-        <div className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur px-6 lg:px-10 py-4 flex items-center justify-between gap-4">
+        <div className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur px-4 lg:px-10 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
+            <button
+              className="lg:hidden h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:bg-accent/10 transition"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu size={20} />
+            </button>
             <BetaBadge />
           </div>
           <div className="flex items-center gap-3">
@@ -459,7 +508,9 @@ export default function AppShell() {
                     Relaunch main tour
                   </Button>
                 </div>
-                <AccountProfile />
+                <Suspense fallback={<div className="p-8 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}>
+                  <AccountProfile />
+                </Suspense>
               </div>
             </Card>
           </div>

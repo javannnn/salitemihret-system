@@ -16,12 +16,14 @@ import {
   Member,
   SchoolsMeta,
   api,
+  ApiError,
   createAbenetEnrollment,
   getAbenetReport,
   getSchoolsMeta,
   listAbenetEnrollments,
   recordAbenetPayment,
   searchMembers,
+  SundaySchoolCategory,
   SundaySchoolParticipant,
   SundaySchoolPaymentMethod,
   SundaySchoolParticipantList,
@@ -167,6 +169,7 @@ export default function SchoolsWorkspace() {
     getSchoolsMeta()
       .then(setMeta)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load school settings.");
       });
@@ -177,6 +180,7 @@ export default function SchoolsWorkspace() {
     getSundaySchoolMeta()
       .then(setSundayMeta)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Sunday School options.");
       });
@@ -201,6 +205,7 @@ export default function SchoolsWorkspace() {
     getSundaySchoolStats()
       .then(setSundayStats)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Sunday School stats.");
       });
@@ -218,6 +223,7 @@ export default function SchoolsWorkspace() {
     })
       .then(setAbenetList)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Abenet enrollments.");
       })
@@ -228,7 +234,7 @@ export default function SchoolsWorkspace() {
     if (!canView || activeTab !== "sundayschool") return;
     setSundayLoading(true);
     listSundaySchoolParticipants({
-      category: sundayFilters.category || undefined,
+      category: (sundayFilters.category as SundaySchoolCategory) || undefined,
       pays_contribution: sundayFilters.pays ? sundayFilters.pays === "yes" : undefined,
       search: sundayFilters.search || undefined,
       page: sundayFilters.page,
@@ -236,6 +242,7 @@ export default function SchoolsWorkspace() {
     })
       .then(setSundayList)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Sunday School participants.");
       })
@@ -248,6 +255,7 @@ export default function SchoolsWorkspace() {
     getAbenetReport()
       .then(setReport)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Abenet report.");
       })
@@ -259,10 +267,11 @@ export default function SchoolsWorkspace() {
     setContentLoading(true);
     listSundaySchoolContent({
       type: contentTypeFilter,
-      status: contentStatusFilter === "All" ? undefined : contentStatusFilter || undefined,
+      status: contentStatusFilter === "All" ? undefined : contentStatusFilter,
     })
       .then(setContentList)
       .catch((error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return;
         console.error(error);
         toast.push("Unable to load Sunday School content.");
       })
@@ -372,7 +381,7 @@ export default function SchoolsWorkspace() {
       resetSundayForm();
       setShowSundayForm(false);
       setSundayFilters((prev) => ({ ...prev }));
-      getSundaySchoolStats().then(setSundayStats).catch(() => {});
+      getSundaySchoolStats().then(setSundayStats).catch(() => { });
     } catch (error) {
       console.error(error);
       toast.push("Unable to save participant.");
@@ -396,7 +405,7 @@ export default function SchoolsWorkspace() {
       setSundayPaymentForm({ amount: "", method: sundayMeta?.payment_methods[0] || "CASH", memo: "" });
       setSundayPaymentTarget(null);
       setSundayFilters((prev) => ({ ...prev }));
-      getSundaySchoolStats().then(setSundayStats).catch(() => {});
+      getSundaySchoolStats().then(setSundayStats).catch(() => { });
     } catch (error) {
       console.error(error);
       toast.push("Unable to record contribution.");
@@ -413,9 +422,9 @@ export default function SchoolsWorkspace() {
       toast.push("Content saved.");
       setContentForm({ type: contentForm.type, title: "", body: "" });
       setContentTypeFilter(contentForm.type);
-      listSundaySchoolContent({ type: contentTypeFilter, status: contentStatusFilter || undefined })
+      listSundaySchoolContent({ type: contentTypeFilter, status: contentStatusFilter === "All" ? undefined : contentStatusFilter })
         .then(setContentList)
-        .catch(() => {});
+        .catch(() => { });
     } catch (error) {
       console.error(error);
       toast.push("Unable to save content.");
@@ -432,9 +441,9 @@ export default function SchoolsWorkspace() {
         const reason = window.prompt("Provide a reason for rejection?") || "Changes required";
         await rejectSundaySchoolContent(content.id, reason);
       }
-      listSundaySchoolContent({ type: contentTypeFilter, status: contentStatusFilter || undefined })
+      listSundaySchoolContent({ type: contentTypeFilter, status: contentStatusFilter === "All" ? undefined : contentStatusFilter })
         .then(setContentList)
-        .catch(() => {});
+        .catch(() => { });
       toast.push("Content updated.");
     } catch (error) {
       console.error(error);
@@ -558,9 +567,8 @@ export default function SchoolsWorkspace() {
           <button
             key={tab.key}
             type="button"
-            className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${
-              activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-mute hover:text-foreground"
-            }`}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-mute hover:text-foreground"
+              }`}
             onClick={() => setActiveTab(tab.key as "abenet" | "sundayschool")}
           >
             {tab.label}
@@ -587,417 +595,417 @@ export default function SchoolsWorkspace() {
               </Button>
             )}
           </div>
-      <Card className="p-4 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <HandHeart className="h-8 w-8 text-accent" />
-            <div>
-              <p className="text-xs uppercase text-mute tracking-wide">Total enrollments</p>
-              <p className="text-2xl font-semibold">{abenetList?.total ?? "—"}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Select
-              value={abenetFilters.service_stage}
-              onChange={(event) => setAbenetFilters((prev) => ({ ...prev, service_stage: event.target.value, page: 1 }))}
-            >
-              <option value="">All services</option>
-              {meta?.service_stages.map((value) => (
-                <option key={value} value={value}>
-                  {SERVICE_LABELS[value]}
-                </option>
-              ))}
-            </Select>
-            <Select
-              value={abenetFilters.status}
-              onChange={(event) => setAbenetFilters((prev) => ({ ...prev, status: event.target.value, page: 1 }))}
-            >
-              <option value="">All statuses</option>
-              {meta?.statuses.map((value) => (
-                <option key={value} value={value}>
-                  {STATUS_LABELS[value as AbenetEnrollment["status"]]}
-                </option>
-              ))}
-            </Select>
-            <Input
-              placeholder="Search child"
-              value={abenetFilters.q}
-              onChange={(event) => setAbenetFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))}
-            />
-            <Button variant="ghost" onClick={() => setAbenetFilters({ service_stage: "", status: "", q: "", page: 1 })}>
-              <RefreshCcw className="h-4 w-4" />
-              Reset
-            </Button>
-          </div>
-        </div>
-        {abenetLoading ? (
-          <div className="py-10 text-center text-mute flex items-center justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading enrollments…
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-mute">
-                  <th className="py-2 pr-4">Child</th>
-                  <th className="py-2 pr-4">Parent</th>
-                  <th className="py-2 pr-4">Service</th>
-                  <th className="py-2 pr-4">Monthly fee</th>
-                  <th className="py-2 pr-4">Last payment</th>
-                  <th className="py-2 pr-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {abenetList?.items.map((item) => (
-                  <tr key={item.id} className="border-t border-border/60">
-                    <td className="py-2 pr-4">
-                      <div className="font-medium">
-                        {item.child.first_name} {item.child.last_name}
-                      </div>
-                      <div className="text-xs text-mute">Enrolled {new Date(item.enrollment_date).toLocaleDateString()}</div>
-                    </td>
-                    <td className="py-2 pr-4 text-sm">
-                      {item.parent.first_name} {item.parent.last_name}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <Badge className="normal-case">{SERVICE_LABELS[item.service_stage]}</Badge>
-                    </td>
-                    <td className="py-2 pr-4 font-medium">{currency(item.monthly_amount)}</td>
-                    <td className="py-2 pr-4 text-xs">
-                      {item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : "No payments yet"}
-                    </td>
-                    <td className="py-2 pr-4 text-right">
-                      {canManage && (
-                        <Button
-                          variant="ghost"
-                          className="text-xs"
-                          disabled={!paymentMethods.length}
-                          onClick={() => {
-                            setSelectedEnrollment(item);
-                            setPaymentForm({ method: paymentMethods[0] ?? undefined });
-                            setShowPaymentModal(true);
-                          }}
-                        >
-                          <Wallet className="h-4 w-4 mr-1" />
-                          Record payment
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {!abenetList?.items.length && (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-mute">
-                      No enrollments found for the selected filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {abenetList && abenetList.total > 10 && (
-          <div className="flex justify-between items-center text-sm text-mute pt-3">
-            <span>
-              Page {abenetFilters.page} of {Math.ceil(abenetList.total / 10)}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                disabled={abenetFilters.page === 1}
-                onClick={() => setAbenetFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={abenetFilters.page >= Math.ceil(abenetList.total / 10)}
-                onClick={() => setAbenetFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      <Card className="p-4 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <CalendarClock className="h-8 w-8 text-accent" />
-            <div>
-              <p className="text-xs uppercase text-mute tracking-wide">Abenet report</p>
-              <p className="text-2xl font-semibold">{report.length ?? 0}</p>
-            </div>
-          </div>
-          <Button variant="ghost" onClick={() => setReportLoading(true) || getAbenetReport().then(setReport).finally(() => setReportLoading(false))}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-        {reportLoading ? (
-          <div className="py-8 text-center text-mute flex items-center justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading report…
-          </div>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {report.map((row) => (
-              <div key={`${row.child_name}-${row.parent_name}`} className="border border-border/70 rounded-2xl p-3 bg-card/70">
-                <div className="font-medium">{row.child_name}</div>
-                <div className="text-xs text-mute">{row.parent_name}</div>
-                <div className="text-sm mt-2 flex items-center gap-2">
-                  <Badge className="normal-case">{SERVICE_LABELS[row.service_stage]}</Badge>
-                  <span className="text-xs text-mute">
-                    Last payment: {row.last_payment_at ? new Date(row.last_payment_at).toLocaleDateString() : "—"}
-                  </span>
+          <Card className="p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <HandHeart className="h-8 w-8 text-accent" />
+                <div>
+                  <p className="text-xs uppercase text-mute tracking-wide">Total enrollments</p>
+                  <p className="text-2xl font-semibold">{abenetList?.total ?? "—"}</p>
                 </div>
               </div>
-            ))}
-            {!report.length && <p className="text-sm text-mute">No report data available.</p>}
-          </div>
-        )}
-      </Card>
-
-      <AnimatePresence>
-        {showEnrollmentModal && (
-          <Modal title="New Abenet enrollment" onClose={() => setShowEnrollmentModal(false)}>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Search parent</label>
+              <div className="flex flex-wrap gap-2">
+                <Select
+                  value={abenetFilters.service_stage}
+                  onChange={(event) => setAbenetFilters((prev) => ({ ...prev, service_stage: event.target.value, page: 1 }))}
+                >
+                  <option value="">All services</option>
+                  {meta?.service_stages.map((value) => (
+                    <option key={value} value={value}>
+                      {SERVICE_LABELS[value]}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  value={abenetFilters.status}
+                  onChange={(event) => setAbenetFilters((prev) => ({ ...prev, status: event.target.value, page: 1 }))}
+                >
+                  <option value="">All statuses</option>
+                  {meta?.statuses.map((value) => (
+                    <option key={value} value={value}>
+                      {STATUS_LABELS[value as AbenetEnrollment["status"]]}
+                    </option>
+                  ))}
+                </Select>
                 <Input
-                  placeholder="Type to search members"
-                  value={parentSearch}
-                  onChange={(event) => setParentSearch(event.target.value)}
+                  placeholder="Search child"
+                  value={abenetFilters.q}
+                  onChange={(event) => setAbenetFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))}
                 />
-                {parentResults.length > 0 && (
-                  <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70">
-                    {parentResults.map((result) => (
-                      <li
-                        key={result.id}
-                        className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer"
-                        onClick={() => handleParentSelect(result)}
-                      >
-                        {result.first_name} {result.last_name}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <Button variant="ghost" onClick={() => setAbenetFilters({ service_stage: "", status: "", q: "", page: 1 })}>
+                  <RefreshCcw className="h-4 w-4" />
+                  Reset
+                </Button>
               </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Parent ID</label>
-                  <Input
-                    type="number"
-                    value={enrollmentForm.parent_member_id}
-                    onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, parent_member_id: event.target.value, child_id: "" }))}
-                    onBlur={(event) => {
-                      const value = Number(event.target.value);
-                      if (!value) return;
-                      handleParentSelect({ id: value, first_name: event.target.value, last_name: "" } as MemberSummary);
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Service stage</label>
-                  <Select
-                    value={enrollmentForm.service_stage}
-                    onChange={(event) =>
-                      setEnrollmentForm((prev) => ({
-                        ...prev,
-                        service_stage: event.target.value as AbenetEnrollment["service_stage"],
-                      }))
-                    }
+            </div>
+            {abenetLoading ? (
+              <div className="py-10 text-center text-mute flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading enrollments…
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-mute">
+                      <th className="py-2 pr-4">Child</th>
+                      <th className="py-2 pr-4">Parent</th>
+                      <th className="py-2 pr-4">Service</th>
+                      <th className="py-2 pr-4">Monthly fee</th>
+                      <th className="py-2 pr-4">Last payment</th>
+                      <th className="py-2 pr-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {abenetList?.items.map((item) => (
+                      <tr key={item.id} className="border-t border-border/60">
+                        <td className="py-2 pr-4">
+                          <div className="font-medium">
+                            {item.child.first_name} {item.child.last_name}
+                          </div>
+                          <div className="text-xs text-mute">Enrolled {new Date(item.enrollment_date).toLocaleDateString()}</div>
+                        </td>
+                        <td className="py-2 pr-4 text-sm">
+                          {item.parent.first_name} {item.parent.last_name}
+                        </td>
+                        <td className="py-2 pr-4">
+                          <Badge className="normal-case">{SERVICE_LABELS[item.service_stage]}</Badge>
+                        </td>
+                        <td className="py-2 pr-4 font-medium">{currency(item.monthly_amount)}</td>
+                        <td className="py-2 pr-4 text-xs">
+                          {item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : "No payments yet"}
+                        </td>
+                        <td className="py-2 pr-4 text-right">
+                          {canManage && (
+                            <Button
+                              variant="ghost"
+                              className="text-xs"
+                              disabled={!paymentMethods.length}
+                              onClick={() => {
+                                setSelectedEnrollment(item);
+                                setPaymentForm({ method: paymentMethods[0] ?? undefined });
+                                setShowPaymentModal(true);
+                              }}
+                            >
+                              <Wallet className="h-4 w-4 mr-1" />
+                              Record payment
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {!abenetList?.items.length && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-mute">
+                          No enrollments found for the selected filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {abenetList && abenetList.total > 10 && (
+              <div className="flex justify-between items-center text-sm text-mute pt-3">
+                <span>
+                  Page {abenetFilters.page} of {Math.ceil(abenetList.total / 10)}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={abenetFilters.page === 1}
+                    onClick={() => setAbenetFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
                   >
-                    {meta?.service_stages.map((value) => (
-                      <option key={value} value={value}>
-                        {SERVICE_LABELS[value]}
-                      </option>
-                    ))}
-                  </Select>
+                    Previous
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={abenetFilters.page >= Math.ceil(abenetList.total / 10)}
+                    onClick={() => setAbenetFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
+                  >
+                    Next
+                  </Button>
                 </div>
               </div>
+            )}
+          </Card>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-3 text-sm">
-                  <button
-                    type="button"
-                    className={`px-3 py-1 rounded-xl border ${enrollmentForm.child_mode === "existing" ? "border-accent bg-accent/10" : "border-border"}`}
-                    onClick={() => setEnrollmentForm((prev) => ({ ...prev, child_mode: "existing", child_id: "" }))}
-                  >
-                    Select existing child
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1 rounded-xl border ${enrollmentForm.child_mode === "new" ? "border-accent bg-accent/10" : "border-border"}`}
-                    onClick={() =>
-                      setEnrollmentForm((prev) => ({
-                        ...prev,
-                        child_mode: "new",
-                        child_id: "",
-                        child_first_name: "",
-                        child_last_name: "",
-                      }))
-                    }
-                  >
-                    Add new child
-                  </button>
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <CalendarClock className="h-8 w-8 text-accent" />
+                <div>
+                  <p className="text-xs uppercase text-mute tracking-wide">Abenet report</p>
+                  <p className="text-2xl font-semibold">{report.length ?? 0}</p>
                 </div>
-                {enrollmentForm.child_mode === "existing" ? (
-                  <div className="space-y-2">
-                    {parentLoading && <p className="text-xs text-mute">Loading children…</p>}
-                    {!parentLoading && parentDetail?.children?.length ? (
-                      <ul className="space-y-2">
-                        {parentDetail.children.map((child) => (
-                          <li key={child.id}>
-                            <label className="flex items-center gap-2 text-sm cursor-pointer">
-                              <input
-                                type="radio"
-                                name="child"
-                                value={child.id}
-                                checked={enrollmentForm.child_id === String(child.id)}
-                                onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_id: event.target.value }))}
-                              />
-                              <span>
-                                {child.first_name} {child.last_name}{" "}
-                                {child.birth_date && (
-                                  <span className="text-xs text-mute">({new Date(child.birth_date).toLocaleDateString()})</span>
-                                )}
-                              </span>
-                            </label>
+              </div>
+              <Button variant="ghost" onClick={() => { setReportLoading(true); getAbenetReport().then(setReport).finally(() => setReportLoading(false)); }}>
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+            {reportLoading ? (
+              <div className="py-8 text-center text-mute flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading report…
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {report.map((row) => (
+                  <div key={`${row.child_name}-${row.parent_name}`} className="border border-border/70 rounded-2xl p-3 bg-card/70">
+                    <div className="font-medium">{row.child_name}</div>
+                    <div className="text-xs text-mute">{row.parent_name}</div>
+                    <div className="text-sm mt-2 flex items-center gap-2">
+                      <Badge className="normal-case">{SERVICE_LABELS[row.service_stage]}</Badge>
+                      <span className="text-xs text-mute">
+                        Last payment: {row.last_payment_at ? new Date(row.last_payment_at).toLocaleDateString() : "—"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {!report.length && <p className="text-sm text-mute">No report data available.</p>}
+              </div>
+            )}
+          </Card>
+
+          <AnimatePresence>
+            {showEnrollmentModal && (
+              <Modal title="New Abenet enrollment" onClose={() => setShowEnrollmentModal(false)}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Search parent</label>
+                    <Input
+                      placeholder="Type to search members"
+                      value={parentSearch}
+                      onChange={(event) => setParentSearch(event.target.value)}
+                    />
+                    {parentResults.length > 0 && (
+                      <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70">
+                        {parentResults.map((result) => (
+                          <li
+                            key={result.id}
+                            className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer"
+                            onClick={() => handleParentSelect(result)}
+                          >
+                            {result.first_name} {result.last_name}
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <p className="text-xs text-mute">No child records found under this parent.</p>
                     )}
                   </div>
-                ) : (
-                  <div className="grid md:grid-cols-3 gap-3">
+                  <div className="grid md:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">First name</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Parent ID</label>
                       <Input
-                        value={enrollmentForm.child_first_name}
-                        onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_first_name: event.target.value }))}
+                        type="number"
+                        value={enrollmentForm.parent_member_id}
+                        onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, parent_member_id: event.target.value, child_id: "" }))}
+                        onBlur={(event) => {
+                          const value = Number(event.target.value);
+                          if (!value) return;
+                          handleParentSelect({ id: value, first_name: event.target.value, last_name: "" } as MemberSummary);
+                        }}
                       />
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Last name</label>
-                      <Input
-                        value={enrollmentForm.child_last_name}
-                        onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_last_name: event.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Birth date</label>
-                      <Input
-                        type="date"
-                        value={enrollmentForm.birth_date}
-                        onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
-                      />
+                      <label className="text-xs uppercase text-mute block mb-1">Service stage</label>
+                      <Select
+                        value={enrollmentForm.service_stage}
+                        onChange={(event) =>
+                          setEnrollmentForm((prev) => ({
+                            ...prev,
+                            service_stage: event.target.value as AbenetEnrollment["service_stage"],
+                          }))
+                        }
+                      >
+                        {meta?.service_stages.map((value) => (
+                          <option key={value} value={value}>
+                            {SERVICE_LABELS[value]}
+                          </option>
+                        ))}
+                      </Select>
                     </div>
                   </div>
-                )}
-              </div>
 
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Enrollment date</label>
-                  <Input
-                    type="date"
-                    value={enrollmentForm.enrollment_date}
-                    onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Fixed monthly amount</label>
-                  <Input value={currency(meta?.monthly_amount ?? 0)} disabled />
-                </div>
-              </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 text-sm">
+                      <button
+                        type="button"
+                        className={`px-3 py-1 rounded-xl border ${enrollmentForm.child_mode === "existing" ? "border-accent bg-accent/10" : "border-border"}`}
+                        onClick={() => setEnrollmentForm((prev) => ({ ...prev, child_mode: "existing", child_id: "" }))}
+                      >
+                        Select existing child
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-3 py-1 rounded-xl border ${enrollmentForm.child_mode === "new" ? "border-accent bg-accent/10" : "border-border"}`}
+                        onClick={() =>
+                          setEnrollmentForm((prev) => ({
+                            ...prev,
+                            child_mode: "new",
+                            child_id: "",
+                            child_first_name: "",
+                            child_last_name: "",
+                          }))
+                        }
+                      >
+                        Add new child
+                      </button>
+                    </div>
+                    {enrollmentForm.child_mode === "existing" ? (
+                      <div className="space-y-2">
+                        {parentLoading && <p className="text-xs text-mute">Loading children…</p>}
+                        {!parentLoading && parentDetail?.children?.length ? (
+                          <ul className="space-y-2">
+                            {parentDetail.children.map((child) => (
+                              <li key={child.id}>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name="child"
+                                    value={child.id}
+                                    checked={enrollmentForm.child_id === String(child.id)}
+                                    onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_id: event.target.value }))}
+                                  />
+                                  <span>
+                                    {child.first_name} {child.last_name}{" "}
+                                    {child.birth_date && (
+                                      <span className="text-xs text-mute">({new Date(child.birth_date).toLocaleDateString()})</span>
+                                    )}
+                                  </span>
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-mute">No child records found under this parent.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-xs uppercase text-mute block mb-1">First name</label>
+                          <Input
+                            value={enrollmentForm.child_first_name}
+                            onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_first_name: event.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs uppercase text-mute block mb-1">Last name</label>
+                          <Input
+                            value={enrollmentForm.child_last_name}
+                            onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, child_last_name: event.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs uppercase text-mute block mb-1">Birth date</label>
+                          <Input
+                            type="date"
+                            value={enrollmentForm.birth_date}
+                            onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, birth_date: event.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Notes</label>
-                <Textarea
-                  rows={3}
-                  value={enrollmentForm.notes}
-                  onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, notes: event.target.value }))}
-                />
-              </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Enrollment date</label>
+                      <Input
+                        type="date"
+                        value={enrollmentForm.enrollment_date}
+                        onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, enrollment_date: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Fixed monthly amount</label>
+                      <Input value={currency(meta?.monthly_amount ?? 0)} disabled />
+                    </div>
+                  </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setShowEnrollmentModal(false);
-                    resetEnrollmentModal();
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleEnrollmentSubmit}>Save enrollment</Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-     </AnimatePresence>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Notes</label>
+                    <Textarea
+                      rows={3}
+                      value={enrollmentForm.notes}
+                      onChange={(event) => setEnrollmentForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    />
+                  </div>
 
-      <AnimatePresence>
-        {showPaymentModal && selectedEnrollment && (
-          <Modal title="Record Abenet payment" onClose={() => setShowPaymentModal(false)}>
-            <div className="space-y-3">
-              <p className="text-sm">
-                Recording payment for{" "}
-                <strong>
-                  {selectedEnrollment.child.first_name} {selectedEnrollment.child.last_name}
-                </strong>{" "}
-                ({selectedEnrollment.parent.first_name} {selectedEnrollment.parent.last_name})
-              </p>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Amount</label>
-                  <Input value={currency(meta?.monthly_amount ?? 0)} disabled readOnly />
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setShowEnrollmentModal(false);
+                        resetEnrollmentModal();
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleEnrollmentSubmit}>Save enrollment</Button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Method</label>
-                  <Select
-                    value={paymentForm.method || paymentMethods[0] || ""}
-                    onChange={(event) => setPaymentForm((prev) => ({ ...prev, method: event.target.value }))}
-                  >
-                    {paymentMethods.map((method) => (
-                      <option key={method} value={method}>
-                        {method}
-                      </option>
-                    ))}
-                  </Select>
+              </Modal>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showPaymentModal && selectedEnrollment && (
+              <Modal title="Record Abenet payment" onClose={() => setShowPaymentModal(false)}>
+                <div className="space-y-3">
+                  <p className="text-sm">
+                    Recording payment for{" "}
+                    <strong>
+                      {selectedEnrollment.child.first_name} {selectedEnrollment.child.last_name}
+                    </strong>{" "}
+                    ({selectedEnrollment.parent.first_name} {selectedEnrollment.parent.last_name})
+                  </p>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Amount</label>
+                      <Input value={currency(meta?.monthly_amount ?? 0)} disabled readOnly />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Method</label>
+                      <Select
+                        value={paymentForm.method || paymentMethods[0] || ""}
+                        onChange={(event) => setPaymentForm((prev) => ({ ...prev, method: event.target.value }))}
+                      >
+                        {paymentMethods.map((method) => (
+                          <option key={method} value={method}>
+                            {method}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Memo</label>
+                    <Textarea
+                      rows={3}
+                      placeholder="Optional note"
+                      value={paymentForm.memo || ""}
+                      onChange={(event) => setPaymentForm((prev) => ({ ...prev, memo: event.target.value }))}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setShowPaymentModal(false);
+                        setSelectedEnrollment(null);
+                        setPaymentForm({});
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handlePaymentSubmit}>Record payment</Button>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Memo</label>
-                <Textarea
-                  rows={3}
-                  placeholder="Optional note"
-                  value={paymentForm.memo || ""}
-                  onChange={(event) => setPaymentForm((prev) => ({ ...prev, memo: event.target.value }))}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setShowPaymentModal(false);
-                    setSelectedEnrollment(null);
-                    setPaymentForm({});
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handlePaymentSubmit}>Record payment</Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>        </div>
+              </Modal>
+            )}
+          </AnimatePresence>        </div>
       ) : (
         <div className="space-y-6" data-tour="schools-sunday-list">
           <Card className="p-4 grid gap-4 md:grid-cols-4">
@@ -1197,10 +1205,8 @@ export default function SchoolsWorkspace() {
                 To publish Mezmur, Lessons, or Art to the public site, please use the church website’s content tools. Sunday School content publishing from here will return once the website integration is ready.
               </p>
               <div className="flex justify-center">
-                <Button asChild>
-                  <a href="https://salitemihret.org" target="_blank" rel="noreferrer">
-                    Open church website
-                  </a>
+                <Button href="https://salitemihret.org" target="_blank" rel="noreferrer">
+                  Open church website
                 </Button>
               </div>
             </div>
