@@ -10,6 +10,7 @@ from app.schemas.payment import PaymentStatus
 ALLOWED_MEMBER_STATUSES = {"Active", "Inactive", "Pending", "Archived"}
 ALLOWED_MEMBER_GENDERS = {"Male", "Female"}
 ALLOWED_MEMBER_MARITAL_STATUSES = {"Single", "Married", "Divorced", "Widowed", "Separated", "Other"}
+VISIBLE_MEMBER_MARITAL_STATUSES = tuple(status for status in ALLOWED_MEMBER_MARITAL_STATUSES if status != "Other")
 ALLOWED_CONTRIBUTION_METHODS = {"Cash", "Debit", "Credit", "E-Transfer", "Cheque", "Direct Deposit"}
 ALLOWED_CONTRIBUTION_EXCEPTION_REASONS = {"LowIncome", "Senior", "Student", "Other"}
 

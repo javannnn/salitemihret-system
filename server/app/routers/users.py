@@ -19,7 +19,7 @@ from app.models.user import (
     UserMemberLink,
     UserInvitation,
     UserAuditLog,
-    UserAuditAction,
+    UserAuditActionEnum,
 )
 from app.schemas.user_admin import (
     InvitationCreateRequest,
@@ -40,8 +40,10 @@ from app.services.user_accounts import (
     now_utc,
     sanitize_username,
 )
+from app.services.notifications import send_password_reset_email, send_user_invitation_email
 
 router = APIRouter(prefix="/users", tags=["users"])
+SUPER_ADMIN_ROLE_NAME = "SuperAdmin"
 
 
 def _enum_value(value: Any) -> Any:
@@ -70,6 +72,9 @@ def _serialize_member(link: UserMemberLink | None, owning_user: User | None = No
 
 
 def _serialize_user(user: User) -> UserAdminSummary:
+    role_names = [role.name for role in user.roles]
+    if user.is_super_admin and SUPER_ADMIN_ROLE_NAME not in role_names:
+        role_names.append(SUPER_ADMIN_ROLE_NAME)
     return UserAdminSummary(
         id=user.id,
         email=user.email,
@@ -77,7 +82,7 @@ def _serialize_user(user: User) -> UserAdminSummary:
         full_name=user.full_name,
         is_active=user.is_active,
         is_super_admin=user.is_super_admin,
-        roles=[role.name for role in user.roles],
+        roles=role_names,
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -90,7 +95,7 @@ def _log_audit(
     *,
     actor: User,
     target: User,
-    action: UserAuditAction,
+    action: UserAuditActionEnum,
     payload: dict[str, Any] | None = None,
 ) -> None:
     entry = UserAuditLog(
@@ -289,7 +294,7 @@ def update_user(
                 db,
                 actor=actor,
                 target=user,
-                action=UserAuditAction.USERNAME_CHANGED,
+                action=UserAuditActionEnum.USERNAME_CHANGED,
                 payload=username_payload,
             )
         if audit_payload:
@@ -297,7 +302,7 @@ def update_user(
                 db,
                 actor=actor,
                 target=user,
-                action=UserAuditAction.USER_STATUS_CHANGED,
+                action=UserAuditActionEnum.USER_STATUS_CHANGED,
                 payload=audit_payload,
             )
         db.commit()
@@ -313,17 +318,20 @@ def update_user_roles(
 ) -> UserAdminSummary:
     user = _load_user(db, user_id)
     try:
-        roles = load_roles(db, payload.roles)
+        super_requested = SUPER_ADMIN_ROLE_NAME in payload.roles
+        filtered_roles = [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
+        roles = load_roles(db, filtered_roles)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     user.roles = roles
+    user.is_super_admin = super_requested
     db.commit()
     db.refresh(user)
     _log_audit(
         db,
         actor=actor,
         target=user,
-        action=UserAuditAction.ROLE_UPDATED,
+        action=UserAuditActionEnum.ROLE_UPDATED,
         payload={"roles": payload.roles},
     )
     db.commit()
@@ -346,7 +354,7 @@ def link_member(
                 db,
                 actor=actor,
                 target=user,
-                action=UserAuditAction.MEMBER_UNLINKED,
+                action=UserAuditActionEnum.MEMBER_UNLINKED,
             )
             db.commit()
         return _serialize_user(user)
@@ -370,7 +378,7 @@ def link_member(
         db,
         actor=actor,
         target=user,
-        action=UserAuditAction.MEMBER_LINKED,
+        action=UserAuditActionEnum.MEMBER_LINKED,
         payload={"member_id": member.id},
     )
     db.commit()
@@ -427,9 +435,9 @@ def create_invitation(
         _ensure_member_available(db, payload.member_id)
         member_id = payload.member_id
 
-    roles = payload.roles
     try:
-        load_roles(db, roles)
+        filtered_roles = [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
+        load_roles(db, filtered_roles)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -438,10 +446,11 @@ def create_invitation(
         email=payload.email,
         username=clean_username,
         invited_by=actor,
-        roles=roles,
+        roles=payload.roles,
         member_id=member_id,
         message=payload.message,
     )
+    send_user_invitation_email(invitation, raw_token, actor)
     return InvitationResponse(
         id=invitation.id,
         email=invitation.email,
@@ -469,11 +478,13 @@ def reset_user_password(
         member_id=member_id,
         message="Password reset",
     )
+    email_sent = send_password_reset_email(invitation, raw_token, actor)
     _log_audit(
         db,
         actor=actor,
         target=user,
-        action=UserAuditAction.PASSWORD_RESET_SENT,
+        action=UserAuditActionEnum.PASSWORD_RESET_SENT,
+        payload={"invitation_id": invitation.id, "email_sent": email_sent},
     )
     db.commit()
     return InvitationResponse(

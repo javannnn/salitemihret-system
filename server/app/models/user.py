@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import enum
+
 from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, JSON, String, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -27,6 +29,7 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_super_admin = Column(Boolean, default=False, nullable=False)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     username_changed_at = Column(DateTime(timezone=True), nullable=True)
@@ -68,18 +71,22 @@ class User(Base):
 
 
 UserMemberLinkStatus = Enum("linked", "pending_review", "rejected", name="user_member_link_status")
-UserAuditAction = Enum(
-    "INVITE_SENT",
-    "USER_CREATED",
-    "ROLE_UPDATED",
-    "USERNAME_CHANGED",
-    "MEMBER_LINKED",
-    "MEMBER_UNLINKED",
-    "PASSWORD_RESET_SENT",
-    "USER_STATUS_CHANGED",
-    "LINK_REQUESTED",
-    name="user_audit_action",
-)
+class UserAuditActionEnum(str, enum.Enum):
+    INVITE_SENT = "INVITE_SENT"
+    USER_CREATED = "USER_CREATED"
+    ROLE_UPDATED = "ROLE_UPDATED"
+    USERNAME_CHANGED = "USERNAME_CHANGED"
+    MEMBER_LINKED = "MEMBER_LINKED"
+    MEMBER_UNLINKED = "MEMBER_UNLINKED"
+    PASSWORD_RESET_SENT = "PASSWORD_RESET_SENT"
+    USER_STATUS_CHANGED = "USER_STATUS_CHANGED"
+    LINK_REQUESTED = "LINK_REQUESTED"
+    SUPER_ADMIN_GRANTED = "SUPER_ADMIN_GRANTED"
+    SUPER_ADMIN_REVOKED = "SUPER_ADMIN_REVOKED"
+
+
+# SQLAlchemy enum type for the column
+UserAuditAction = Enum(UserAuditActionEnum, name="user_audit_action")
 
 
 class UserMemberLink(Base):

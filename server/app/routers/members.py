@@ -321,6 +321,26 @@ def create_member(
         phone=payload.phone,
     )
 
+    if payload.birth_date:
+        today = datetime.now(timezone.utc).date()
+        age = today.year - payload.birth_date.year - ((today.month, today.day) < (payload.birth_date.month, payload.birth_date.day))
+        if age < 18:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Members must be 18 years or older. Please add them as a child of an existing member.",
+            )
+
+    if payload.children:
+        today = datetime.now(timezone.utc).date()
+        for child in payload.children:
+            if child.birth_date:
+                child_age = today.year - child.birth_date.year - ((today.month, today.day) < (child.birth_date.month, child.birth_date.day))
+                if child_age >= 18:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Child {child.first_name} is over 18. Please register them as an independent member.",
+                    )
+
     username = generate_username(db, payload.first_name, payload.last_name)
     member = Member(
         first_name=payload.first_name,
@@ -586,6 +606,14 @@ def update_member(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number cannot be empty")
         member.phone = cleaned_phone
     if payload.birth_date is not None:
+        today = datetime.now(timezone.utc).date()
+        if payload.birth_date:
+            age = today.year - payload.birth_date.year - ((today.month, today.day) < (payload.birth_date.month, payload.birth_date.day))
+            if age < 18:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Members must be 18 years or older. Please add them as a child of an existing member.",
+                )
         member.birth_date = payload.birth_date
     if payload.join_date is not None:
         member.join_date = payload.join_date
@@ -660,6 +688,15 @@ def update_member(
         apply_spouse(member, payload.spouse.dict() if payload.spouse else None)
 
     if "children" in fields_set and payload.children is not None:
+        today = datetime.now(timezone.utc).date()
+        for child in payload.children:
+            if child.birth_date:
+                child_age = today.year - child.birth_date.year - ((today.month, today.day) < (child.birth_date.month, child.birth_date.day))
+                if child_age >= 18:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Child {child.first_name} is over 18. Please register them as an independent member.",
+                    )
         apply_children(member, [child.dict() for child in payload.children])
 
     if payload.father_confessor_id is not None:

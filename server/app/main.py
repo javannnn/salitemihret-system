@@ -19,6 +19,7 @@ from app.core.license import get_license_status
 from app.routers import auth as auth_router
 from app.routers import account as account_router
 from app.routers import children as children_router
+from app.routers import emails as emails_router
 from app.routers import license as license_router
 from app.routers import members as members_router
 from app.routers import members_bulk as members_bulk_router
@@ -33,8 +34,11 @@ from app.routers import sunday_school as sunday_school_router
 from app.routers import reports as reports_router
 from app.routers import schools as schools_router
 from app.routers import newcomers as newcomers_router
+from app.routers import chat as chat_router
 from app.services.child_promotion import get_children_ready_for_promotion
+from app.services.notifications import send_child_promotion_digest
 from app.services import payments as payments_service
+from app.services.members_utils import cleanup_archived_members
 
 app = FastAPI(title="SaliteMihret API", version="0.1.0")
 
@@ -72,6 +76,7 @@ app.include_router(account_router.router)
 app.include_router(whoami_router.router)
 app.include_router(priests_router.router)
 app.include_router(children_router.router)
+app.include_router(emails_router.router)
 app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
@@ -84,6 +89,7 @@ app.include_router(sunday_school_router.router)
 app.include_router(sunday_school_router.public_router)
 app.include_router(reports_router.router)
 app.include_router(schools_router.router)
+app.include_router(chat_router.router)
 app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
 
@@ -389,7 +395,9 @@ def health() -> dict[str, str]:
 
 def _send_promotion_digest() -> None:
     with SessionLocal() as session:
-        candidates = get_children_ready_for_promotion(session, within_days=60)
+        candidates = get_children_ready_for_promotion(
+            session, within_days=settings.CHILD_PROMOTION_DIGEST_LOOKAHEAD_DAYS
+        )
         if not candidates:
             return
         logger.info(
@@ -399,6 +407,7 @@ def _send_promotion_digest() -> None:
                 "child_ids": [child.id for child, _ in candidates],
             },
         )
+        send_child_promotion_digest(session, candidates)
 
 def _run_overdue_payment_check() -> None:
     with SessionLocal() as session:
@@ -412,6 +421,13 @@ def _run_daily_close_job() -> None:
         lock = payments_service.auto_close_previous_day(session)
         if lock:
             logger.info("payment_daily_close", extra={"day": lock.day.isoformat()})
+
+
+def _run_archived_cleanup_job() -> None:
+    with SessionLocal() as session:
+        count = cleanup_archived_members(session)
+        if count > 0:
+            logger.info("archived_members_cleanup", extra={"deleted_count": count})
 
 
 @app.on_event("startup")
@@ -440,6 +456,14 @@ def start_scheduled_jobs() -> None:
         hour=2,
         minute=5,
         id="payment_daily_close",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_archived_cleanup_job,
+        trigger="cron",
+        hour=4,
+        minute=0,
+        id="archived_members_cleanup",
         replace_existing=True,
     )
 

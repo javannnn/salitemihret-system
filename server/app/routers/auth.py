@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.core.db import get_db
 from app.core.config import settings
-from app.models.user import User, UserInvitation, UserMemberLink, UserAuditLog, UserAuditAction
+from app.models.user import User, UserInvitation, UserMemberLink, UserAuditLog, UserAuditActionEnum
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.schemas.user_admin import InvitationAcceptRequest
 from app.services.user_accounts import (
@@ -65,8 +65,11 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    roles_snapshot = invitation.roles_snapshot or []
+    is_super_admin_invite = "SuperAdmin" in roles_snapshot
+    filtered_roles = [role for role in roles_snapshot if role != "SuperAdmin"]
     try:
-        roles = load_roles(db, invitation.roles_snapshot or [])
+        roles = load_roles(db, filtered_roles)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -76,6 +79,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
         full_name=payload.full_name or invitation.username,
         hashed_password=hash_password(payload.password),
         is_active=True,
+        is_super_admin=is_super_admin_invite,
         created_at=now_utc(),
         updated_at=now_utc(),
     )
@@ -103,7 +107,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
     audit_entry = UserAuditLog(
         actor_user_id=user.id,
         target_user_id=user.id,
-        action=UserAuditAction.USER_CREATED,
+        action=UserAuditActionEnum.USER_CREATED,
         payload={"via_invitation": True},
         created_at=now_utc(),
     )
@@ -113,7 +117,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
             UserAuditLog(
                 actor_user_id=user.id,
                 target_user_id=user.id,
-                action=UserAuditAction.MEMBER_LINKED,
+                action=UserAuditActionEnum.MEMBER_LINKED,
                 payload={"member_id": user.member_link.member_id},
                 created_at=now_utc(),
             )
@@ -121,5 +125,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
 
     db.commit()
     roles_names = [role.name for role in roles]
+    if is_super_admin_invite:
+        roles_names.append("SuperAdmin")
     token_response = create_access_token(subject=str(user.id), roles=roles_names)
     return TokenResponse(access_token=token_response)

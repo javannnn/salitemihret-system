@@ -15,6 +15,30 @@
     --x: 50%;
     --y: 50%;
     --r: 220px;
+
+    /* Theming Variables - Light Mode Default */
+    --chroma-card-bg: #ffffff;
+    --chroma-text-primary: #0f172a;
+    --chroma-text-secondary: #334155;
+    --chroma-text-muted: #64748b;
+    --chroma-border-color: rgba(0, 0, 0, 0.1);
+    --chroma-info-bg: rgba(255, 255, 255, 0.85);
+    --chroma-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    --chroma-hover-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    --chroma-overlay-mask-start: rgba(0, 0, 0, 0.05);
+}
+
+:global(.dark) .chroma-grid {
+    /* Dark Mode Overrides */
+    --chroma-card-bg: #000000;
+    --chroma-text-primary: #ffffff;
+    --chroma-text-secondary: #cbd5e1;
+    --chroma-text-muted: #94a3b8;
+    --chroma-border-color: rgba(255, 255, 255, 0.1);
+    --chroma-info-bg: rgba(0, 0, 0, 0.6);
+    --chroma-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --chroma-hover-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+    --chroma-overlay-mask-start: rgba(255, 255, 255, 0.1);
 }
 
 @media (max-width: 1124px) {
@@ -66,10 +90,10 @@
     height: auto;
     border-radius: 12px;
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--chroma-border-color);
     transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
     background: var(--card-gradient);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--chroma-shadow);
 
     --mouse-x: 50%;
     --mouse-y: 50%;
@@ -79,9 +103,10 @@
 .chroma-card:hover {
     border-color: var(--card-border);
     transform: translateY(-4px);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--chroma-hover-shadow);
 }
 
+/* ... (skipping pseudo-elements that don't need change) ... */
 .chroma-card::before {
     content: '';
     position: absolute;
@@ -126,12 +151,12 @@
     position: relative;
     z-index: 1;
     padding: 1.25rem;
-    color: #fff;
+    color: var(--chroma-text-primary);
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--chroma-info-bg);
     backdrop-filter: blur(10px);
 }
 
@@ -146,7 +171,7 @@
     margin: 0;
     font-size: 1.1rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--chroma-text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -186,7 +211,7 @@
     align-items: center;
     gap: 0.75rem;
     font-size: 0.85rem;
-    color: #ccc;
+    color: var(--chroma-text-secondary);
 }
 
 .detail-item {
@@ -204,13 +229,13 @@
 .chroma-info .role {
     margin: 0;
     font-size: 0.85rem;
-    color: #aaa;
+    color: var(--chroma-text-muted);
     margin-top: 0.25rem;
 }
 
 .chroma-info .location {
     font-size: 0.7rem;
-    color: #64748b;
+    color: var(--chroma-text-muted);
     margin-top: auto;
 }
 

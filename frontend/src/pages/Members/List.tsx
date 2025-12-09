@@ -16,6 +16,8 @@ import {
   List as ListIcon,
   UserPlus,
   Home,
+  Archive,
+  Undo,
 } from "lucide-react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
@@ -550,21 +552,35 @@ export default function MembersList() {
 
   const handleArchiveSingle = async (memberId: number) => {
     if (!canManage) {
-      toast.push("You do not have permission to archive members.");
+      toast.push("You do not have permission to manage member archives.");
       return;
     }
-    const confirmed = window.confirm("Archive this member? You can find archived records via the Archived quick filter.");
+
+    const isArchived = filters.status === "Archived";
+    const action = isArchived ? "Restore" : "Archive";
+
+    const confirmed = window.confirm(
+      isArchived
+        ? "Restore this member? They will be moved back to the active list."
+        : "Archive this member? You can find archived records via the Archived view."
+    );
+
     if (!confirmed) {
       return;
     }
     setRowMenu(null);
     try {
-      await api(`/members/${memberId}`, { method: "DELETE" });
-      toast.push("Member archived");
+      if (isArchived) {
+        await api(`/members/${memberId}/restore`, { method: "POST" });
+        toast.push("Member restored");
+      } else {
+        await api(`/members/${memberId}`, { method: "DELETE" });
+        toast.push("Member archived");
+      }
       loadMembers(page);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to archive member");
+      toast.push(`Failed to ${action.toLowerCase()} member`);
     }
   };
 
@@ -976,13 +992,29 @@ export default function MembersList() {
                   setFilterOpen(true);
                 }}
               >
-                <Filter className="h-4 w-4" />
-                Filters
+                <Filter className="h-4 w-4 mr-2" />
+                Filter
                 {activeFilters.length > 0 && (
-                  <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] text-accent-foreground">
+                  <span className="ml-2 bg-primary-foreground text-primary text-xs rounded-full w-5 h-5 flex items-center justify-center">
                     {activeFilters.length}
                   </span>
                 )}
+              </Button>
+              <Button
+                variant={filters.status === "Archived" ? "solid" : "ghost"}
+                className={filters.status === "Archived" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 border-destructive" : ""}
+                onClick={() => {
+                  if (filters.status === "Archived") {
+                    clearFilter("status");
+                  } else {
+                    setFilters((prev) => ({ ...prev, status: "Archived" }));
+                    setPage(1);
+                    loadMembers(1, { filters: { ...filters, status: "Archived" } });
+                  }
+                }}
+              >
+                <Archive className="h-4 w-4 mr-2" />
+                {filters.status === "Archived" ? "Exit Archives" : "Archived"}
               </Button>
             </div>
           </form>
@@ -990,26 +1022,7 @@ export default function MembersList() {
 
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className={`flex items-center gap-2 ${isMobile ? "overflow-x-auto -mx-1 px-1 pb-1" : "flex-wrap"}`}>
-            <Button
-              variant={filters.status === "Archived" ? "solid" : "ghost"}
-              className="whitespace-nowrap"
-              onClick={() => {
-                const isArchived = filters.status === "Archived";
-                const next: Filters = {
-                  ...filters,
-                  status: isArchived ? "" : "Archived",
-                  hasChildren: isArchived ? filters.hasChildren : false,
-                  missingPhone: isArchived ? filters.missingPhone : false,
-                  newThisMonth: isArchived ? filters.newThisMonth : false,
-                };
-                setFilters(next);
-                setDraftFilters(next);
-                setPage(1);
-                loadMembers(1, { filters: next });
-              }}
-            >
-              Archived
-            </Button>
+
             <Button
               variant={filters.status === "Active" ? "solid" : "ghost"}
               className="whitespace-nowrap"
@@ -1254,7 +1267,7 @@ export default function MembersList() {
                         subtitle: member.username,
                         handle: member.username,
                         borderColor: statusColor,
-                        gradient: `linear-gradient(145deg, ${statusColor}, #000)`,
+                        gradient: `linear-gradient(145deg, ${statusColor}, var(--chroma-card-bg))`,
                         url: `/members/${member.id}/edit`,
                         location: member.district || undefined,
                         id: member.id,
@@ -1279,299 +1292,299 @@ export default function MembersList() {
               <Card className="relative overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-[960px] text-sm">
-                  <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
-                    <tr>
-                      <th className="px-4 py-3 text-left w-12">
-                        {canBulk && rows.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={toggleSelectAll}
-                            className="text-accent"
-                          >
-                            {selectedIds.size === rows.length ? (
-                              <CheckSquare className="h-4 w-4" />
-                            ) : (
-                              <Square className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                      </th>
-                      <th className="px-4 py-3 text-left">Member</th>
-                      <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Family</th>
-                      <th className="px-4 py-3 text-left">Giving</th>
-                      <th className="px-4 py-3 text-left">Contact</th>
-                      <th className="px-4 py-3 text-left">Location</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading &&
-                      Array.from({ length: 6 }).map((_, index) => (
-                        <tr key={`skeleton-${index}`} className="border-b border-border/60">
-                          <td className="px-4 py-4">
-                            <div className="h-4 w-4 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 rounded-full bg-border animate-pulse" />
-                              <div className="space-y-2">
-                                <div className="h-3 w-32 rounded bg-border animate-pulse" />
-                                <div className="h-3 w-20 rounded bg-border animate-pulse" />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="h-4 w-16 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="h-4 w-16 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="h-4 w-20 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="h-3 w-28 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="h-3 w-24 rounded bg-border animate-pulse" />
-                          </td>
-                          <td className="px-4 py-4 text-right">
-                            <div className="h-8 w-20 rounded bg-border animate-pulse" />
-                          </td>
-                        </tr>
-                      ))}
-
-                    {!loading &&
-                      rows.map((member) => {
-                        const selected = selectedIds.has(member.id);
-                        const url = avatarUrl(member.avatar_path);
-                        return (
-                          <tr
-                            key={member.id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => handleRowClick(member.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                handleRowClick(member.id);
-                              }
-                            }}
-                            className={`border-b border-border/60 last:border-none transition cursor-pointer hover:bg-accent/5 ${selected ? "bg-accent/10" : ""}`}
-                          >
-                            <td className="px-4 py-3">
-                              {canBulk && (
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    toggleSelect(member.id);
-                                  }}
-                                  className="text-accent"
-                                >
-                                  {selected ? (
-                                    <CheckSquare className="h-4 w-4" />
-                                  ) : (
-                                    <Square className="h-4 w-4" />
-                                  )}
-                                </button>
+                    <thead className="bg-card/80 text-xs uppercase tracking-wide text-mute border-b border-border">
+                      <tr>
+                        <th className="px-4 py-3 text-left w-12">
+                          {canBulk && rows.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={toggleSelectAll}
+                              className="text-accent"
+                            >
+                              {selectedIds.size === rows.length ? (
+                                <CheckSquare className="h-4 w-4" />
+                              ) : (
+                                <Square className="h-4 w-4" />
                               )}
+                            </button>
+                          )}
+                        </th>
+                        <th className="px-4 py-3 text-left">Member</th>
+                        <th className="px-4 py-3 text-left">Status</th>
+                        <th className="px-4 py-3 text-left">Family</th>
+                        <th className="px-4 py-3 text-left">Giving</th>
+                        <th className="px-4 py-3 text-left">Contact</th>
+                        <th className="px-4 py-3 text-left">Location</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading &&
+                        Array.from({ length: 6 }).map((_, index) => (
+                          <tr key={`skeleton-${index}`} className="border-b border-border/60">
+                            <td className="px-4 py-4">
+                              <div className="h-4 w-4 rounded bg-border animate-pulse" />
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 rounded-full bg-border overflow-hidden">
-                                  {url ? (
-                                    <img
-                                      src={url}
-                                      alt={`${member.first_name} ${member.last_name}`}
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="h-full w-full flex items-center justify-center text-xs text-mute">
-                                      {member.first_name.charAt(0)}
-                                      {member.last_name.charAt(0)}
-                                    </div>
-                                  )}
-                                </div>
-                                <div>
-                                  <div className="font-medium">
-                                    {member.first_name}{" "}
-                                    {member.middle_name ? `${member.middle_name} ` : ""}
-                                    {member.last_name}
-                                  </div>
-                                  <div className="text-xs text-mute">{member.username}</div>
+                                <div className="h-10 w-10 rounded-full bg-border animate-pulse" />
+                                <div className="space-y-2">
+                                  <div className="h-3 w-32 rounded bg-border animate-pulse" />
+                                  <div className="h-3 w-20 rounded bg-border animate-pulse" />
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-4 align-top">
-                              <div className="flex flex-col gap-1">
-                                <Badge className="normal-case w-fit">{member.status}</Badge>
-                                {member.marital_status && (
-                                  <span className="text-xs text-mute">
-                                    {member.marital_status}
-                                  </span>
-                                )}
-                              </div>
+                            <td className="px-4 py-4">
+                              <div className="h-4 w-16 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4 text-sm text-mute align-top">
-                              <div className="font-medium">{member.family_count}</div>
-                              {member.household_size_override && (
-                                <div className="text-xs text-mute/70">
-                                  Override: {member.household_size_override}
-                                </div>
-                              )}
-                              <div className="text-xs uppercase tracking-wide text-mute/70">
-                                {member.has_father_confessor ? "Father Confessor assigned" : "No Father Confessor"}
-                              </div>
+                            <td className="px-4 py-4">
+                              <div className="h-4 w-16 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4 text-sm text-mute align-top">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.is_tither ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-border text-mute"}`}
-                                >
-                                  Tithe {member.is_tither ? "Yes" : "No"}
-                                </span>
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.pays_contribution ? "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" : "bg-border text-mute"}`}
-                                >
-                                  Contribution {member.pays_contribution ? "Yes" : "No"}
-                                </span>
-                              </div>
-                              {(member.contribution_method || member.contribution_amount !== undefined) && (
-                                <div className="text-xs text-mute mt-1 flex items-center gap-1">
-                                  <span>{member.contribution_method ?? "—"}</span>
-                                  <span>
-                                    · {member.contribution_currency} {member.contribution_amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                  {formatContributionException(member.contribution_exception_reason) && (
-                                    <span className="text-amber-600">· {formatContributionException(member.contribution_exception_reason)} exception</span>
-                                  )}
-                                </div>
-                              )}
+                            <td className="px-4 py-4">
+                              <div className="h-4 w-20 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4 text-sm text-mute space-y-1 align-top">
-                              {member.email && <div>{member.email}</div>}
-                              <div>{member.phone}</div>
+                            <td className="px-4 py-4">
+                              <div className="h-3 w-28 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4 text-sm text-mute align-top">
-                              {member.district || "—"}
-                              {(member.address_city || member.address_region) && (
-                                <div className="text-xs text-mute/70">
-                                  {[member.address_city, member.address_region]
-                                    .filter(Boolean)
-                                    .join(", ")}
-                                </div>
-                              )}
-                              {member.gender && (
-                                <div className="text-xs uppercase tracking-wide text-mute/70">
-                                  {member.gender}
-                                </div>
-                              )}
+                            <td className="px-4 py-4">
+                              <div className="h-3 w-24 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4 text-right align-top relative">
-                              <div className="flex justify-end">
-                                <Button
-                                  data-tour="members-row-menu"
-                                  variant="ghost"
-                                  className="p-2"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setRowMenu((prev) => (prev === member.id ? null : member.id));
-                                  }}
-                                >
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </div>
-                              {rowMenu === member.id && (
-                                <div
-                                  className="absolute right-4 mt-2 w-48 p-2 space-y-1 rounded-xl border border-border bg-card shadow-lg z-40"
-                                  onMouseLeave={() => setRowMenu(null)}
-                                >
-                                  <button
-                                    type="button"
-                                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      event.preventDefault();
-                                      setRowMenu(null);
-                                      handleRowClick(member.id);
-                                    }}
-                                  >
-                                    View profile
-                                  </button>
-                                  {permissions.editCore && (
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                        setRowMenu(null);
-                                        handleOpenHouseholdForMember(member);
-                                      }}
-                                    >
-                                      Manage household
-                                    </button>
-                                  )}
-                                  {permissions.editCore && (
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                        setRowMenu(null);
-                                        handleOpenSpouseDrawer(member);
-                                      }}
-                                    >
-                                      Manage spouse
-                                    </button>
-                                  )}
-                                  {permissions.editSpiritual && (
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                        openAssignModalForMember(member);
-                                      }}
-                                    >
-                                      Assign father confessor
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      event.preventDefault();
-                                      handleExportSingle(member);
-                                    }}
-                                  >
-                                    Export CSV
-                                  </button>
-                                  {canManage && (
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-600"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                        handleArchiveSingle(member.id);
-                                      }}
-                                    >
-                                      Archive member
-                                    </button>
-                                  )}
-                                </div>
-                              )}
+                            <td className="px-4 py-4 text-right">
+                              <div className="h-8 w-20 rounded bg-border animate-pulse" />
                             </td>
                           </tr>
-                        );
-                      })}
-                  </tbody>
+                        ))}
+
+                      {!loading &&
+                        rows.map((member) => {
+                          const selected = selectedIds.has(member.id);
+                          const url = avatarUrl(member.avatar_path);
+                          return (
+                            <tr
+                              key={member.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handleRowClick(member.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  handleRowClick(member.id);
+                                }
+                              }}
+                              className={`border-b border-border/60 last:border-none transition cursor-pointer hover:bg-accent/5 ${selected ? "bg-accent/10" : ""}`}
+                            >
+                              <td className="px-4 py-3">
+                                {canBulk && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleSelect(member.id);
+                                    }}
+                                    className="text-accent"
+                                  >
+                                    {selected ? (
+                                      <CheckSquare className="h-4 w-4" />
+                                    ) : (
+                                      <Square className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="h-10 w-10 rounded-full bg-border overflow-hidden">
+                                    {url ? (
+                                      <img
+                                        src={url}
+                                        alt={`${member.first_name} ${member.last_name}`}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="h-full w-full flex items-center justify-center text-xs text-mute">
+                                        {member.first_name.charAt(0)}
+                                        {member.last_name.charAt(0)}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div className="font-medium">
+                                      {member.first_name}{" "}
+                                      {member.middle_name ? `${member.middle_name} ` : ""}
+                                      {member.last_name}
+                                    </div>
+                                    <div className="text-xs text-mute">{member.username}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <div className="flex flex-col gap-1">
+                                  <Badge className="normal-case w-fit">{member.status}</Badge>
+                                  {member.marital_status && (
+                                    <span className="text-xs text-mute">
+                                      {member.marital_status}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-mute align-top">
+                                <div className="font-medium">{member.family_count}</div>
+                                {member.household_size_override && (
+                                  <div className="text-xs text-mute/70">
+                                    Override: {member.household_size_override}
+                                  </div>
+                                )}
+                                <div className="text-xs uppercase tracking-wide text-mute/70">
+                                  {member.has_father_confessor ? "Father Confessor assigned" : "No Father Confessor"}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-mute align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.is_tither ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-border text-mute"}`}
+                                  >
+                                    Tithe {member.is_tither ? "Yes" : "No"}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${member.pays_contribution ? "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" : "bg-border text-mute"}`}
+                                  >
+                                    Contribution {member.pays_contribution ? "Yes" : "No"}
+                                  </span>
+                                </div>
+                                {(member.contribution_method || member.contribution_amount !== undefined) && (
+                                  <div className="text-xs text-mute mt-1 flex items-center gap-1">
+                                    <span>{member.contribution_method ?? "—"}</span>
+                                    <span>
+                                      · {member.contribution_currency} {member.contribution_amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    {formatContributionException(member.contribution_exception_reason) && (
+                                      <span className="text-amber-600">· {formatContributionException(member.contribution_exception_reason)} exception</span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-sm text-mute space-y-1 align-top">
+                                {member.email && <div>{member.email}</div>}
+                                <div>{member.phone}</div>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-mute align-top">
+                                {member.district || "—"}
+                                {(member.address_city || member.address_region) && (
+                                  <div className="text-xs text-mute/70">
+                                    {[member.address_city, member.address_region]
+                                      .filter(Boolean)
+                                      .join(", ")}
+                                  </div>
+                                )}
+                                {member.gender && (
+                                  <div className="text-xs uppercase tracking-wide text-mute/70">
+                                    {member.gender}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-right align-top relative">
+                                <div className="flex justify-end">
+                                  <Button
+                                    data-tour="members-row-menu"
+                                    variant="ghost"
+                                    className="p-2"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setRowMenu((prev) => (prev === member.id ? null : member.id));
+                                    }}
+                                  >
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                {rowMenu === member.id && (
+                                  <div
+                                    className="absolute right-4 mt-2 w-48 p-2 space-y-1 rounded-xl border border-border bg-card shadow-lg z-40"
+                                    onMouseLeave={() => setRowMenu(null)}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        setRowMenu(null);
+                                        handleRowClick(member.id);
+                                      }}
+                                    >
+                                      View profile
+                                    </button>
+                                    {permissions.editCore && (
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          event.preventDefault();
+                                          setRowMenu(null);
+                                          handleOpenHouseholdForMember(member);
+                                        }}
+                                      >
+                                        Manage household
+                                      </button>
+                                    )}
+                                    {permissions.editCore && (
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          event.preventDefault();
+                                          setRowMenu(null);
+                                          handleOpenSpouseDrawer(member);
+                                        }}
+                                      >
+                                        Manage spouse
+                                      </button>
+                                    )}
+                                    {permissions.editSpiritual && (
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          event.preventDefault();
+                                          openAssignModalForMember(member);
+                                        }}
+                                      >
+                                        Assign father confessor
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/10 text-sm"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        handleExportSingle(member);
+                                      }}
+                                    >
+                                      Export CSV
+                                    </button>
+                                    {canManage && (
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-600"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          event.preventDefault();
+                                          handleArchiveSingle(member.id);
+                                        }}
+                                      >
+                                        Archive member
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
                   </table>
                 </div>
 
@@ -1787,13 +1800,17 @@ export default function MembersList() {
               <form onSubmit={handleAssignSubmit} className="space-y-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">Assign Father Confessor</h2>
-                    <p className="text-sm text-mute">
-                      {assignContext?.mode === "single"
-                        ? assignContext.memberName
-                        : `${selectedArray.length} members selected`}
-                    </p>
-                  </div>
+                    <h3 className="text-lg font-semibold">Assign Father Confessor</h3>
+                    {assignContext?.mode === "single" && "memberName" in assignContext && (
+                      <p className="text-sm text-mute">
+                        For <span className="text-foreground font-medium">{assignContext.memberName}</span>
+                      </p>
+                    )}
+                    {assignContext?.mode === "bulk" && (
+                      <p className="text-sm text-mute">
+                        For <span className="text-foreground font-medium">{selectedIds.size} members</span>
+                      </p>
+                    )}      </div>
                   <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
                     Close
                   </Button>

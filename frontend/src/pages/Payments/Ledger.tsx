@@ -38,6 +38,7 @@ type Filters = {
   end_date: string;
   method: string;
   status: string;
+  member_name: string;
 };
 
 const INITIAL_FILTERS: Filters = {
@@ -48,6 +49,7 @@ const INITIAL_FILTERS: Filters = {
   end_date: "",
   method: "",
   status: "",
+  member_name: "",
 };
 
 export default function PaymentsLedger() {
@@ -65,6 +67,8 @@ export default function PaymentsLedger() {
   const [recordSaving, setRecordSaving] = useState(false);
   const [correctionSaving, setCorrectionSaving] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [filterMemberOptions, setFilterMemberOptions] = useState<Member[]>([]);
+  const [filterMemberLoading, setFilterMemberLoading] = useState(false);
   const canRecordPayments = permissions.managePayments;
   const readOnlyAccess = permissions.viewPayments && !permissions.managePayments;
 
@@ -81,6 +85,7 @@ export default function PaymentsLedger() {
           end_date: filters.end_date || undefined,
           method: filters.method || undefined,
           status: filters.status || undefined,
+          member_name: filters.member_name || undefined,
         };
         const [types, ledger, summaryResponse] = await Promise.all([
           getPaymentServiceTypes(),
@@ -112,6 +117,40 @@ export default function PaymentsLedger() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!filters.member_name || filters.member_name.trim().length < 2) {
+      setFilterMemberOptions([]);
+      setFilterMemberLoading(false);
+      return;
+    }
+    // If member_id is set, we assume the name is already synced/selected, so don't search again
+    // unless the user is typing (which would have cleared member_id in the onChange handler)
+    if (filters.member_id) {
+      return;
+    }
+
+    let cancelled = false;
+    setFilterMemberLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const results = await searchMembers(filters.member_name.trim(), 6);
+        if (!cancelled) {
+          setFilterMemberOptions(results.items);
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!cancelled) {
+          setFilterMemberLoading(false);
+        }
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [filters.member_name, filters.member_id]);
+
   const handleDownloadReport = async () => {
     if (reporting) return;
     setReporting(true);
@@ -124,6 +163,7 @@ export default function PaymentsLedger() {
         end_date: filters.end_date || undefined,
         method: filters.method || undefined,
         status: filters.status || undefined,
+        member_name: filters.member_name || undefined,
       });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -244,6 +284,53 @@ export default function PaymentsLedger() {
                 </option>
               ))}
             </Select>
+          </div>
+          <div className="relative">
+            <label className="text-xs uppercase text-mute block mb-1">Member Name</label>
+            <Input
+              value={filters.member_name}
+              onChange={(event) => {
+                setFilters((prev) => ({
+                  ...prev,
+                  member_name: event.target.value,
+                  member_id: "", // Clear ID when typing to switch to text search
+                }));
+              }}
+              placeholder="Search by name"
+              autoComplete="off"
+            />
+            {filters.member_name.length >= 2 && !filters.member_id && (
+              <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-md shadow-lg max-h-48 overflow-auto">
+                {filterMemberLoading && (
+                  <div className="p-2 text-xs text-mute flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Searching...
+                  </div>
+                )}
+                {!filterMemberLoading && filterMemberOptions.length === 0 && (
+                  <div className="p-2 text-xs text-mute">No matches found</div>
+                )}
+                {!filterMemberLoading &&
+                  filterMemberOptions.map((member) => (
+                    <button
+                      key={member.id}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10 transition-colors border-b border-border/50 last:border-0"
+                      onClick={() => {
+                        setFilters((prev) => ({
+                          ...prev,
+                          member_name: `${member.first_name} ${member.last_name}`,
+                          member_id: String(member.id),
+                        }));
+                        setFilterMemberOptions([]);
+                      }}
+                    >
+                      <div className="font-medium">
+                        {member.first_name} {member.last_name}
+                      </div>
+                      <div className="text-xs text-mute">#{member.id}</div>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Member ID</label>
@@ -554,7 +641,7 @@ function RecordPaymentDialog({
       try {
         const results = await searchMembers(memberLookupQuery.trim(), 6);
         if (!cancelled) {
-          setMemberOptions(results);
+          setMemberOptions(results.items);
         }
       } catch (error) {
         console.error(error);

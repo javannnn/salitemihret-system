@@ -57,3 +57,13 @@ def require_super_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_super_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super Admin privileges required")
     return user
+
+
+def get_current_active_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Compatibility wrapper for routes that expect an "active" user dependency.
+    """
+    return get_current_user(credentials=credentials, db=db)

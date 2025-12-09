@@ -10,6 +10,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/whoami", response_model=WhoAmIResponse)
 def whoami(user: User = Depends(get_current_user)) -> WhoAmIResponse:
     return WhoAmIResponse(
+        id=user.id,
         user=user.email,
         username=user.username,
         full_name=user.full_name,

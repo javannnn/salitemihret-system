@@ -19,6 +19,7 @@ import { useToast } from "@/components/Toast";
 import { ROLE_OPTIONS, ROLE_LABELS } from "@/lib/roles";
 
 export default function UserDetail() {
+  const SUPER_ROLE = "SuperAdmin";
   const { id } = useParams();
   const userId = Number(id);
   const [user, setUser] = useState<AdminUserSummary | null>(null);
@@ -116,6 +117,24 @@ export default function UserDetail() {
   }, [user]);
 
   useEffect(() => {
+    const hasSuper = roleSelection.includes(SUPER_ROLE);
+    setSuperAdmin(hasSuper);
+  }, [roleSelection]);
+
+  useEffect(() => {
+    setRoleSelection((prev) => {
+      const hasSuper = prev.includes(SUPER_ROLE);
+      if (superAdmin && !hasSuper) {
+        return [...prev, SUPER_ROLE];
+      }
+      if (!superAdmin && hasSuper) {
+        return prev.filter((role) => role !== SUPER_ROLE);
+      }
+      return prev;
+    });
+  }, [superAdmin]);
+
+  useEffect(() => {
     const term = memberSearchTerm.trim();
     if (term.length < 2) {
       setMemberResults([]);
@@ -151,9 +170,14 @@ export default function UserDetail() {
   };
 
   const toggleRole = (roleName: string) => {
-    setRoleSelection((prev) =>
-      prev.includes(roleName) ? prev.filter((role) => role !== roleName) : [...prev, roleName]
-    );
+    setRoleSelection((prev) => {
+      const exists = prev.includes(roleName);
+      const next = exists ? prev.filter((role) => role !== roleName) : [...prev, roleName];
+      if (roleName === SUPER_ROLE) {
+        setSuperAdmin(!exists);
+      }
+      return next;
+    });
   };
 
   const handleSelectMemberResult = (member: AdminUserMemberSummary) => {

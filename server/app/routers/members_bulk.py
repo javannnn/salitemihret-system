@@ -23,6 +23,7 @@ from app.schemas.member import (
     ALLOWED_MEMBER_GENDERS,
     ALLOWED_MEMBER_STATUSES,
     ALLOWED_MEMBER_MARITAL_STATUSES,
+    VISIBLE_MEMBER_MARITAL_STATUSES,
     ALLOWED_CONTRIBUTION_METHODS,
     ALLOWED_CONTRIBUTION_EXCEPTION_REASONS,
     ChildPromotionCandidate,
@@ -322,7 +323,7 @@ def get_member_meta(
     return MemberMetaResponse(
         statuses=sorted(ALLOWED_MEMBER_STATUSES),
         genders=sorted(ALLOWED_MEMBER_GENDERS),
-        marital_statuses=sorted(ALLOWED_MEMBER_MARITAL_STATUSES),
+        marital_statuses=sorted(VISIBLE_MEMBER_MARITAL_STATUSES),
         payment_methods=sorted(ALLOWED_CONTRIBUTION_METHODS),
         contribution_exception_reasons=sorted(ALLOWED_CONTRIBUTION_EXCEPTION_REASONS),
         districts=districts,

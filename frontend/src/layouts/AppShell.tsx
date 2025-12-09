@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2 } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff } from "lucide-react";
 
-import { logout } from "@/lib/auth";
-import { Card, Button, Badge, Textarea } from "@/components/ui";
+import { logout, login } from "@/lib/auth";
+import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } from "@/lib/api";
-import { subscribeSessionExpired } from "@/lib/session";
+import { subscribeSessionExpired, resetSessionExpiryNotice } from "@/lib/session";
 import { useTour } from "@/context/TourContext";
 import { TourOverlay } from "@/components/Tour/TourOverlay";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { ChatProvider } from "@/context/ChatContext";
+import { ChatWidget } from "@/components/Chat/ChatWidget";
+import { useRecaptcha } from "@/hooks/useRecaptcha";
 
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
 
@@ -34,7 +37,11 @@ export default function AppShell() {
   const [licenseToken, setLicenseToken] = useState("");
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [reloginLoading, setReloginLoading] = useState(false);
   const tour = useTour();
+  const recaptcha = useRecaptcha();
 
   const initials = useMemo(() => {
     const source = user?.full_name || user?.username || user?.user || "";
@@ -47,6 +54,12 @@ export default function AppShell() {
   }, [user]);
 
   const navItems = useMemo(() => {
+    const canViewReports =
+      permissions.viewMembers ||
+      permissions.viewPayments ||
+      permissions.viewSponsorships ||
+      permissions.viewSchools;
+
     const items = [
       { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, visible: true },
       { label: "Members", to: "/members", icon: Users, visible: permissions.viewMembers },
@@ -63,7 +76,14 @@ export default function AppShell() {
         icon: GraduationCap,
         visible: permissions.viewSchools,
       },
+      {
+        label: "Reports",
+        to: "/admin/reports",
+        icon: BarChart3,
+        visible: canViewReports
+      },
       { label: "User Management", to: "/admin/users", icon: ShieldCheck, visible: isSuperAdmin },
+      { label: "Email", to: "/admin/email", icon: Mail, visible: isSuperAdmin },
     ];
     return items.filter((item) => item.visible);
   }, [
@@ -551,26 +571,116 @@ export default function AppShell() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
             >
-              <Card className="max-w-lg w-full p-6 space-y-4 border border-amber-300 bg-amber-50/95 text-amber-900">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-amber-100 flex items-center justify-center">
-                    <ShieldAlert className="h-6 w-6" />
+              <Card className="max-w-md w-full p-6 space-y-6 border border-amber-300 bg-amber-50/95 text-amber-900 shadow-2xl">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <ShieldAlert className="h-6 w-6 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-sm uppercase tracking-wide">Session expired</p>
-                    <h3 className="text-xl font-semibold">Time to sign in again</h3>
+                    <h3 className="text-lg font-bold text-amber-900">Session Expired</h3>
+                    <p className="text-sm text-amber-800/80">Please sign in again to continue working.</p>
                   </div>
                 </div>
-                <p className="text-sm">
-                  For your security we ended this session after a long period of inactivity. Save any notes, then sign in
-                  again to keep working.
-                </p>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button variant="ghost" onClick={() => window.location.reload()}>
-                    Reload page
-                  </Button>
-                  <Button onClick={logout}>Go to login</Button>
-                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!password) return;
+                    setReloginLoading(true);
+                    let token: string | undefined;
+                    if (recaptcha.siteKey) {
+                      try {
+                        token = await recaptcha.execute("login");
+                      } catch (err) {
+                        console.error("reCAPTCHA failed", err);
+                        toast.push("Verification failed. Please retry.", "error");
+                        setReloginLoading(false);
+                        return;
+                      }
+                    }
+
+                    try {
+                      await login(user?.user || "", password, token);
+                      resetSessionExpiryNotice();
+                      setSessionExpired(false);
+                      setPassword("");
+                      toast.push("Session restored", "info");
+                    } catch (error) {
+                      console.error(error);
+                      toast.push("Invalid password", "error");
+                    } finally {
+                      setReloginLoading(false);
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-amber-800/70">
+                      Account
+                    </label>
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-100/50 border border-amber-200/50">
+                      <div className="h-8 w-8 rounded-full bg-amber-200 flex items-center justify-center text-amber-800 font-bold text-xs">
+                        {initials}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-amber-900 truncate">
+                          {user?.full_name || user?.username}
+                        </div>
+                        <div className="text-xs text-amber-700 truncate">{user?.user}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-amber-800/70">
+                        Password
+                      </label>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="bg-white/80 border-amber-200 focus:border-amber-400 focus:ring-amber-400/20 pr-10"
+                        placeholder="Enter your password"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-800/60 hover:text-amber-900 transition-colors focus:outline-none"
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex-1 border-amber-200 hover:bg-amber-100/50 text-amber-900"
+                      onClick={logout}
+                    >
+                      Sign out
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={!password || reloginLoading}
+                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white border-transparent shadow-lg shadow-amber-900/10"
+                    >
+                      {reloginLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Signing in...
+                        </>
+                      ) : (
+                        "Resume Session"
+                      )}
+                    </Button>
+                  </div>
+                </form>
               </Card>
             </motion.div>
           </>
@@ -602,6 +712,9 @@ export default function AppShell() {
         </nav>
       )}
       <TourOverlay />
+      <ChatProvider>
+        <ChatWidget />
+      </ChatProvider>
     </div>
   );
 }

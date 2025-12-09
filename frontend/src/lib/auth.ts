@@ -1,6 +1,7 @@
 import { api, API_BASE, getToken, setToken } from "@/lib/api";
 
 export type WhoAmI = {
+  id: number;
   user: string;
   username: string;
   roles: string[];

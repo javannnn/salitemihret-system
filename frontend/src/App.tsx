@@ -20,6 +20,8 @@ const SponsorshipWorkspace = lazy(() => import("@/pages/Sponsorships"));
 const SchoolsWorkspace = lazy(() => import("@/pages/Schools"));
 const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
+const EmailClient = lazy(() => import("@/pages/Admin/Email/Client"));
+const ReportsClient = lazy(() => import("@/pages/Admin/Reports/Client"));
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
 
 export default function App() {
@@ -58,6 +60,22 @@ export default function App() {
             element={
               <ProtectedRoute requireSuperAdmin>
                 <UserDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/email"
+            element={
+              <ProtectedRoute requireSuperAdmin>
+                <EmailClient />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/reports"
+            element={
+              <ProtectedRoute>
+                <ReportsClient />
               </ProtectedRoute>
             }
           />

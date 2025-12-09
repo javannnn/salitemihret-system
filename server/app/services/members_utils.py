@@ -181,3 +181,26 @@ def find_member_duplicates(
         if len(matches) >= limit:
             break
     return matches
+
+
+def cleanup_archived_members(db: Session) -> int:
+    """Permanently delete members archived more than 5 years ago."""
+    from datetime import datetime, timedelta
+
+    cutoff_date = datetime.utcnow() - timedelta(days=5 * 365)
+    
+    # Find members to delete
+    members_to_delete = (
+        db.query(Member)
+        .filter(Member.deleted_at.isnot(None))
+        .filter(Member.deleted_at < cutoff_date)
+        .all()
+    )
+    
+    count = len(members_to_delete)
+    if count > 0:
+        for member in members_to_delete:
+            db.delete(member)
+        db.commit()
+        
+    return count

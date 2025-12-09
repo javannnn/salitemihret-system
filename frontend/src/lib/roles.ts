@@ -1,4 +1,5 @@
 export const ROLE_OPTIONS = [
+  "SuperAdmin",
   "Admin",
   "PublicRelations",
   "Registrar",
@@ -10,6 +11,7 @@ export const ROLE_OPTIONS = [
 ] as const;
 
 export const ROLE_LABELS: Record<string, string> = {
+  SuperAdmin: "Super Admin (full access)",
   Admin: "Admin",
   PublicRelations: "Public Relations",
   Registrar: "Registrar",

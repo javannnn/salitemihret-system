@@ -122,6 +122,46 @@ const normalizeCanadianInput = (input: string) => {
   return { digits, autoAdjusted: autoAdjusted || (!!digits && rawDigits !== digits) };
 };
 
+const formatCanadianPostalCode = (value: string) => {
+  if (!value) return "";
+
+  // Remove non-alphanumeric characters and convert to uppercase
+  let clean = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+
+  // Filter out invalid characters globally: D, F, I, O, Q, U
+  clean = clean.replace(/[DFIOQU]/g, "");
+
+  // Enforce first character restrictions: cannot be W or Z
+  if (clean.length > 0 && /[WZ]/.test(clean[0])) {
+    clean = clean.slice(1);
+  }
+
+  // Enforce alternating format: Letter-Number-Letter Number-Letter-Number
+  let formatted = "";
+  for (let i = 0; i < clean.length && i < 6; i++) {
+    const char = clean[i];
+    const isLetterPosition = i % 2 === 0; // 0, 2, 4 are letters
+
+    if (isLetterPosition) {
+      if (/[A-Z]/.test(char)) {
+        formatted += char;
+      }
+      // If it's a number in a letter position, we skip it (or could stop, but skipping feels better for typing)
+    } else {
+      if (/[0-9]/.test(char)) {
+        formatted += char;
+      }
+    }
+  }
+
+  // Add space after FSA (first 3 chars)
+  if (formatted.length > 3) {
+    formatted = `${formatted.slice(0, 3)} ${formatted.slice(3)}`;
+  }
+
+  return formatted;
+};
+
 type SpouseFormState = {
   first_name: string;
   last_name: string;
@@ -692,6 +732,17 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const openConfirm = (config: ConfirmConfig) => setConfirmConfig(config);
   const closeConfirm = () => setConfirmConfig(null);
   const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
+
+  const handlePostalCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const formatted = formatCanadianPostalCode(raw);
+
+    // Only update if the formatted value is different or if the user is deleting (to allow backspace)
+    // Actually, formatting on every change provides the best "force" experience
+    setMember((prev) => (prev ? { ...prev, address_postal_code: formatted } : null));
+    markDirty();
+  };
+
   const toggleSectionCollapse = useCallback((id: SectionId) => {
     setCollapsedSections((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
@@ -1396,6 +1447,44 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         toast.push("Select a father confessor or disable the flag");
         setUpdating(false);
         return;
+      }
+
+      if (member.birth_date) {
+        const birth = new Date(member.birth_date);
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const hasHadBirthday =
+          today.getMonth() > birth.getMonth() ||
+          (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+        if (!hasHadBirthday) {
+          age -= 1;
+        }
+        if (age < 18) {
+          toast.push("Members must be 18 years or older. Please add them as a child of an existing member.");
+          setUpdating(false);
+          return;
+        }
+      }
+
+      if (!disableCore) {
+        for (const child of childrenForm) {
+          if (child.birth_date) {
+            const birth = new Date(child.birth_date);
+            const today = new Date();
+            let age = today.getFullYear() - birth.getFullYear();
+            const hasHadBirthday =
+              today.getMonth() > birth.getMonth() ||
+              (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+            if (!hasHadBirthday) {
+              age -= 1;
+            }
+            if (age >= 18) {
+              toast.push(`Child ${child.first_name} is over 18. Please register them as an independent member.`);
+              setUpdating(false);
+              return;
+            }
+          }
+        }
       }
 
       if (!disableCore && member.marital_status === "Married") {
@@ -2150,7 +2239,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs uppercase text-mute">Postal code</label>
-                      <Input value={member.address_postal_code ?? ""} onChange={handleChange("address_postal_code")} disabled={disableCore} />
+                      <Input
+                        value={member.address_postal_code ?? ""}
+                        onChange={handlePostalCodeChange}
+                        disabled={disableCore}
+                        placeholder="A1A 1A1"
+                        maxLength={7}
+                      />
                     </div>
                     <div>
                       <label className="text-xs uppercase text-mute">Country</label>

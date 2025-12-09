@@ -126,6 +126,7 @@ def _apply_payment_filters(
     end_date: Optional[date] = None,
     method: Optional[str] = None,
     status_filter: Optional[str] = None,
+    member_name: Optional[str] = None,
 ) -> Query:
     if reference:
         query = query.filter(Payment.id == reference)
@@ -145,6 +146,11 @@ def _apply_payment_filters(
         query = query.filter(func.lower(Payment.method) == method.lower())
     if status_filter:
         query = query.filter(Payment.status == status_filter)
+    if member_name:
+        search = f"%{member_name}%"
+        query = query.join(Member).filter(
+            (Member.first_name.ilike(search)) | (Member.last_name.ilike(search))
+        )
     return query
 
 
@@ -202,6 +208,7 @@ def list_payments(
     end_date: Optional[date] = None,
     method: Optional[str] = None,
     status_filter: Optional[str] = None,
+    member_name: Optional[str] = None,
 ) -> PaymentListResponse:
     query = _apply_payment_filters(
         db,
@@ -213,6 +220,7 @@ def list_payments(
         end_date=end_date,
         method=method,
         status_filter=status_filter,
+        member_name=member_name,
     )
 
     total = query.count()
@@ -341,6 +349,7 @@ def get_payments_for_export(
     end_date: Optional[date] = None,
     method: Optional[str] = None,
     status_filter: Optional[str] = None,
+    member_name: Optional[str] = None,
 ) -> list[Payment]:
     query = _apply_payment_filters(
         db,
@@ -352,6 +361,7 @@ def get_payments_for_export(
         end_date=end_date,
         method=method,
         status_filter=status_filter,
+        member_name=member_name,
     )
     return query.all()
 

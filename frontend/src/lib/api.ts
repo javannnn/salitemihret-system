@@ -1087,13 +1087,12 @@ export async function updateMemberSpouse(
   });
 }
 
-export async function searchMembers(query: string, limit = 5): Promise<Member[]> {
+export async function searchMembers(query: string, limit = 5): Promise<Page<Member>> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   params.set("page_size", String(limit));
   params.set("sort", "-updated_at");
-  const response = await api<Page<Member>>(`/members?${params.toString()}`);
-  return response.items;
+  return api<Page<Member>>(`/members?${params.toString()}`);
 }
 
 export async function getPromotionPreview(withinDays = 30): Promise<ChildPromotionPreview> {
@@ -1198,6 +1197,7 @@ export type PaymentFilters = {
   service_type?: string;
   method?: string;
   status?: string;
+  member_name?: string;
   start_date?: string;
   end_date?: string;
 };
@@ -1363,11 +1363,13 @@ export type TokenResponse = { access_token: string; token_type: string };
 
 export async function inviteAccept(
   token: string,
-  payload: { full_name?: string; username?: string; password: string }
+  payload: { full_name?: string; username?: string; password: string },
+  signal?: AbortSignal
 ): Promise<TokenResponse> {
   return api<TokenResponse>(`/auth/invitations/${encodeURIComponent(token)}`, {
     method: "POST",
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
@@ -1622,4 +1624,136 @@ export async function listPublicSundaySchoolContent(type: SundaySchoolContent["t
   const path =
     type === "Mezmur" ? "/public/sunday-school/mezmur" : type === "Lesson" ? "/public/sunday-school/lessons" : "/public/sunday-school/art";
   return api<SundaySchoolContent[]>(path);
+}
+export type ChatMessageType = "text" | "image" | "file";
+
+export type Message = {
+  id: number;
+  sender_id: number;
+  recipient_id: number;
+  content: string;
+  timestamp: string;
+  is_read: boolean;
+  type?: ChatMessageType;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_mime?: string | null;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+};
+
+export type MessageCreatePayload = {
+  recipient_id: number;
+  content: string;
+  type?: ChatMessageType;
+};
+
+export async function sendMessage(payload: MessageCreatePayload): Promise<Message> {
+  return api<Message>("/chat/messages", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, type: payload.type ?? "text" }),
+  });
+}
+
+export async function uploadChatAttachment(recipientId: number, file: File): Promise<Message> {
+  const form = new FormData();
+  form.append("recipient_id", String(recipientId));
+  form.append("file", file);
+
+  return api<Message>("/chat/messages/upload", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export async function getMessages(otherUserId?: number): Promise<Message[]> {
+  const query = otherUserId ? `?other_user_id=${otherUserId}` : "";
+  return api<Message[]>(`/chat/messages${query}`);
+}
+
+export type ChatUser = {
+  id: number;
+  name: string;
+  avatar_url: string;
+  status: string;
+};
+
+export async function getChatUsers(): Promise<ChatUser[]> {
+  return api<ChatUser[]>("/chat/users");
+}
+
+export async function markMessageRead(messageId: number): Promise<Message> {
+  return api<Message>(`/chat/messages/${messageId}/read`, {
+    method: "PUT",
+  });
+}
+
+export async function deleteChatMessage(messageId: number): Promise<Message> {
+  return api<Message>(`/chat/messages/${messageId}`, {
+    method: "DELETE",
+  });
+}
+
+// Email (Super Admin)
+export type AdminEmailSummary = {
+  uid: string;
+  subject: string;
+  sender: string;
+  date?: string | null;
+  snippet: string;
+  has_html: boolean;
+  has_attachments: boolean;
+};
+
+export type AdminEmailDetail = {
+  uid: string;
+  subject: string;
+  sender: string;
+  to: string[];
+  cc: string[];
+  date?: string | null;
+  text_body: string;
+  html_body?: string | null;
+  headers: Record<string, string>;
+  has_attachments: boolean;
+};
+
+export type SendAdminEmailPayload = {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body_text?: string;
+  body_html?: string;
+  reply_to?: string;
+  audience?: "all_members" | "active_members" | "missing_phone" | "with_children" | "new_this_month";
+  attachments?: { filename: string; content_base64: string; content_type: string }[];
+};
+
+export async function getAdminInbox(limit = 25, folder?: string): Promise<AdminEmailSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (folder) params.set("folder", folder);
+  const response = await api<{ items: AdminEmailSummary[] }>(`/emails?${params.toString()}`);
+  return response.items;
+}
+
+export async function getAdminEmail(uid: string, folder?: string): Promise<AdminEmailDetail> {
+  const params = new URLSearchParams();
+  if (folder) params.set("folder", folder);
+  const suffix = params.toString();
+  return api<AdminEmailDetail>(`/emails/${encodeURIComponent(uid)}${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function sendAdminEmail(payload: SendAdminEmailPayload): Promise<void> {
+  const res = await api<{ status: string; refused?: string[] }>("/emails/send", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (res?.refused && res.refused.length) {
+    throw new ApiError(207, JSON.stringify({ refused: res.refused }));
+  }
+}
+
+export async function sendHeartbeat(): Promise<void> {
+  await api("/chat/heartbeat", { method: "POST" });
 }

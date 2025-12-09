@@ -20,3 +20,4 @@ from .schools import (  # noqa: F401
     SundaySchoolContent,
     SundaySchoolAuditLog,
 )
+from .chat import Message  # noqa: F401

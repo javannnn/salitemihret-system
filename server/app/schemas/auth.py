@@ -13,6 +13,7 @@ class TokenResponse(BaseModel):
 
 
 class WhoAmIResponse(BaseModel):
+    id: int
     user: EmailStr
     username: str
     roles: list[str]

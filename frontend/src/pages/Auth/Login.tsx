@@ -4,7 +4,7 @@ import { Input } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useTheme } from "@/context/ThemeContext";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, ArrowRight, Loader2, ShieldCheck, Lock, Moon, Sun } from "lucide-react";
+import { User, ArrowRight, Loader2, ShieldCheck, Lock, Moon, Sun, Eye, EyeOff } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
   { label: "Super Admin", email: "superadmin@example.com", password: "Demo123!", role: "Administrator" },
@@ -17,6 +17,7 @@ const DEMO_ACCOUNTS = [
 export default function LoginPage() {
   const [email, setEmail] = useState(DEMO_ACCOUNTS[0].email);
   const [password, setPassword] = useState(DEMO_ACCOUNTS[0].password);
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [recaptchaReady, setRecaptchaReady] = useState(false);
@@ -153,13 +154,13 @@ export default function LoginPage() {
                   setPassword(account.password);
                 }}
                 className={`group relative flex items-center gap-4 p-4 rounded-2xl text-left transition-all duration-300 border ${email === account.email
-                    ? "bg-white dark:bg-white/10 border-gray-300 dark:border-white/20 shadow-lg shadow-black/5 scale-[1.02]"
-                    : "bg-white/40 dark:bg-white/5 border-transparent hover:bg-white/80 dark:hover:bg-white/10 hover:scale-[1.01]"
+                  ? "bg-white dark:bg-white/10 border-gray-300 dark:border-white/20 shadow-lg shadow-black/5 scale-[1.02]"
+                  : "bg-white/40 dark:bg-white/5 border-transparent hover:bg-white/80 dark:hover:bg-white/10 hover:scale-[1.01]"
                   }`}
               >
                 <div className={`h-12 w-12 rounded-full grid place-items-center text-lg font-semibold transition-colors ${email === account.email
-                    ? "bg-black text-white dark:bg-white dark:text-black"
-                    : "bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400 group-hover:bg-gray-200 group-hover:text-gray-900 dark:group-hover:bg-white/20 dark:group-hover:text-white"
+                  ? "bg-black text-white dark:bg-white dark:text-black"
+                  : "bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400 group-hover:bg-gray-200 group-hover:text-gray-900 dark:group-hover:bg-white/20 dark:group-hover:text-white"
                   }`}>
                   {account.label.charAt(0)}
                 </div>
@@ -215,11 +216,18 @@ export default function LoginPage() {
                   <Input
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     required
-                    className="pl-10 h-12 bg-white/50 dark:bg-black/20 border-gray-200 dark:border-white/10 focus:border-black dark:focus:border-white focus:ring-4 focus:ring-black/5 dark:focus:ring-white/5 rounded-xl transition-all"
+                    className="pl-10 pr-10 h-12 bg-white/50 dark:bg-black/20 border-gray-200 dark:border-white/10 focus:border-black dark:focus:border-white focus:ring-4 focus:ring-black/5 dark:focus:ring-white/5 rounded-xl transition-all"
                     placeholder="••••••••"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus:outline-none"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 

@@ -12,7 +12,7 @@ from app.auth.security import hash_password, verify_password
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.member import Member
-from app.models.user import User, UserMemberLink, UserAuditLog, UserAuditAction
+from app.models.user import User, UserMemberLink, UserAuditLog, UserAuditActionEnum
 from app.schemas.account import (
     AccountProfileResponse,
     AccountMemberSummary,
@@ -174,7 +174,7 @@ def request_member_link(payload: MemberLinkRequest, user: User = Depends(get_cur
         UserAuditLog(
             actor_user_id=user.id,
             target_user_id=user.id,
-            action=UserAuditAction.LINK_REQUESTED,
+            action=UserAuditActionEnum.LINK_REQUESTED,
             payload={"member_id": payload.member_id, "notes": notes},
             created_at=now_utc(),
         )

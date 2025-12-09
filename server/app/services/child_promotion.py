@@ -122,7 +122,7 @@ def promote_child(
     )
     db.add(audit_child)
 
-    notify_child_turns_eighteen(child, parent, new_member)
+    notify_child_turns_eighteen(db, child, parent, new_member)
     return new_member
 
 

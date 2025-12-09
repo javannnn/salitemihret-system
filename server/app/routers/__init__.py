@@ -18,4 +18,5 @@ from app.routers import (  # noqa: F401
     reports,
     whoami,
     users,
+    emails,
 )
