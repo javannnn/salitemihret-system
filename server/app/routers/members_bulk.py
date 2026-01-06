@@ -40,6 +40,7 @@ from app.schemas.member import (
     MinistryOut,
 )
 from app.services.child_promotion import get_children_ready_for_promotion, promote_children_who_are_18
+from app.core.config import settings
 from app.services.members_import import import_members_from_csv
 from app.services.members_query import apply_member_sort, build_members_query
 
@@ -411,7 +412,7 @@ def _derive_action(entry: MemberAudit) -> str:
 
 @router.get("/promotions", response_model=ChildPromotionPreviewResponse, status_code=status.HTTP_200_OK)
 def preview_child_promotions(
-    within_days: int = Query(30, ge=0, le=365),
+    within_days: int = Query(settings.CHILD_PROMOTION_DIGEST_LOOKAHEAD_DAYS, ge=0, le=365),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*ADMIN_ROLES)),
 ) -> ChildPromotionPreviewResponse:

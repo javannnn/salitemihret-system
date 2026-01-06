@@ -118,7 +118,7 @@ export default function Dashboard() {
     }
     let cancelled = false;
     setPromotionsLoading(true);
-    getPromotionPreview(30)
+    getPromotionPreview()
       .then((data) => {
         if (!cancelled) setPromotions(data);
       })

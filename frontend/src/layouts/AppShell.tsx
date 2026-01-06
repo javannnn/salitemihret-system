@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus } from "lucide-react";
 
 import { logout, login } from "@/lib/auth";
 import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
@@ -17,9 +17,31 @@ import { TourOverlay } from "@/components/Tour/TourOverlay";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { ChatProvider } from "@/context/ChatContext";
 import { ChatWidget } from "@/components/Chat/ChatWidget";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useRecaptcha } from "@/hooks/useRecaptcha";
 
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
+
+const routePreloaders: Record<string, () => Promise<unknown>> = {
+  "/dashboard": () => import("@/pages/Dashboard"),
+  "/members": () => import("@/pages/Members/List"),
+  "/members/new": () => import("@/pages/Members/Create"),
+  "/payments": () => import("@/pages/Payments/Ledger"),
+  "/newcomers": () => import("@/pages/Newcomers"),
+  "/sponsorships": () => import("@/pages/Sponsorships"),
+  "/schools": () => import("@/pages/Schools"),
+  "/admin/users": () => import("@/pages/Admin/Users/List"),
+  "/admin/email": () => import("@/pages/Admin/Email/Client"),
+  "/admin/reports": () => import("@/pages/Admin/Reports/Client"),
+  "/account": () => import("@/pages/Account/Profile"),
+};
+
+const preloadRoute = (path: string) => {
+  const loader = routePreloaders[path];
+  if (loader) {
+    loader();
+  }
+};
 
 export default function AppShell() {
   const { user, loading } = useAuth();
@@ -65,10 +87,16 @@ export default function AppShell() {
       { label: "Members", to: "/members", icon: Users, visible: permissions.viewMembers },
       { label: "Payments", to: "/payments", icon: CreditCard, visible: permissions.viewPayments },
       {
+        label: "Newcomers",
+        to: "/newcomers",
+        icon: UserPlus,
+        visible: permissions.viewNewcomers || permissions.manageNewcomers,
+      },
+      {
         label: "Sponsorships",
         to: "/sponsorships",
         icon: HeartHandshake,
-        visible: permissions.viewSponsorships || permissions.viewNewcomers,
+        visible: permissions.viewSponsorships || permissions.manageSponsorships,
       },
       {
         label: "Schools",
@@ -91,7 +119,9 @@ export default function AppShell() {
     permissions.viewMembers,
     permissions.viewPayments,
     permissions.viewSponsorships,
+    permissions.manageSponsorships,
     permissions.viewNewcomers,
+    permissions.manageNewcomers,
     permissions.viewSchools,
   ]);
 
@@ -172,6 +202,20 @@ export default function AppShell() {
   useEffect(() => {
     setLicenseCollapsed(isMobile);
   }, [isMobile]);
+
+  useEffect(() => {
+    if (!navItems.length) return;
+    const idleCallback =
+      (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback ||
+      ((cb: () => void) => window.setTimeout(cb, 800));
+    const cancelIdle =
+      (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback ||
+      window.clearTimeout;
+    const handle = idleCallback(() => {
+      navItems.forEach((item) => preloadRoute(item.to));
+    });
+    return () => cancelIdle(handle);
+  }, [navItems]);
 
   const handleLicenseActivate = async () => {
     if (!licenseToken.trim()) {
@@ -268,6 +312,8 @@ export default function AppShell() {
             <NavLink
               key={item.to}
               to={item.to}
+              onMouseEnter={() => preloadRoute(item.to)}
+              onFocus={() => preloadRoute(item.to)}
               className={({ isActive }) =>
                 `relative group flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-200 overflow-hidden ${isActive
                   ? "bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg dark:from-slate-800 dark:to-slate-900 ring-1 ring-white/10"
@@ -325,25 +371,7 @@ export default function AppShell() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <motion.button
-              data-tour="theme-toggle"
-              className="h-10 w-10 flex items-center justify-center rounded-xl border border-border hover:border-accent/50 hover:bg-accent/10 transition overflow-hidden"
-              aria-label="Toggle theme"
-              onClick={toggleTheme}
-              whileTap={{ scale: 0.95 }}
-            >
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={theme}
-                  initial={{ y: -20, opacity: 0, rotate: -90 }}
-                  animate={{ y: 0, opacity: 1, rotate: 0 }}
-                  exit={{ y: 20, opacity: 0, rotate: 90 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
-                </motion.div>
-              </AnimatePresence>
-            </motion.button>
+            <ThemeToggle />
             <button
               data-tour="avatar-menu"
               className="relative h-12 w-12 flex items-center justify-center rounded-full bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500 text-white shadow-lg ring-2 ring-white/50 dark:from-slate-800 dark:via-slate-700 dark:to-slate-600"
@@ -479,13 +507,13 @@ export default function AppShell() {
           )}
         </div>
         <section className="px-6 lg:px-10 py-8">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="sync">
             <motion.div
               key={location.pathname}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.12 }}
               className="space-y-6"
             >
               <Outlet />
@@ -693,6 +721,8 @@ export default function AppShell() {
               <NavLink
                 key={item.to}
                 to={item.to}
+                onMouseEnter={() => preloadRoute(item.to)}
+                onFocus={() => preloadRoute(item.to)}
                 className={({ isActive }) =>
                   `flex-shrink-0 min-w-[80px] flex-1 rounded-xl px-2 py-1.5 text-xs font-medium transition ${isActive
                     ? "bg-ink text-card shadow-soft"

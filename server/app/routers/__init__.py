@@ -16,6 +16,7 @@ from app.routers import (  # noqa: F401
     sponsorships,
     sunday_school,
     reports,
+    staff,
     whoami,
     users,
     emails,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { getSponsorshipMetrics, SponsorshipMetrics } from "@/lib/api";
 import { StatCard } from "./StatCard";
-import { Heart, Users, PieChart as PieIcon, AlertCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Heart, PieChart as PieIcon, PauseCircle } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { useToast } from "@/components/Toast";
 
@@ -34,25 +34,40 @@ export function SponsorshipsReport() {
         return <div className="p-8 text-center text-muted">No sponsorship data available.</div>;
     }
 
+    const totalSlots = metrics.current_budget?.total_slots || 0;
+    const usedSlots = metrics.current_budget?.used_slots || 0;
+    const availableSlots = Math.max(0, totalSlots - usedSlots);
     const budgetData = [
-        { name: "Used", value: metrics.current_budget?.used_slots || 0, color: "#ef4444" },
-        { name: "Available", value: (metrics.current_budget?.total_slots || 0) - (metrics.current_budget?.used_slots || 0), color: "#10b981" },
+        { name: "Used", value: usedSlots, color: "#ef4444" },
+        { name: "Available", value: availableSlots, color: "#10b981" },
     ];
 
     return (
         <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <StatCard
-                    title="Active Sponsors"
-                    value={metrics.total_active_sponsors}
-                    icon={Users}
-                    description="Members currently sponsoring"
+                    title="Active Cases"
+                    value={metrics.active_cases}
+                    icon={Heart}
+                    description="Currently active sponsorships"
                 />
                 <StatCard
-                    title="Newcomers Sponsored"
-                    value={metrics.newcomers_sponsored}
-                    icon={Heart}
-                    description="Total beneficiaries"
+                    title="Submitted"
+                    value={metrics.submitted_cases}
+                    icon={Clock}
+                    description="Pending approval"
+                />
+                <StatCard
+                    title="Executed (Month)"
+                    value={metrics.month_executed}
+                    icon={CheckCircle2}
+                    description="Completed this month"
+                />
+                <StatCard
+                    title="Suspended Cases"
+                    value={metrics.suspended_cases}
+                    icon={PauseCircle}
+                    description="On hold"
                 />
                 <StatCard
                     title="Budget Utilization"
@@ -62,15 +77,8 @@ export function SponsorshipsReport() {
                     trend={{
                         value: metrics.budget_utilization_percent,
                         label: "used",
-                        positive: metrics.budget_utilization_percent < 90
+                        positive: metrics.budget_utilization_percent < 90,
                     }}
-                />
-                <StatCard
-                    title="Alerts"
-                    value={metrics.alerts.length}
-                    icon={AlertCircle}
-                    description="Issues requiring attention"
-                    trend={{ value: metrics.alerts.length, label: "alerts", positive: metrics.alerts.length === 0 }}
                 />
             </div>
 

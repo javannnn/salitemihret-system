@@ -25,7 +25,8 @@ def test_create_member_requires_registrar_or_admin(client, authorize, office_adm
     payload = {
         "first_name": "Lulit",
         "last_name": "Bekele",
-        "status": "Active",
+        "phone": "6135550188",
+        "pays_contribution": True,
     }
     response = client.post("/members", json=payload)
     assert response.status_code == 403
@@ -42,12 +43,14 @@ def test_create_member_success(client, authorize, registrar_user, db_session):
         "last_name": "Bekele",
         "status": "Active",
         "is_tither": True,
-        "contribution_method": "Bank",
-        "contribution_amount": 120.5,
-        "spouse": {"full_name": "Hailu Bekele"},
+        "phone": "6135550177",
+        "pays_contribution": True,
+        "contribution_method": "E-Transfer",
+        "contribution_amount": 75.0,
+        "spouse": {"first_name": "Hailu", "last_name": "Bekele"},
         "children": [
-            {"full_name": "Dawit Bekele", "birth_date": "2010-05-12"},
-            {"full_name": "Sara Bekele"},
+            {"first_name": "Dawit", "last_name": "Bekele", "birth_date": "2010-05-12"},
+            {"first_name": "Sara", "last_name": "Bekele"},
         ],
         "tag_ids": [tag.id],
         "ministry_ids": [ministry.id],
@@ -74,6 +77,8 @@ def test_create_member_future_birth_date(client, authorize, registrar_user):
         "last_name": "Person",
         "birth_date": date.today().replace(year=date.today().year + 1).isoformat(),
         "status": "Active",
+        "phone": "6135550166",
+        "pays_contribution": True,
     }
     response = client.post("/members", json=payload)
     assert response.status_code == 422
@@ -90,8 +95,8 @@ def test_update_member_regenerates_username(client, authorize, registrar_user, s
     assert member.username.startswith("selam.kebede")
 
 
-def test_patch_member_updates_status(client, authorize, registrar_user, sample_member, db_session):
-    authorize(registrar_user)
+def test_patch_member_updates_status(client, authorize, admin_user, sample_member, db_session):
+    authorize(admin_user)
     response = client.patch(
         f"/members/{sample_member.id}",
         json={"status": "Inactive"},
@@ -127,7 +132,7 @@ def test_restore_member(client, authorize, admin_user, sample_member, db_session
     assert response.status_code == 200
     restored = db_session.get(Member, sample_member.id)
     assert restored.deleted_at is None
-    assert restored.status == "Inactive"
+    assert restored.status == "Pending"
 
 
 def test_list_filter_by_gender_and_tag(client, authorize, office_admin_user, db_session, sample_member):

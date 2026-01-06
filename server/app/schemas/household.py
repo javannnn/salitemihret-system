@@ -47,7 +47,7 @@ class HouseholdDetail(HouseholdListItem):
 
 
 class HouseholdListResponse(BaseModel):
-    items: List[HouseholdOut]
+    items: List[HouseholdListItem]
     total: int
     page: int
     page_size: int

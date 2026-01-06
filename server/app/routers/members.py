@@ -57,7 +57,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/members", tags=["members"])
 
-READ_ROLES = ("PublicRelations", "OfficeAdmin", "Registrar", "Admin", "Clerk", "FinanceAdmin")
+READ_ROLES = (
+    "PublicRelations",
+    "OfficeAdmin",
+    "Registrar",
+    "Admin",
+    "Clerk",
+    "FinanceAdmin",
+    "SponsorshipCommittee",
+)
 WRITE_ROLES = ("PublicRelations", "Registrar", "Admin")
 DELETE_ROLES = ("PublicRelations", "Admin")
 FINANCE_ROLES = ("Admin", "FinanceAdmin")

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Download, Loader2 } from "lucide-react";
@@ -6,12 +6,14 @@ import { AlertCircle, Download, Loader2 } from "lucide-react";
 import { Card, Button, Input, Select, Badge } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
+import { getCache, setCache } from "@/lib/cache";
 import {
   Member,
   Payment,
   PaymentListResponse,
   PaymentServiceType,
   PaymentSummaryItem,
+  PaymentSummaryResponse,
   createPaymentEntry,
   correctPayment,
   getPaymentServiceTypes,
@@ -69,13 +71,15 @@ export default function PaymentsLedger() {
   const [reporting, setReporting] = useState(false);
   const [filterMemberOptions, setFilterMemberOptions] = useState<Member[]>([]);
   const [filterMemberLoading, setFilterMemberLoading] = useState(false);
+  const loadRequestRef = useRef(0);
   const canRecordPayments = permissions.managePayments;
   const readOnlyAccess = permissions.viewPayments && !permissions.managePayments;
 
   const loadData = useCallback(
     async (pageOverride?: number) => {
       if (!permissions.viewPayments) return;
-      setLoading(true);
+      const pageToLoad = pageOverride ?? page;
+      const requestId = ++loadRequestRef.current;
       try {
         const appliedFilters = {
           reference: filters.reference || undefined,
@@ -87,10 +91,40 @@ export default function PaymentsLedger() {
           status: filters.status || undefined,
           member_name: filters.member_name || undefined,
         };
+        const ledgerCacheKey = `payments:ledger:${JSON.stringify({
+          page: pageToLoad,
+          page_size: PAGE_SIZE,
+          reference: appliedFilters.reference || "",
+          service_type: appliedFilters.service_type || "",
+          member_id: appliedFilters.member_id ?? "",
+          start_date: appliedFilters.start_date || "",
+          end_date: appliedFilters.end_date || "",
+          method: appliedFilters.method || "",
+          status: appliedFilters.status || "",
+          member_name: appliedFilters.member_name || "",
+        })}`;
+        const summaryCacheKey = `payments:summary:${JSON.stringify({
+          start_date: appliedFilters.start_date || "",
+          end_date: appliedFilters.end_date || "",
+        })}`;
+        const cachedLedger = getCache<PaymentListResponse>(ledgerCacheKey);
+        const cachedTypes = getCache<PaymentServiceType[]>("payments:serviceTypes", 5 * 60_000);
+        const cachedSummary = getCache<PaymentSummaryResponse>(summaryCacheKey);
+        if (cachedTypes) {
+          setServiceTypes(cachedTypes);
+        }
+        if (cachedLedger) {
+          setData(cachedLedger);
+        }
+        if (cachedSummary) {
+          setSummary(cachedSummary.items);
+          setGrandTotal(cachedSummary.grand_total);
+        }
+        setLoading(!cachedLedger);
         const [types, ledger, summaryResponse] = await Promise.all([
           getPaymentServiceTypes(),
           listPayments({
-            page: pageOverride ?? page,
+            page: pageToLoad,
             page_size: PAGE_SIZE,
             ...appliedFilters,
           }),
@@ -99,15 +133,22 @@ export default function PaymentsLedger() {
             end_date: appliedFilters.end_date,
           }),
         ]);
+        if (requestId !== loadRequestRef.current) return;
         setServiceTypes(types);
         setData(ledger);
         setSummary(summaryResponse.items);
         setGrandTotal(summaryResponse.grand_total);
+        setCache("payments:serviceTypes", types);
+        setCache(ledgerCacheKey, ledger);
+        setCache(summaryCacheKey, summaryResponse);
       } catch (error) {
+        if (requestId !== loadRequestRef.current) return;
         console.error(error);
         toast.push("Failed to load payments ledger. Please refresh.");
       } finally {
-        setLoading(false);
+        if (requestId === loadRequestRef.current) {
+          setLoading(false);
+        }
       }
     },
     [filters, page, permissions.viewPayments, toast]

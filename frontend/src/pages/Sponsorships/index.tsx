@@ -1,163 +1,133 @@
-import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  AlertTriangle,
-  Bell,
+  CheckCircle2,
+  ChevronRight,
   Filter,
-  Globe,
-  HandHeart,
-  Handshake,
   Loader2,
-  Mail,
-  Megaphone,
-  MessageCircle,
-  PhoneCall,
   PlusCircle,
   RefreshCcw,
   Search,
-  Users,
+  XCircle,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
-import { PhoneInput } from "@/components/PhoneInput";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
+import { getCache, setCache } from "@/lib/cache";
 import {
+  ApiCapabilities,
+  ApiError,
+  Member,
+  NewcomerListResponse,
   Sponsorship,
   SponsorshipListResponse,
   SponsorshipMetrics,
-  SponsorshipMotivation,
-  SponsorshipNotesTemplate,
-  SponsorshipPledgeChannel,
-  SponsorshipProgram,
-  SponsorshipReminderChannel,
-  Member,
-  MemberDetail,
-  Priest,
-  listSponsorships,
-  getSponsorshipMetrics,
-  createSponsorship,
-  remindSponsorship,
-  Newcomer,
-  NewcomerListResponse,
-  listNewcomers,
+  SponsorshipPayload,
+  SponsorshipSponsorContext,
+  StaffSummary,
   createNewcomer,
-  updateNewcomer,
-  convertNewcomer,
-  ApiError,
-  api,
+  createSponsorship,
+  getApiCapabilities,
+  getSponsorContext,
+  getSponsorship,
+  getSponsorshipMetrics,
+  listNewcomers,
+  listSponsorships,
+  listStaff,
   searchMembers,
-  searchPriests,
+  transitionSponsorshipStatus,
+  updateSponsorship,
 } from "@/lib/api";
+import { parseApiFieldErrors } from "@/lib/formErrors";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import {
+  COUNTRY_OPTIONS,
+  COUNTY_OPTIONS,
+  LANGUAGE_OPTIONS,
+  PROVINCE_OPTIONS,
+  SPONSORSHIP_FREQUENCY_OPTIONS,
+  SPONSORSHIP_MOTIVATION_OPTIONS,
+  SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS,
+  SPONSORSHIP_PROGRAM_OPTIONS,
+  SPONSORSHIP_REMINDER_CHANNEL_OPTIONS,
+  VOLUNTEER_SERVICE_OPTIONS,
+} from "@/lib/options";
+import {
+  getCanonicalCanadianPhone,
+  hasValidEmail,
+  isLikelyPhoneNumber,
+  normalizeEmailInput,
+} from "@/lib/validation";
 
-type SponsorshipFormState = {
-  sponsor_member_id: string;
-  beneficiary_member_id: string;
-  newcomer_id: string;
+type WizardStep = 0 | 1 | 2 | 3;
+type BeneficiaryMode = "newcomer_existing" | "newcomer_create" | "member" | "external";
+
+type SponsorshipWizardForm = {
+  sponsor_member_id: number | null;
+  sponsor_name: string;
+  beneficiary_mode: BeneficiaryMode | null;
+  beneficiary_member_id: number | null;
+  newcomer_id: number | null;
   beneficiary_name: string;
-  father_of_repentance_id: string;
-  monthly_amount: string;
-  start_date: string;
-  frequency: "OneTime" | "Monthly" | "Quarterly" | "Yearly";
-  program: SponsorshipProgram;
-  pledge_channel: SponsorshipPledgeChannel;
-  reminder_channel: SponsorshipReminderChannel;
-  motivation: SponsorshipMotivation;
-  notes_template: SponsorshipNotesTemplate | "";
-  notes: string;
+  program: Sponsorship["program"] | "";
+  frequency: string;
+  pledge_channel: Sponsorship["pledge_channel"] | "";
+  reminder_channel: Sponsorship["reminder_channel"] | "";
+  motivation: Sponsorship["motivation"] | "";
   volunteer_services: string[];
   volunteer_service_other: string;
-  payment_information: string;
+  start_date: string;
+  end_date: string;
+  monthly_amount: string;
   budget_month: string;
   budget_year: string;
-  budget_month_year: string;
   budget_slots: string;
+  notes: string;
 };
 
-type NewcomerFormState = {
+type NewcomerQuickForm = {
   first_name: string;
   last_name: string;
+  family_size: string;
   contact_phone: string;
   contact_email: string;
-  arrival_date: string;
-  service_type: string;
-  notes: string;
+  preferred_language: string;
+  interpreter_required: boolean;
+  country: string;
+  county: string;
+  temporary_address_street: string;
+  temporary_address_city: string;
+  temporary_address_province: string;
+  temporary_address_postal_code: string;
+};
+type NewcomerQuickErrors = Partial<Record<keyof NewcomerQuickForm, string>>;
+
+type StatusModalState = {
+  open: boolean;
+  sponsorship: Sponsorship | null;
+  nextStatus: Sponsorship["status"] | null;
+  title: string;
+  reasonRequired: boolean;
 };
 
-type ConvertFormState = {
-  phone: string;
-  email: string;
-  status: string;
-  notes: string;
+type NewcomerListItem = NewcomerListResponse["items"][number];
+type SelectOption = { value: string; label: string };
+type BudgetDraft = { budget_slots: string; used_slots: string; budget_amount: string };
+
+const STATUS_STYLES: Record<Sponsorship["status"], string> = {
+  Draft: "bg-slate-50 text-slate-600 border-slate-200",
+  Submitted: "bg-amber-50 text-amber-700 border-amber-200",
+  Approved: "bg-sky-50 text-sky-700 border-sky-200",
+  Rejected: "bg-rose-50 text-rose-600 border-rose-200",
+  Active: "bg-emerald-50 text-emerald-600 border-emerald-200",
+  Suspended: "bg-orange-50 text-orange-700 border-orange-200",
+  Completed: "bg-zinc-50 text-zinc-600 border-zinc-200",
+  Closed: "bg-neutral-50 text-neutral-600 border-neutral-200",
 };
 
-const STATUS_ORDER: Array<Newcomer["status"]> = ["New", "InProgress", "Sponsored", "Converted", "Closed"];
-const FREQUENCIES: SponsorshipFormState["frequency"][] = ["Monthly", "Quarterly", "Yearly", "OneTime"];
-const PROGRAM_OPTIONS: Array<{ value: SponsorshipProgram; label: string; description: string }> = [
-  { value: "Education", label: "Education", description: "Scholarships, tutoring, youth enrichment." },
-  { value: "Nutrition", label: "Nutrition", description: "Groceries, meal stipends, pantry support." },
-  { value: "Healthcare", label: "Healthcare", description: "Clinic visits, medication, wellness aid." },
-  { value: "Housing", label: "Housing", description: "Rent, utilities, bedding, emergency shelter." },
-  { value: "EmergencyRelief", label: "Emergency relief", description: "Rapid response for crises and disasters." },
-  { value: "SpecialProjects", label: "Special projects", description: "Pilgrimages, seasonal drives, one-offs." },
-  { value: "Youth Scholarship", label: "Youth scholarship", description: "Youth-only scholarships and mentoring." },
-];
-const PLEDGE_CHANNELS: Array<{
-  value: SponsorshipPledgeChannel;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}> = [
-  { value: "InPerson", label: "In person", description: "Recorded during a visit or meeting.", icon: Handshake },
-  { value: "OnlinePortal", label: "Online portal", description: "Submitted via the parish site or app.", icon: Globe },
-  { value: "Phone", label: "Phone call", description: "Documented after a phone conversation.", icon: PhoneCall },
-  { value: "EventBooth", label: "Event booth", description: "Collected at an outreach or fundraiser.", icon: Megaphone },
-];
-const REMINDER_CHANNELS: Array<{
-  value: SponsorshipReminderChannel;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}> = [
-  { value: "Email", label: "Email", description: "Send the monthly digest email.", icon: Mail },
-  { value: "SMS", label: "SMS", description: "Short text nudges with pledge summary.", icon: MessageCircle },
-  { value: "Phone", label: "Phone", description: "Logged phone call reminder.", icon: PhoneCall },
-  { value: "WhatsApp", label: "WhatsApp", description: "Chat reminder for sponsors abroad.", icon: MessageCircle },
-];
-const MOTIVATION_OPTIONS: Array<{ value: SponsorshipMotivation; label: string; description: string }> = [
-  { value: "ParishInitiative", label: "Parish initiative", description: "Campaign-driven pledge." },
-  { value: "HonorMemorial", label: "Honor / memorial", description: "Gift made in someone's name." },
-  { value: "CommunityOutreach", label: "Community outreach", description: "Neighbourhood or civic effort." },
-  { value: "Corporate", label: "Corporate / business", description: "Company, workplace, or foundation." },
-  { value: "Other", label: "Other", description: "Custom reason (document in notes)." },
-];
-const NOTE_TEMPLATES: Array<{ value: SponsorshipNotesTemplate; label: string; body: string }> = [
-  {
-    value: "FollowUp",
-    label: "Follow-up",
-    body: "Checked in with sponsor about pledge progression and captured the agreed next step.",
-  },
-  {
-    value: "PaymentIssue",
-    label: "Payment issue",
-    body: "Sponsor reported a payment issue; coordinated with Finance to resolve before the next due date.",
-  },
-  {
-    value: "Gratitude",
-    label: "Gratitude",
-    body: "Sent gratitude update highlighting the beneficiary impact and upcoming parish gathering.",
-  },
-  {
-    value: "Escalation",
-    label: "Escalation",
-    body: "Escalated to PR leadership due to prolonged lapse; awaiting guidance on next contact.",
-  },
-];
-
-const VOLUNTEER_OPTIONS = ["Holy Day Cleanup", "General Service", "Meal Support"];
-const WIZARD_STEPS = ["Basics", "Program & Channels", "Budget & Review"];
+const PAGE_SIZE = 12;
 const MONTH_OPTIONS = [
   { value: "1", label: "January" },
   { value: "2", label: "February" },
@@ -173,2189 +143,2255 @@ const MONTH_OPTIONS = [
   { value: "12", label: "December" },
 ];
 const CURRENT_YEAR = new Date().getFullYear();
-const YEAR_OPTIONS = Array.from({ length: 5 }, (_, index) => {
-  const year = CURRENT_YEAR + index;
-  return { value: String(year), label: String(year) };
+const YEAR_OPTIONS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - 1 + index);
+const SLOT_OPTIONS = Array.from({ length: 100 }, (_, index) => index + 1);
+
+const emptyWizardForm = (): SponsorshipWizardForm => ({
+  sponsor_member_id: null,
+  sponsor_name: "",
+  beneficiary_mode: null,
+  beneficiary_member_id: null,
+  newcomer_id: null,
+  beneficiary_name: "",
+  program: "",
+  frequency: "Monthly",
+  pledge_channel: "",
+  reminder_channel: "Email",
+  motivation: "",
+  volunteer_services: [],
+  volunteer_service_other: "",
+  start_date: new Date().toISOString().slice(0, 10),
+  end_date: "",
+  monthly_amount: "150",
+  budget_month: "",
+  budget_year: "",
+  budget_slots: "",
+  notes: "",
 });
 
-function getDefaultSponsorshipForm(): SponsorshipFormState {
+const emptyNewcomerForm = (): NewcomerQuickForm => ({
+  first_name: "",
+  last_name: "",
+  family_size: "",
+  contact_phone: "",
+  contact_email: "",
+  preferred_language: "",
+  interpreter_required: false,
+  country: "",
+  county: "",
+  temporary_address_street: "",
+  temporary_address_city: "",
+  temporary_address_province: "",
+  temporary_address_postal_code: "",
+});
+
+const buildSponsorContextFallback = (member: Member): SponsorshipSponsorContext => ({
+  member_id: member.id,
+  member_name: `${member.first_name} ${member.last_name}`.trim(),
+  member_status: member.status,
+  last_sponsorship_id: null,
+  last_sponsorship_date: null,
+  last_sponsorship_status: null,
+  history_count_last_12_months: 0,
+  volunteer_services: [],
+  father_of_repentance_id: null,
+  father_of_repentance_name: null,
+  budget_usage: null,
+});
+
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+}
+
+function beneficiaryLabel(item: Sponsorship) {
+  if (item.newcomer) return `${item.newcomer.first_name} ${item.newcomer.last_name} (Newcomer)`;
+  if (item.beneficiary_member) {
+    return `${item.beneficiary_member.first_name} ${item.beneficiary_member.last_name} (Member)`;
+  }
+  return `${item.beneficiary_name} (External)`;
+}
+
+function nextActionLabel(status: Sponsorship["status"]) {
+  switch (status) {
+    case "Draft":
+      return "Continue";
+    case "Submitted":
+      return "Approve or Reject";
+    case "Approved":
+      return "Activate";
+    case "Active":
+      return "Suspend or Complete";
+    case "Suspended":
+      return "Resume";
+    case "Completed":
+      return "View";
+    default:
+      return "View";
+  }
+}
+
+function resolveOptionLabel(options: SelectOption[], value?: string | null) {
+  if (!value) return "—";
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function resolveBeneficiaryMode(record: Sponsorship): BeneficiaryMode {
+  if (record.newcomer) return "newcomer_existing";
+  if (record.beneficiary_member) return "member";
+  return "external";
+}
+
+function mapSponsorshipToWizardForm(record: Sponsorship): SponsorshipWizardForm {
   return {
-    sponsor_member_id: "",
-    beneficiary_member_id: "",
-    newcomer_id: "",
-    beneficiary_name: "",
-    father_of_repentance_id: "",
-    monthly_amount: "150",
-    start_date: new Date().toISOString().slice(0, 10),
-    frequency: "Monthly",
-    program: "Housing",
-    pledge_channel: "InPerson",
-    reminder_channel: "Email",
-    motivation: "ParishInitiative",
-    notes_template: "",
-    notes: "",
-    volunteer_services: [],
-    volunteer_service_other: "",
-    payment_information: "",
-    budget_month: "",
-    budget_year: "",
-    budget_month_year: "",
-    budget_slots: "",
+    sponsor_member_id: record.sponsor?.id ?? null,
+    sponsor_name: `${record.sponsor?.first_name ?? ""} ${record.sponsor?.last_name ?? ""}`.trim(),
+    beneficiary_mode: resolveBeneficiaryMode(record),
+    beneficiary_member_id: record.beneficiary_member?.id ?? null,
+    newcomer_id: record.newcomer?.id ?? null,
+    beneficiary_name: record.beneficiary_name || "",
+    program: record.program ?? "",
+    frequency: record.frequency || "Monthly",
+    pledge_channel: record.pledge_channel ?? "",
+    reminder_channel: record.reminder_channel ?? "",
+    motivation: record.motivation ?? "",
+    volunteer_services: record.volunteer_services ?? [],
+    volunteer_service_other: record.volunteer_service_other ?? "",
+    start_date: record.start_date || new Date().toISOString().slice(0, 10),
+    end_date: record.end_date || "",
+    monthly_amount: record.monthly_amount ? String(record.monthly_amount) : "",
+    budget_month: record.budget_month ? String(record.budget_month) : "",
+    budget_year: record.budget_year ? String(record.budget_year) : "",
+    budget_slots: record.budget_slots ? String(record.budget_slots) : "",
+    notes: record.notes || "",
   };
 }
 
-const PAGE_SIZE = 10;
-const DEFAULT_FILTERS = {
-  status: "Active",
-  program: "",
-  frequency: "",
-  hasNewcomer: "",
-  q: "",
-  startDate: "",
-  endDate: "",
-  page: 1,
-};
+function resolveDraftStep(record: Sponsorship): WizardStep {
+  const storedRaw = localStorage.getItem(`sponsorship_draft_step_${record.id}`);
+  if (storedRaw !== null && storedRaw.trim() !== "") {
+    const stored = Number(storedRaw);
+    if (!Number.isNaN(stored) && stored >= 0 && stored <= 3) {
+      return stored as WizardStep;
+    }
+  }
+  if (!record.beneficiary_name) {
+    return 1;
+  }
+  const hasDetails = Boolean(
+    record.program ||
+      record.frequency ||
+      record.pledge_channel ||
+      record.reminder_channel ||
+      record.motivation ||
+      record.monthly_amount ||
+      record.notes ||
+      record.budget_month ||
+      record.budget_year ||
+      record.budget_slots
+  );
+  return hasDetails ? 2 : 1;
+}
 
 export default function SponsorshipWorkspace() {
   const permissions = usePermissions();
   const toast = useToast();
-  const [sponsorships, setSponsorships] = useState<SponsorshipListResponse | null>(null);
-  const [sponsorshipLoading, setSponsorshipLoading] = useState(false);
-  const [filters, setFilters] = useState({ ...DEFAULT_FILTERS });
-  const [draftFilters, setDraftFilters] = useState(filters);
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const canView = permissions.viewSponsorships || permissions.manageSponsorships;
+  const canManage = permissions.manageSponsorships;
+  const canApprove = permissions.hasRole("Admin") || permissions.isSuperAdmin;
+
+  const viewParam = searchParams.get("view");
+  const [activeView, setActiveView] = useState<"cases" | "budget">(
+    viewParam === "budget" ? "budget" : "cases",
+  );
+
   const [metrics, setMetrics] = useState<SponsorshipMetrics | null>(null);
-  const [newcomers, setNewcomers] = useState<NewcomerListResponse | null>(null);
-  const [newcomerLoading, setNewcomerLoading] = useState(false);
-  const [showSponsorshipForm, setShowSponsorshipForm] = useState(false);
-  const [showNewcomerForm, setShowNewcomerForm] = useState(false);
-  const [convertTarget, setConvertTarget] = useState<Newcomer | null>(null);
+  const [sponsorships, setSponsorships] = useState<SponsorshipListResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [apiCaps, setApiCaps] = useState<ApiCapabilities | null>(null);
+  const [filters, setFilters] = useState({
+    status: "",
+    beneficiary_type: "",
+    sponsor_id: "",
+    county: "",
+    assigned_staff_id: "",
+    created_from: "",
+    created_to: "",
+    q: "",
+    page: 1,
+  });
+  const [staff, setStaff] = useState<StaffSummary[]>([]);
   const [sponsorSearch, setSponsorSearch] = useState("");
   const [sponsorResults, setSponsorResults] = useState<Member[]>([]);
-  const [sponsorLookupLoading, setSponsorLookupLoading] = useState(false);
-  const [sponsorshipForm, setSponsorshipForm] = useState<SponsorshipFormState>(getDefaultSponsorshipForm);
-  const [newcomerForm, setNewcomerForm] = useState<NewcomerFormState>({
-    first_name: "",
-    last_name: "",
-    contact_phone: "",
-    contact_email: "",
-    arrival_date: new Date().toISOString().slice(0, 10),
-    service_type: "Family Settlement",
-    notes: "",
+  const [sponsorSearchLoading, setSponsorSearchLoading] = useState(false);
+  const [sponsorSearchError, setSponsorSearchError] = useState<string | null>(null);
+  const [sponsorContextAvailable, setSponsorContextAvailable] = useState(true);
+
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState<WizardStep>(0);
+  const [wizardForm, setWizardForm] = useState<SponsorshipWizardForm>(emptyWizardForm);
+  const [sponsorContext, setSponsorContext] = useState<SponsorshipSponsorContext | null>(null);
+  const [wizardLoading, setWizardLoading] = useState(false);
+  const [wizardError, setWizardError] = useState<string | null>(null);
+  const [draftEditingId, setDraftEditingId] = useState<number | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+
+  const today = new Date();
+  const [budgetMonth, setBudgetMonth] = useState(String(today.getMonth() + 1));
+  const [budgetYear, setBudgetYear] = useState(String(today.getFullYear()));
+  const [budgetCases, setBudgetCases] = useState<SponsorshipListResponse | null>(null);
+  const [budgetLoading, setBudgetLoading] = useState(false);
+  const [budgetRefreshTick, setBudgetRefreshTick] = useState(0);
+  const [budgetEdits, setBudgetEdits] = useState<Record<number, BudgetDraft>>({});
+  const [budgetSavingId, setBudgetSavingId] = useState<number | null>(null);
+
+  const [beneficiarySearch, setBeneficiarySearch] = useState("");
+  const [beneficiaryResults, setBeneficiaryResults] = useState<NewcomerListResponse | null>(null);
+  const [beneficiaryLoading, setBeneficiaryLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberResults, setMemberResults] = useState<Member[]>([]);
+  const [memberSearchLoading, setMemberSearchLoading] = useState(false);
+  const [newcomerForm, setNewcomerForm] = useState<NewcomerQuickForm>(emptyNewcomerForm);
+  const [newcomerFieldErrors, setNewcomerFieldErrors] = useState<NewcomerQuickErrors>({});
+
+  const [statusModal, setStatusModal] = useState<StatusModalState>({
+    open: false,
+    sponsorship: null,
+    nextStatus: null,
+    title: "",
+    reasonRequired: false,
   });
-  const [convertForm, setConvertForm] = useState<ConvertFormState>({ phone: "", email: "", status: "Pending", notes: "" });
-  const [wizardStep, setWizardStep] = useState(0);
-  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const [selectedSponsorship, setSelectedSponsorship] = useState<Sponsorship | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedSponsor, setSelectedSponsor] = useState<Member | null>(null);
-  const [customVolunteerOptions, setCustomVolunteerOptions] = useState<string[]>([]);
-  const [sponsorError, setSponsorError] = useState<string | null>(null);
-  const [sponsorDetail, setSponsorDetail] = useState<MemberDetail | null>(null);
-  const [sponsorDetailLoading, setSponsorDetailLoading] = useState(false);
-  const [autoFatherLocked, setAutoFatherLocked] = useState(false);
-  const [priestOptions, setPriestOptions] = useState<Priest[]>([]);
-  const [priestLoading, setPriestLoading] = useState(false);
-  const [priestQuery, setPriestQuery] = useState("");
-  const resetSponsorshipForm = () => {
-    setSponsorshipForm(getDefaultSponsorshipForm());
-    setSponsorSearch("");
-    setSponsorResults([]);
-    setSelectedSponsor(null);
-    setCustomVolunteerOptions([]);
-    setSponsorError(null);
-    setSponsorDetail(null);
-    setAutoFatherLocked(false);
-    setSponsorDetailLoading(false);
-    setPriestQuery("");
-  };
-  const handleCloseSponsorshipModal = () => {
-    setShowSponsorshipForm(false);
-    resetSponsorshipForm();
-    setWizardStep(0);
-  };
-
-  const canViewBoard = permissions.viewSponsorships || permissions.manageSponsorships;
-  const canViewNewcomers = permissions.viewNewcomers || permissions.manageNewcomers;
+  const [statusReason, setStatusReason] = useState("");
+  const [statusSubmitting, setStatusSubmitting] = useState(false);
+  const listRequestRef = useRef(0);
+  const debouncedQuery = useDebouncedValue(filters.q, 350);
+  const debouncedSponsorSearch = useDebouncedValue(sponsorSearch.trim(), 300);
+  const debouncedMemberSearch = useDebouncedValue(memberSearch.trim(), 300);
+  const debouncedBeneficiarySearch = useDebouncedValue(beneficiarySearch.trim(), 300);
 
   useEffect(() => {
-    if (filterDrawerOpen) {
-      setDraftFilters(filters);
+    getApiCapabilities()
+      .then(setApiCaps)
+      .catch(() => setApiCaps({ supportsStaff: true, supportsSponsorContext: true, supportsSubmittedStatus: true }));
+  }, []);
+
+  const updateSearchParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const next = new URLSearchParams(searchParams);
+      Object.entries(updates).forEach(([key, value]) => {
+        if (!value) {
+          next.delete(key);
+        } else {
+          next.set(key, value);
+        }
+      });
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  useEffect(() => {
+    const nextView = viewParam === "budget" ? "budget" : "cases";
+    if (nextView !== activeView) {
+      setActiveView(nextView);
     }
-  }, [filterDrawerOpen, filters]);
+  }, [viewParam, activeView]);
+
+  const listPayload = useMemo(
+    () => ({
+      page: filters.page,
+      page_size: PAGE_SIZE,
+      status: filters.status || undefined,
+      beneficiary_type: filters.beneficiary_type || undefined,
+      sponsor_id: filters.sponsor_id ? Number(filters.sponsor_id) : undefined,
+      county: filters.county || undefined,
+      assigned_staff_id: filters.assigned_staff_id ? Number(filters.assigned_staff_id) : undefined,
+      created_from: filters.created_from || undefined,
+      created_to: filters.created_to || undefined,
+      q: debouncedQuery || undefined,
+    }),
+    [
+      filters.page,
+      filters.status,
+      filters.beneficiary_type,
+      filters.sponsor_id,
+      filters.county,
+      filters.assigned_staff_id,
+      filters.created_from,
+      filters.created_to,
+      debouncedQuery,
+    ]
+  );
+
+  const listCacheKey = useMemo(
+    () => `sponsorships:list:${JSON.stringify(listPayload)}`,
+    [listPayload]
+  );
+
+  const budgetListPayload = useMemo(
+    () => ({
+      page: 1,
+      page_size: 100,
+      budget_month: budgetMonth ? Number(budgetMonth) : undefined,
+      budget_year: budgetYear ? Number(budgetYear) : undefined,
+    }),
+    [budgetMonth, budgetYear]
+  );
+
+  const budgetCacheKey = useMemo(
+    () => `sponsorships:budget:${JSON.stringify(budgetListPayload)}`,
+    [budgetListPayload]
+  );
 
   useEffect(() => {
-    if (!canViewBoard) return;
-    const run = async () => {
-      setSponsorshipLoading(true);
-      try {
-        const data = await listSponsorships({
-          status: filters.status || undefined,
-          program: filters.program || undefined,
-          frequency: filters.frequency || undefined,
-          has_newcomer: filters.hasNewcomer === "" ? undefined : filters.hasNewcomer === "yes",
-          q: filters.q || undefined,
-          start_date: filters.startDate || undefined,
-          end_date: filters.endDate || undefined,
-          page: filters.page,
-          page_size: PAGE_SIZE,
-        });
-        setSponsorships(data);
-      } catch (error) {
+    if (!canView) return;
+    const cached = getCache<SponsorshipListResponse>(listCacheKey);
+    if (cached) {
+      setSponsorships(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    const requestId = ++listRequestRef.current;
+    listSponsorships(listPayload)
+      .then((response) => {
+        if (requestId !== listRequestRef.current) return;
+        setSponsorships(response);
+        setCache(listCacheKey, response);
+      })
+      .catch((error) => {
+        if (requestId !== listRequestRef.current) return;
         console.error(error);
-        toast.push("Unable to load sponsorships right now.");
-      } finally {
-        setSponsorshipLoading(false);
-      }
-    };
-    run();
-  }, [filters, canViewBoard, toast]);
+        toast.push("Unable to load sponsorship cases.");
+      })
+      .finally(() => {
+        if (requestId === listRequestRef.current) {
+          setLoading(false);
+        }
+      });
+  }, [listPayload, listCacheKey, canView, toast]);
 
   useEffect(() => {
-    if (!canViewBoard) return;
+    if (!canView || activeView !== "budget") return;
+    const cached = getCache<SponsorshipListResponse>(budgetCacheKey);
+    if (cached) {
+      setBudgetCases(cached);
+      setBudgetLoading(false);
+    } else {
+      setBudgetLoading(true);
+    }
+    let active = true;
+    listSponsorships(budgetListPayload)
+      .then((response) => {
+        if (!active) return;
+        setBudgetCases(response);
+        setCache(budgetCacheKey, response);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(error);
+        toast.push("Unable to load budget allocations.");
+      })
+      .finally(() => {
+        if (active) {
+          setBudgetLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [budgetListPayload, budgetCacheKey, activeView, canView, toast, budgetRefreshTick]);
+
+  useEffect(() => {
+    setBudgetEdits({});
+  }, [budgetMonth, budgetYear]);
+
+  useEffect(() => {
+    if (!canView) return;
+    const cachedMetrics = getCache<SponsorshipMetrics>("sponsorships:metrics", 60_000);
+    if (cachedMetrics) {
+      setMetrics(cachedMetrics);
+    }
     getSponsorshipMetrics()
-      .then(setMetrics)
+      .then((next) => {
+        setMetrics(next);
+        setCache("sponsorships:metrics", next);
+      })
       .catch((error) => {
         console.error(error);
         toast.push("Unable to load sponsorship metrics.");
       });
-  }, [canViewBoard, toast]);
+  }, [canView, toast]);
 
   useEffect(() => {
-    if (!canViewNewcomers) return;
-    const run = async () => {
-      setNewcomerLoading(true);
-      try {
-        const data = await listNewcomers({ page: 1, page_size: 40 });
-        setNewcomers(data);
-      } catch (error) {
-        console.error(error);
-        toast.push("Unable to load newcomer pipeline.");
-      } finally {
-        setNewcomerLoading(false);
-      }
-    };
-    run();
-  }, [canViewNewcomers, toast]);
-
-  useEffect(() => {
-    if (!showSponsorshipForm) {
-      setWizardStep(0);
+    if (!canView) return;
+    if (!apiCaps) return;
+    if (!apiCaps.supportsStaff) return;
+    const cachedStaff = getCache<StaffSummary[]>("staff:list", 5 * 60_000);
+    if (cachedStaff) {
+      setStaff(cachedStaff);
     }
-  }, [showSponsorshipForm]);
-
-  useEffect(() => {
-    if (sponsorSearch.trim().length < 2) {
-      setSponsorResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSponsorLookupLoading(true);
-    searchMembers(sponsorSearch.trim(), 5)
-      .then((results) => {
-        if (!cancelled) {
-          setSponsorResults(results);
-        }
+    listStaff()
+      .then((response) => {
+        setStaff(response.items);
+        setCache("staff:list", response.items);
       })
-      .catch((error) => console.error(error))
-      .finally(() => {
-        if (!cancelled) {
-          setSponsorLookupLoading(false);
-        }
+      .catch((error) => {
+        console.error(error);
       });
-    return () => {
-      cancelled = true;
-    };
+  }, [canView, apiCaps]);
+
+  useEffect(() => {
+    if (!sponsorSearch.trim()) {
+      setSponsorResults([]);
+      setSponsorSearchError(null);
+      setSponsorSearchLoading(false);
+    }
   }, [sponsorSearch]);
 
   useEffect(() => {
-    let cancelled = false;
-    setPriestLoading(true);
-    searchPriests("", 50)
-      .then((list) => {
-        if (!cancelled) {
-          setPriestOptions(list);
+    if (!debouncedSponsorSearch) return;
+    let active = true;
+    setSponsorSearchLoading(true);
+    setSponsorSearchError(null);
+    searchMembers(debouncedSponsorSearch)
+      .then((results) => {
+        if (active) {
+          setSponsorResults(results.items.slice(0, 6));
         }
       })
-      .catch((error) => {
-        console.error(error);
+      .catch(() => {
+        if (active) {
+          setSponsorSearchError("Unable to search members right now.");
+          setSponsorResults([]);
+        }
       })
       .finally(() => {
-        if (!cancelled) {
-          setPriestLoading(false);
+        if (active) {
+          setSponsorSearchLoading(false);
         }
       });
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, []);
+  }, [debouncedSponsorSearch]);
 
   useEffect(() => {
-    const sponsorId = Number(sponsorshipForm.sponsor_member_id);
-    if (!sponsorId || Number.isNaN(sponsorId)) {
-      setSponsorDetail(null);
-      if (!sponsorshipForm.sponsor_member_id) {
-        setSponsorError(null);
-      }
-      setAutoFatherLocked(false);
-      setPriestQuery("");
+    if (!memberSearch.trim() || wizardForm.beneficiary_mode !== "member") {
+      setMemberResults([]);
+      setMemberSearchLoading(false);
+    }
+  }, [memberSearch, wizardForm.beneficiary_mode]);
+
+  useEffect(() => {
+    if (!debouncedMemberSearch || wizardForm.beneficiary_mode !== "member") {
       return;
     }
-    let cancelled = false;
-    setSponsorDetailLoading(true);
-    api<MemberDetail>(`/members/${sponsorId}`)
-      .then((detail) => {
-        if (cancelled) return;
-        if (detail.id !== sponsorId) return;
-        setSponsorDetail(detail);
-        setSelectedSponsor(detail);
-        setSponsorSearch(`${detail.first_name} ${detail.last_name}`.trim());
-        if (detail.status !== "Active") {
-          setSponsorError("Sponsor must be marked Active before they can fund a sponsorship.");
-        } else {
-          setSponsorError(null);
-        }
-        if (detail.father_confessor) {
-          setAutoFatherLocked(true);
-          setSponsorshipForm((prev) => ({
-            ...prev,
-            father_of_repentance_id: String(detail.father_confessor?.id ?? ""),
-          }));
-          setPriestQuery(detail.father_confessor.full_name ?? "");
-        } else {
-          setAutoFatherLocked(false);
-          setPriestQuery("");
+    let active = true;
+    setMemberSearchLoading(true);
+    searchMembers(debouncedMemberSearch)
+      .then((results) => {
+        if (active) {
+          setMemberResults(results.items.slice(0, 6));
         }
       })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error(error);
-        setSponsorDetail(null);
-      })
+      .catch(() => null)
       .finally(() => {
-        if (!cancelled) {
-          setSponsorDetailLoading(false);
+        if (active) {
+          setMemberSearchLoading(false);
         }
       });
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [sponsorshipForm.sponsor_member_id]);
+  }, [debouncedMemberSearch, wizardForm.beneficiary_mode]);
 
-  const groupedNewcomers = useMemo(() => {
-    const map: Record<Newcomer["status"], Newcomer[]> = {
-      New: [],
-      InProgress: [],
-      Sponsored: [],
-      Converted: [],
-      Closed: [],
-    };
-    newcomers?.items.forEach((item) => {
-      map[item.status]?.push(item);
-    });
-    return map;
-  }, [newcomers]);
-
-  const combinedVolunteerOptions = useMemo(() => {
-    const deduped = new Map<string, string>();
-    VOLUNTEER_OPTIONS.forEach((option) => deduped.set(option.toLowerCase(), option));
-    customVolunteerOptions.forEach((option) => {
-      const key = option.toLowerCase();
-      if (!deduped.has(key)) {
-        deduped.set(key, option);
-      }
-    });
-    return Array.from(deduped.values());
-  }, [customVolunteerOptions]);
-
-  const volunteerSuggestions = useMemo(() => {
-    const value = sponsorshipForm.volunteer_service_other.trim().toLowerCase();
-    if (!value || value.length < 2) return [];
-    return combinedVolunteerOptions
-      .filter((option) => option.toLowerCase().includes(value) && option.toLowerCase() !== value)
-      .slice(0, 4);
-  }, [combinedVolunteerOptions, sponsorshipForm.volunteer_service_other]);
-
-  const filteredPriests = useMemo(() => {
-    if (!priestQuery.trim()) {
-      return priestOptions.slice(0, 6);
+  useEffect(() => {
+    if (!beneficiarySearch.trim() || wizardForm.beneficiary_mode !== "newcomer_existing") {
+      setBeneficiaryResults(null);
+      setBeneficiaryLoading(false);
     }
-    const term = priestQuery.trim().toLowerCase();
-    return priestOptions.filter((priest) => priest.full_name.toLowerCase().includes(term));
-  }, [priestOptions, priestQuery]);
+  }, [beneficiarySearch, wizardForm.beneficiary_mode]);
 
-  const selectedFatherName =
-    priestQuery ||
-    priestOptions.find((priest) => String(priest.id) === sponsorshipForm.father_of_repentance_id)?.full_name ||
-    "";
+  useEffect(() => {
+    if (!debouncedBeneficiarySearch || wizardForm.beneficiary_mode !== "newcomer_existing") {
+      return;
+    }
+    let active = true;
+    setBeneficiaryLoading(true);
+    listNewcomers({ q: debouncedBeneficiarySearch, page: 1, page_size: 6 })
+      .then((response) => {
+        if (active) {
+          setBeneficiaryResults(response);
+        }
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (active) {
+          setBeneficiaryLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedBeneficiarySearch, wizardForm.beneficiary_mode]);
 
-  const selectedBudgetMonthLabel =
-    MONTH_OPTIONS.find((option) => option.value === sponsorshipForm.budget_month)?.label ?? "";
+  useEffect(() => {
+    const draftParam = searchParams.get("draft");
+    if (!draftParam) return;
+    const draftId = Number(draftParam);
+    if (Number.isNaN(draftId)) {
+      updateSearchParams({ draft: null });
+      return;
+    }
+    if (draftEditingId === draftId && wizardOpen) {
+      return;
+    }
+    let active = true;
+    setDraftLoading(true);
+    getSponsorship(draftId)
+      .then(async (record) => {
+        if (!active) return;
+        if (record.status !== "Draft") {
+          toast.push("Only draft cases can be continued.");
+          updateSearchParams({ draft: null });
+          return;
+        }
+        setActiveView("cases");
+        updateSearchParams({ view: null });
+        setWizardOpen(true);
+        setWizardStep(resolveDraftStep(record));
+        setWizardForm(mapSponsorshipToWizardForm(record));
+        setWizardError(null);
+        setNewcomerFieldErrors({});
+        setDraftEditingId(record.id);
+        setSponsorSearch(`${record.sponsor.first_name} ${record.sponsor.last_name}`.trim());
+        setSponsorResults([]);
+        setSponsorContextAvailable(true);
 
-  const toggleVolunteerService = (service: string) => {
-    setSponsorshipForm((prev) => {
-      const exists = prev.volunteer_services.includes(service);
-      return {
-        ...prev,
-        volunteer_services: exists
-          ? prev.volunteer_services.filter((item) => item !== service)
-          : [...prev.volunteer_services, service],
-      };
-    });
-  };
+        const beneficiaryLabel = record.newcomer
+          ? `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim()
+          : record.beneficiary_member
+            ? `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim()
+            : record.beneficiary_name || "";
+        setBeneficiarySearch(record.newcomer ? beneficiaryLabel : "");
+        setMemberSearch(record.beneficiary_member ? beneficiaryLabel : "");
+        setBeneficiaryResults(null);
+        setMemberResults([]);
 
-  const handleVolunteerSuggestionApply = (service: string) => {
-    toggleVolunteerService(service);
-    setSponsorshipForm((prev) => ({ ...prev, volunteer_service_other: "" }));
-  };
+        const fallbackMember = {
+          id: record.sponsor.id,
+          first_name: record.sponsor.first_name,
+          last_name: record.sponsor.last_name,
+          status: record.sponsor_status ?? "Active",
+        } as Member;
+        setSponsorContext(buildSponsorContextFallback(fallbackMember));
 
-  const handleBudgetMonthSelect = (monthValue: string) => {
-    setSponsorshipForm((prev) => {
-      const nextMonth = prev.budget_month === monthValue ? "" : monthValue;
-      return {
-        ...prev,
-        budget_month: nextMonth,
-        budget_month_year: formatBudgetMonthYear(nextMonth, prev.budget_year),
-      };
-    });
-  };
-
-  const handlePriestSelect = (priest: Priest) => {
-    setSponsorshipForm((prev) => ({
-      ...prev,
-      father_of_repentance_id: String(priest.id),
-    }));
-    setPriestQuery(priest.full_name);
-  };
-
-  const handleClearFather = () => {
-    if (autoFatherLocked) return;
-    setSponsorshipForm((prev) => ({ ...prev, father_of_repentance_id: "" }));
-    setPriestQuery("");
-  };
-
-  const reloadNewcomers = () => {
-    if (!canViewNewcomers) return;
-    setNewcomerLoading(true);
-    listNewcomers({ page: 1, page_size: 40 })
-      .then(setNewcomers)
+        let caps = apiCaps;
+        if (!caps) {
+          try {
+            caps = await getApiCapabilities();
+            setApiCaps(caps);
+          } catch {
+            caps = null;
+          }
+        }
+        if (caps && !caps.supportsSponsorContext) {
+          setSponsorContextAvailable(false);
+          return;
+        }
+        try {
+          const context = await getSponsorContext(record.sponsor.id);
+          if (!active) return;
+          setSponsorContext(context);
+          if (context.member_status && context.member_status !== "Active") {
+            setWizardError("Sponsor must be Active before creating a case.");
+          }
+        } catch (error) {
+          if (!active) return;
+          if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
+            setSponsorContextAvailable(false);
+            return;
+          }
+          console.error(error);
+          toast.push("Unable to load sponsor context.");
+        }
+      })
       .catch((error) => {
         console.error(error);
-        toast.push("Unable to refresh newcomers.");
+        toast.push("Unable to open draft case.");
+        updateSearchParams({ draft: null });
       })
-      .finally(() => setNewcomerLoading(false));
-  };
-
-  const handleSponsorSelect = (member: Member) => {
-    setSelectedSponsor(member);
-    setSponsorDetail(null);
-    setSponsorshipForm((prev) => ({
-      ...prev,
-      sponsor_member_id: String(member.id),
-    }));
-    setSponsorError(null);
-    setAutoFatherLocked(false);
-    setPriestQuery("");
-    setSponsorSearch(`${member.first_name} ${member.last_name}`);
-    setSponsorResults([]);
-  };
-
-  const handleAddCustomVolunteer = () => {
-    const value = sponsorshipForm.volunteer_service_other.trim();
-    if (!value) {
-      toast.push("Enter a service name first.");
-      return;
-    }
-    const normalized = value.toLowerCase();
-    const existsInOptions = combinedVolunteerOptions.some(
-      (option) => option.toLowerCase() === normalized,
-    );
-    const existsInSelection = sponsorshipForm.volunteer_services.some(
-      (option) => option.toLowerCase() === normalized,
-    );
-    if (existsInOptions) {
-      toast.push(`"${value}" already exists—tap its chip instead.`);
-      return;
-    }
-    if (existsInSelection) {
-      toast.push("Service already added.");
-      return;
-    }
-    setCustomVolunteerOptions((prev) => [...prev, value]);
-    toggleVolunteerService(value);
-    setSponsorshipForm((prev) => ({ ...prev, volunteer_service_other: "" }));
-  };
-
-  const handleNewcomerPhoneChange = (value: string) => {
-    setNewcomerForm((prev) => ({ ...prev, contact_phone: value }));
-  };
-
-  const handleConvertPhoneChange = (value: string) => {
-    setConvertForm((prev) => ({ ...prev, phone: value }));
-  };
-
-  const handleFilterApply = () => {
-    setFilters({ ...draftFilters, page: 1 });
-    setFilterDrawerOpen(false);
-  };
-
-const handleFilterReset = () => {
-  const reset = { ...DEFAULT_FILTERS };
-  setDraftFilters(reset);
-  setFilters(reset);
-  setFilterDrawerOpen(false);
-};
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.body) {
-      try {
-        const parsed = JSON.parse(error.body);
-        if (parsed && typeof parsed === "object" && "detail" in parsed) {
-          return String(parsed.detail);
+      .finally(() => {
+        if (active) {
+          setDraftLoading(false);
         }
-      } catch {
-        // ignore parse issue, fall back to plain text
-      }
-      return error.body;
-    }
-    return fallback;
-  }
-  if (error instanceof Error) {
-    return error.message || fallback;
-  }
-  return fallback;
-}
-
-  const handleNotesTemplateApply = (value: SponsorshipNotesTemplate) => {
-    setSponsorshipForm((prev) => {
-      if (prev.notes_template === value) {
-        return { ...prev, notes_template: "", notes: prev.notes };
-      }
-      const template = NOTE_TEMPLATES.find((item) => item.value === value);
-      return { ...prev, notes_template: value, notes: template?.body ?? prev.notes };
-    });
-  };
-
-  const handleSponsorshipSubmit = async () => {
-    if (!validateWizardStep(2)) {
-      setWizardStep(2);
-      return;
-    }
-    if (!sponsorshipForm.sponsor_member_id) {
-      toast.push("Select a sponsor before saving.");
-      setWizardStep(0);
-      return;
-    }
-    const sponsorId = Number(sponsorshipForm.sponsor_member_id);
-    if (!sponsorId || Number.isNaN(sponsorId)) {
-      toast.push("Sponsor ID is required.");
-      setWizardStep(0);
-      return;
-    }
-    const beneficiaryId = sponsorshipForm.beneficiary_member_id ? Number(sponsorshipForm.beneficiary_member_id) : undefined;
-    const newcomerId = sponsorshipForm.newcomer_id ? Number(sponsorshipForm.newcomer_id) : undefined;
-    const monthlyAmount = Number(sponsorshipForm.monthly_amount);
-    const budgetMonth = sponsorshipForm.budget_month ? Number(sponsorshipForm.budget_month) : undefined;
-    const budgetYear = sponsorshipForm.budget_year ? Number(sponsorshipForm.budget_year) : undefined;
-    const budgetSlots = sponsorshipForm.budget_slots ? Number(sponsorshipForm.budget_slots) : undefined;
-    const volunteerServices = sponsorshipForm.volunteer_services.length ? sponsorshipForm.volunteer_services : undefined;
-    const fatherId = sponsorshipForm.father_of_repentance_id
-      ? Number(sponsorshipForm.father_of_repentance_id)
-      : undefined;
-    try {
-      await createSponsorship({
-        sponsor_member_id: sponsorId,
-        beneficiary_member_id: beneficiaryId || undefined,
-        newcomer_id: newcomerId || undefined,
-        beneficiary_name: sponsorshipForm.beneficiary_name || undefined,
-        father_of_repentance_id: fatherId,
-        monthly_amount: monthlyAmount,
-        start_date: sponsorshipForm.start_date,
-        frequency: sponsorshipForm.frequency,
-        status: "Active",
-        program: sponsorshipForm.program,
-        pledge_channel: sponsorshipForm.pledge_channel,
-        reminder_channel: sponsorshipForm.reminder_channel,
-        motivation: sponsorshipForm.motivation,
-        volunteer_services: volunteerServices,
-        volunteer_service_other: sponsorshipForm.volunteer_service_other || undefined,
-        payment_information: sponsorshipForm.payment_information || undefined,
-        budget_month: budgetMonth,
-        budget_year: budgetYear,
-        budget_slots: budgetSlots,
-        notes_template: sponsorshipForm.notes_template || undefined,
-        notes: sponsorshipForm.notes || undefined,
       });
-      toast.push("Sponsorship saved.");
-      setFilters((prev) => ({ ...prev }));
-      handleCloseSponsorshipModal();
-    } catch (error) {
-      console.error(error);
-      const friendly = getErrorMessage(error, "Could not create sponsorship.");
-      if (friendly.toLowerCase().includes("sponsor must")) {
-        setSponsorError(friendly);
-        setWizardStep(0);
-      }
-      toast.push(friendly);
-    }
-  };
-
-  const handleNewcomerSubmit = async () => {
-    if (!newcomerForm.contact_phone && !newcomerForm.contact_email) {
-      toast.push("Provide at least a phone or email.");
-      return;
-    }
-    try {
-      await createNewcomer({
-        first_name: newcomerForm.first_name.trim(),
-        last_name: newcomerForm.last_name.trim(),
-        contact_phone: newcomerForm.contact_phone || undefined,
-        contact_email: newcomerForm.contact_email || undefined,
-        arrival_date: newcomerForm.arrival_date,
-        service_type: newcomerForm.service_type || undefined,
-        notes: newcomerForm.notes || undefined,
-        status: "New",
-      });
-      toast.push("Newcomer registered.");
-      setShowNewcomerForm(false);
-      setNewcomers(null);
-      reloadNewcomers();
-    } catch (error) {
-      console.error(error);
-      toast.push("Could not save newcomer.");
-    }
-  };
-
-  const handleConvertSubmit = async () => {
-    if (!convertTarget) return;
-    try {
-      await convertNewcomer(convertTarget.id, {
-        phone: convertForm.phone || undefined,
-        email: convertForm.email || undefined,
-        status: convertForm.status || undefined,
-        notes: convertForm.notes || undefined,
-      });
-      toast.push("Newcomer converted to member.");
-      setConvertTarget(null);
-      reloadNewcomers();
-      setFilters((prev) => ({ ...prev }));
-    } catch (error) {
-      console.error(error);
-      toast.push("Conversion failed.");
-    }
-  };
-
-  const handleAdvanceStatus = async (record: Newcomer, nextStatus: Newcomer["status"]) => {
-    try {
-      await updateNewcomer(record.id, { status: nextStatus });
-      toast.push(`Marked newcomer as ${nextStatus}.`);
-      reloadNewcomers();
-    } catch (error) {
-      console.error(error);
-      toast.push("Unable to update newcomer.");
-    }
-  };
-
-  const handleRemind = async (id: number) => {
-    try {
-      await remindSponsorship(id);
-      toast.push("Reminder queued.");
-      setFilters((prev) => ({ ...prev }));
-    } catch (error) {
-      console.error(error);
-      toast.push(getErrorMessage(error, "Failed to trigger reminder."));
-    }
-  };
-
-  const validateWizardStep = (step: number, options: { silent?: boolean } = {}): boolean => {
-    const notify = (message: string) => {
-      if (!options.silent) {
-        toast.push(message);
-      }
+    return () => {
+      active = false;
     };
-    const currentSponsorStatus = sponsorDetail?.status ?? selectedSponsor?.status;
-    if (step === 0) {
-      if (!sponsorshipForm.sponsor_member_id) {
-        const message = "Select a sponsor before continuing.";
-        setSponsorError(message);
-        notify(message);
-        return false;
-      }
-      if (currentSponsorStatus && currentSponsorStatus !== "Active") {
-        const message = "Sponsor must be marked Active before they can fund a sponsorship.";
-        setSponsorError(message);
-        notify(message);
-        return false;
-      }
-      setSponsorError(null);
-      if (!sponsorshipForm.monthly_amount || Number(sponsorshipForm.monthly_amount) <= 0) {
-        notify("Monthly amount must be greater than zero.");
-        return false;
-      }
-      if (!sponsorshipForm.start_date) {
-        notify("Choose a start date.");
-        return false;
-      }
-      if (
-        !sponsorshipForm.beneficiary_member_id &&
-        !sponsorshipForm.newcomer_id &&
-        !sponsorshipForm.beneficiary_name.trim()
-      ) {
-        notify("Provide a beneficiary member, newcomer, or fallback name.");
-        return false;
-      }
-    }
-    if (step === 1) {
-      if (!sponsorshipForm.program) {
-        notify("Select a sponsorship program.");
-        return false;
-      }
-      if (!sponsorshipForm.pledge_channel) {
-        notify("Select a pledge channel.");
-        return false;
-      }
-      if (!sponsorshipForm.reminder_channel) {
-        notify("Select a reminder channel.");
-        return false;
-      }
-    }
-    if (step === 2) {
-      if (
-        (sponsorshipForm.budget_month && !sponsorshipForm.budget_year) ||
-        (!sponsorshipForm.budget_month && sponsorshipForm.budget_year)
-      ) {
-        notify("Provide both budget month and year, or leave both blank.");
-        return false;
-      }
-      if (sponsorshipForm.budget_slots && Number(sponsorshipForm.budget_slots) <= 0) {
-        notify("Budget slots must be positive when provided.");
-        return false;
-      }
-      if (sponsorshipForm.motivation === "Other" && !sponsorshipForm.notes.trim()) {
-        notify("Add a short note when using Other motivation.");
-        return false;
-      }
-    }
-    return true;
-  };
+  }, [searchParams, draftEditingId, wizardOpen, updateSearchParams, toast, apiCaps]);
 
-  const handleNextStep = () => {
-    if (validateWizardStep(wizardStep)) {
-      setWizardStep((prev) => Math.min(WIZARD_STEPS.length - 1, prev + 1));
-    }
-  };
+  const budgetTotals = useMemo(() => {
+    const items = budgetCases?.items ?? [];
+    const totals = { slots: 0, used: 0, amount: 0 };
+    items.forEach((item) => {
+      totals.slots += item.budget_slots ?? 0;
+      totals.used += item.used_slots ?? 0;
+      totals.amount += item.budget_amount ?? 0;
+    });
+    const utilization = totals.slots > 0 ? Math.round((totals.used / totals.slots) * 1000) / 10 : 0;
+    return { ...totals, utilization };
+  }, [budgetCases]);
 
-  if (!canViewBoard && !canViewNewcomers) {
+  if (!canView) {
     return <Navigate to="/dashboard" replace />;
   }
 
+  const totalPages = sponsorships ? Math.ceil(sponsorships.total / PAGE_SIZE) : 1;
+  const activeFilters = [
+    filters.status && `Status: ${filters.status}`,
+    filters.beneficiary_type && `Beneficiary: ${filters.beneficiary_type}`,
+    filters.sponsor_id && `Sponsor ID: ${filters.sponsor_id}`,
+    filters.county && `County: ${filters.county}`,
+    filters.assigned_staff_id && `Assigned ID: ${filters.assigned_staff_id}`,
+    filters.created_from && `From ${filters.created_from}`,
+    filters.created_to && `To ${filters.created_to}`,
+  ].filter(Boolean);
+
+  const handleRefresh = () => {
+    setFilters((prev) => ({ ...prev }));
+    if (activeView === "budget") {
+      setBudgetRefreshTick((prev) => prev + 1);
+    }
+  };
+
+  const handleViewChange = (view: "cases" | "budget") => {
+    setActiveView(view);
+    updateSearchParams({ view: view === "budget" ? "budget" : null });
+  };
+
+  const handleWizardOpen = () => {
+    setDraftEditingId(null);
+    setActiveView("cases");
+    updateSearchParams({ draft: null, view: null });
+    setWizardOpen(true);
+    setWizardStep(0);
+    setWizardForm(emptyWizardForm());
+    setWizardError(null);
+    setSponsorContext(null);
+    setSponsorSearch("");
+    setSponsorResults([]);
+    setBeneficiarySearch("");
+    setBeneficiaryResults(null);
+    setMemberSearch("");
+    setMemberResults([]);
+    setNewcomerForm(emptyNewcomerForm());
+    setNewcomerFieldErrors({});
+  };
+
+  const handleWizardClose = () => {
+    setWizardOpen(false);
+    setDraftEditingId(null);
+    updateSearchParams({ draft: null });
+  };
+
+  const getBudgetDraft = useCallback(
+    (item: Sponsorship): BudgetDraft => {
+      return (
+        budgetEdits[item.id] ?? {
+          budget_slots: item.budget_slots ? String(item.budget_slots) : "",
+          used_slots: item.used_slots !== undefined && item.used_slots !== null ? String(item.used_slots) : "",
+          budget_amount: item.budget_amount !== null && item.budget_amount !== undefined ? String(item.budget_amount) : "",
+        }
+      );
+    },
+    [budgetEdits],
+  );
+
+  const handleBudgetFieldChange = (id: number, field: keyof BudgetDraft, value: string) => {
+    setBudgetEdits((prev) => {
+      const current = prev[id] ?? { budget_slots: "", used_slots: "", budget_amount: "" };
+      return { ...prev, [id]: { ...current, [field]: value } };
+    });
+  };
+
+  const handleBudgetSave = async (item: Sponsorship) => {
+    const draft = getBudgetDraft(item);
+    const nextSlots = draft.budget_slots.trim();
+    const nextUsed = draft.used_slots.trim();
+    const nextAmount = draft.budget_amount.trim();
+    const payload: Partial<SponsorshipPayload> = {};
+
+    if (nextSlots) {
+      const parsed = Number(nextSlots);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        toast.push("Budget slots must be a positive number.");
+        return;
+      }
+      payload.budget_slots = parsed;
+    }
+    if (nextUsed !== "") {
+      const parsed = Number(nextUsed);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        toast.push("Used slots must be a non-negative number.");
+        return;
+      }
+      const slotLimit = payload.budget_slots ?? item.budget_slots;
+      if (slotLimit && parsed > slotLimit) {
+        toast.push("Used slots cannot exceed budget slots.");
+        return;
+      }
+      payload.used_slots = parsed;
+    }
+    if (nextAmount) {
+      const parsed = Number(nextAmount);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.push("Budget amount must be greater than 0.");
+        return;
+      }
+      payload.budget_amount = parsed;
+    }
+    if (Object.keys(payload).length === 0) {
+      toast.push("No budget changes to save.");
+      return;
+    }
+    setBudgetSavingId(item.id);
+    try {
+      const updated = await updateSponsorship(item.id, payload);
+      setBudgetCases((prev) =>
+        prev
+          ? { ...prev, items: prev.items.map((entry) => (entry.id === updated.id ? updated : entry)) }
+          : prev
+      );
+      setBudgetEdits((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      toast.push("Budget updated.");
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to update budget.");
+    } finally {
+      setBudgetSavingId(null);
+    }
+  };
+
+  const clearNewcomerFieldError = (field: keyof NewcomerQuickForm) => {
+    setNewcomerFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    if (wizardError) {
+      setWizardError(null);
+    }
+  };
+
+  const newcomerFieldClass = (field: keyof NewcomerQuickForm) =>
+    newcomerFieldErrors[field] ? "border-rose-300 focus:border-rose-500 focus:shadow-rose-200" : "";
+
+  const handleNewcomerSelect = (newcomer: NewcomerListItem) => {
+    const label = `${newcomer.first_name} ${newcomer.last_name}`.trim();
+    setWizardForm((prev) => ({
+      ...prev,
+      beneficiary_mode: "newcomer_existing",
+      newcomer_id: newcomer.id,
+      beneficiary_member_id: null,
+      beneficiary_name: label,
+    }));
+    setBeneficiarySearch(label);
+    setBeneficiaryResults(null);
+    setWizardError(null);
+  };
+
+  const handleMemberSelect = (member: Member) => {
+    const label = `${member.first_name} ${member.last_name}`.trim();
+    setWizardForm((prev) => ({
+      ...prev,
+      beneficiary_mode: "member",
+      beneficiary_member_id: member.id,
+      newcomer_id: null,
+      beneficiary_name: label,
+    }));
+    setMemberSearch(label);
+    setMemberResults([]);
+    setWizardError(null);
+  };
+
+  const toggleVolunteerService = (service: string) => {
+    setWizardForm((prev) => {
+      const exists = prev.volunteer_services.includes(service);
+      const updated = exists
+        ? prev.volunteer_services.filter((item) => item !== service)
+        : [...prev.volunteer_services, service];
+      return { ...prev, volunteer_services: updated };
+    });
+  };
+
+  const handleSponsorSelect = async (member: Member) => {
+    setWizardForm((prev) => ({
+      ...prev,
+      sponsor_member_id: member.id,
+      sponsor_name: `${member.first_name} ${member.last_name}`.trim(),
+    }));
+    setSponsorSearch(`${member.first_name} ${member.last_name}`.trim());
+    setSponsorResults([]);
+    let caps = apiCaps;
+    if (!caps) {
+      try {
+        caps = await getApiCapabilities();
+        setApiCaps(caps);
+      } catch {
+        caps = null;
+      }
+    }
+    if (caps && !caps.supportsSponsorContext) {
+      setSponsorContextAvailable(false);
+    }
+    if (!sponsorContextAvailable || (caps && !caps.supportsSponsorContext)) {
+      const fallback = buildSponsorContextFallback(member);
+      setSponsorContext(fallback);
+      if (fallback.member_status !== "Active") {
+        setWizardError("Sponsor must be Active before creating a case.");
+      } else {
+        setWizardError(null);
+      }
+      return;
+    }
+    try {
+      const context = await getSponsorContext(member.id);
+      setSponsorContext(context);
+      if (context.member_status && context.member_status !== "Active") {
+        setWizardError("Sponsor must be Active before creating a case.");
+      } else {
+        setWizardError(null);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
+        setSponsorContextAvailable(false);
+        const fallback = buildSponsorContextFallback(member);
+        setSponsorContext(fallback);
+        if (fallback.member_status !== "Active") {
+          setWizardError("Sponsor must be Active before creating a case.");
+        } else {
+          setWizardError(null);
+        }
+        return;
+      }
+      console.error(error);
+      setWizardError("Unable to load sponsor context.");
+    }
+  };
+
+  const sponsorBlocked = !sponsorContext || sponsorContext.member_status !== "Active";
+
+  const isUnsupportedSubmittedError = (error: unknown) => {
+    if (!(error instanceof ApiError) || error.status !== 422 || !error.body) return false;
+    try {
+      const payload = JSON.parse(error.body) as { detail?: Array<{ loc?: string[]; input?: string }> };
+      return Boolean(
+        payload.detail?.some(
+          (item) => Array.isArray(item.loc) && item.loc.includes("status") && item.input === "Submitted",
+        ),
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const handleCreateNewcomer = async () => {
+    const fieldErrors: NewcomerQuickErrors = {};
+    const firstName = newcomerForm.first_name.trim();
+    const lastName = newcomerForm.last_name.trim();
+    const emailInput = newcomerForm.contact_email.trim();
+    const normalizedEmail = emailInput ? normalizeEmailInput(emailInput) : "";
+    const phoneInput = newcomerForm.contact_phone.trim();
+    const canonicalPhone = phoneInput ? getCanonicalCanadianPhone(phoneInput) : null;
+
+    if (!firstName) {
+      fieldErrors.first_name = "First name is required.";
+    }
+    if (!lastName) {
+      fieldErrors.last_name = "Last name is required.";
+    }
+    if (emailInput && !hasValidEmail(normalizedEmail)) {
+      fieldErrors.contact_email = "Enter a valid email address.";
+    }
+    if (phoneInput && !canonicalPhone && !isLikelyPhoneNumber(phoneInput)) {
+      fieldErrors.contact_phone = "Enter a valid phone number (ex: +1 5551234567).";
+    }
+    if (newcomerForm.family_size) {
+      const size = Number(newcomerForm.family_size);
+      if (!Number.isInteger(size) || size < 1 || size > 20) {
+        fieldErrors.family_size = "Family size must be between 1 and 20.";
+      }
+    }
+
+    const missingContact = !phoneInput && !emailInput;
+    const hasFieldErrors = Object.keys(fieldErrors).length > 0;
+    if (missingContact || hasFieldErrors) {
+      setNewcomerFieldErrors(fieldErrors);
+      if (missingContact) {
+        setWizardError("Provide a phone or email for the newcomer.");
+      } else {
+        setWizardError("Fix the highlighted fields.");
+      }
+      return;
+    }
+
+    setWizardLoading(true);
+    setWizardError(null);
+    setNewcomerFieldErrors({});
+    try {
+      const newcomer = await createNewcomer({
+        first_name: firstName,
+        last_name: lastName,
+        family_size: newcomerForm.family_size ? Number(newcomerForm.family_size) : undefined,
+        contact_phone: canonicalPhone || phoneInput || undefined,
+        contact_email: normalizedEmail || undefined,
+        preferred_language: newcomerForm.preferred_language || undefined,
+        interpreter_required: newcomerForm.interpreter_required,
+        country: newcomerForm.country || undefined,
+        county: newcomerForm.county || undefined,
+        temporary_address_street: newcomerForm.temporary_address_street || undefined,
+        temporary_address_city: newcomerForm.temporary_address_city || undefined,
+        temporary_address_province: newcomerForm.temporary_address_province || undefined,
+        temporary_address_postal_code: newcomerForm.temporary_address_postal_code || undefined,
+        arrival_date: new Date().toISOString().slice(0, 10),
+      });
+      setWizardForm((prev) => ({
+        ...prev,
+        newcomer_id: newcomer.id,
+        beneficiary_name: `${newcomer.first_name} ${newcomer.last_name}`.trim(),
+        beneficiary_mode: "newcomer_existing",
+      }));
+      setWizardStep(2);
+    } catch (error) {
+      console.error(error);
+      const parsed = parseApiFieldErrors(error);
+      if (parsed) {
+        setNewcomerFieldErrors(parsed.fieldErrors as NewcomerQuickErrors);
+        setWizardError(parsed.formError || "Fix the highlighted fields.");
+        return;
+      }
+      if (error instanceof ApiError) {
+        setWizardError(error.body || "Unable to create newcomer.");
+      } else {
+        setWizardError("Unable to create newcomer.");
+      }
+    } finally {
+      setWizardLoading(false);
+    }
+  };
+
+  const handleWizardSubmit = async (status: Sponsorship["status"]) => {
+    if (!wizardForm.sponsor_member_id) {
+      setWizardError("Select a sponsor to continue.");
+      return;
+    }
+    if (!wizardForm.beneficiary_mode) {
+      setWizardError("Select a beneficiary to continue.");
+      return;
+    }
+    if (!wizardForm.beneficiary_name.trim()) {
+      setWizardError("Provide a beneficiary name.");
+      return;
+    }
+    if (!wizardForm.monthly_amount.trim()) {
+      setWizardError("Provide a pledge amount.");
+      return;
+    }
+    setWizardLoading(true);
+    setWizardError(null);
+    const submitPayload = (statusToSend: Sponsorship["status"]) => ({
+        sponsor_member_id: wizardForm.sponsor_member_id,
+        beneficiary_member_id: wizardForm.beneficiary_member_id || undefined,
+        newcomer_id: wizardForm.newcomer_id || undefined,
+        beneficiary_name: wizardForm.beneficiary_name,
+        monthly_amount: Number(wizardForm.monthly_amount),
+        start_date: wizardForm.start_date || new Date().toISOString().slice(0, 10),
+        end_date: wizardForm.end_date || undefined,
+        frequency: wizardForm.frequency,
+        program: wizardForm.program || undefined,
+        pledge_channel: wizardForm.pledge_channel || undefined,
+        reminder_channel: wizardForm.reminder_channel || undefined,
+        motivation: wizardForm.motivation || undefined,
+        volunteer_services: wizardForm.volunteer_services.length ? wizardForm.volunteer_services : undefined,
+        volunteer_service_other: wizardForm.volunteer_service_other || undefined,
+        budget_month: wizardForm.budget_month ? Number(wizardForm.budget_month) : undefined,
+        budget_year: wizardForm.budget_year ? Number(wizardForm.budget_year) : undefined,
+        budget_slots: wizardForm.budget_slots ? Number(wizardForm.budget_slots) : undefined,
+        notes: wizardForm.notes || undefined,
+        status: statusToSend,
+      });
+    try {
+      const statusToSend =
+        !draftEditingId && status === "Submitted" && apiCaps?.supportsSubmittedStatus === false
+          ? "Active"
+          : status;
+      let saved: Sponsorship | null = null;
+      if (draftEditingId) {
+        const payload = submitPayload(statusToSend);
+        const { status: _status, ...updatePayload } = payload;
+        saved = await updateSponsorship(draftEditingId, updatePayload);
+        if (statusToSend !== "Draft") {
+          saved = await transitionSponsorshipStatus(draftEditingId, { status: statusToSend });
+        }
+      } else {
+        saved = await createSponsorship(submitPayload(statusToSend));
+      }
+      if (saved) {
+        if (statusToSend === "Draft") {
+          localStorage.setItem(`sponsorship_draft_step_${saved.id}`, String(wizardStep));
+          toast.push(draftEditingId ? "Draft updated." : "Draft saved.");
+        } else {
+          localStorage.removeItem(`sponsorship_draft_step_${saved.id}`);
+          toast.push("Sponsorship submitted.");
+        }
+      }
+      handleWizardClose();
+      handleRefresh();
+    } catch (error) {
+      if (!draftEditingId && status === "Submitted" && isUnsupportedSubmittedError(error)) {
+        setApiCaps((prev) =>
+          prev ? { ...prev, supportsSubmittedStatus: false } : { supportsStaff: true, supportsSponsorContext: true, supportsSubmittedStatus: false },
+        );
+        try {
+          const saved = await createSponsorship(submitPayload("Active"));
+          localStorage.removeItem(`sponsorship_draft_step_${saved.id}`);
+          toast.push("Sponsorship submitted.");
+          handleWizardClose();
+          handleRefresh();
+          return;
+        } catch (fallbackError) {
+          console.error(fallbackError);
+        }
+      }
+      console.error(error);
+      if (error instanceof ApiError) {
+        setWizardError(error.body || "Unable to save sponsorship.");
+      } else {
+        setWizardError("Unable to save sponsorship.");
+      }
+    } finally {
+      setWizardLoading(false);
+    }
+  };
+
+  const openStatusModal = (sponsorship: Sponsorship, nextStatus: Sponsorship["status"], title: string, reasonRequired: boolean) => {
+    setStatusReason("");
+    setStatusModal({ open: true, sponsorship, nextStatus, title, reasonRequired });
+  };
+
+  const handleStatusTransition = async () => {
+    if (!statusModal.sponsorship || !statusModal.nextStatus) return;
+    if (statusModal.reasonRequired && !statusReason.trim()) {
+      return;
+    }
+    setStatusSubmitting(true);
+    try {
+      await transitionSponsorshipStatus(statusModal.sponsorship.id, {
+        status: statusModal.nextStatus,
+        reason: statusReason.trim() || undefined,
+      });
+      toast.push("Case updated.");
+      setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false });
+      handleRefresh();
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to update case.");
+    } finally {
+      setStatusSubmitting(false);
+    }
+  };
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4" data-tour="sponsorship-metrics">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Sponsorship Management</h1>
-          <p className="text-sm text-mute">Pair sponsors with beneficiaries, track newcomer settlement, and monitor budgets.</p>
+          <p className="text-sm text-mute">Case-based sponsorship tracking with sponsor and beneficiary context.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={() => setFilterDrawerOpen(true)}>
-            <Filter className="h-4 w-4" />
-            Filters
-          </Button>
-          <Button variant="ghost" onClick={() => setFilters((prev) => ({ ...prev }))}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-          {permissions.manageNewcomers && (
-            <Button variant="ghost" onClick={() => setShowNewcomerForm(true)}>
-              <PlusCircle className="h-4 w-4" />
-              New newcomer
+          <div className="flex items-center gap-2">
+            <Button
+              variant={activeView === "cases" ? "solid" : "ghost"}
+              onClick={() => handleViewChange("cases")}
+            >
+              Cases
+            </Button>
+            <Button
+              variant={activeView === "budget" ? "solid" : "ghost"}
+              onClick={() => handleViewChange("budget")}
+            >
+              Budget
+            </Button>
+          </div>
+          {draftLoading && (
+            <Badge variant="outline" className="text-xs">
+              Opening draft...
+            </Badge>
+          )}
+          {activeView === "cases" && (
+            <Button variant="ghost" onClick={() => setFilterOpen((prev) => !prev)}>
+              <Filter className="h-4 w-4 mr-2" /> Filters
             </Button>
           )}
-          {permissions.manageSponsorships && (
-            <Button
-              data-tour="sponsorship-wizard"
-              onClick={() => {
-                resetSponsorshipForm();
-                setShowSponsorshipForm(true);
-              }}
-            >
-              <HandHeart className="h-4 w-4" />
-              New sponsorship
+          <Button variant="ghost" onClick={handleRefresh}>
+            <RefreshCcw className="h-4 w-4 mr-2" /> Refresh
+          </Button>
+          {canManage && (
+            <Button onClick={handleWizardOpen}>
+              <PlusCircle className="h-4 w-4 mr-2" /> New Sponsorship
             </Button>
           )}
         </div>
       </div>
 
-      {canViewBoard && (
+      <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-5">
+        <Card className="p-4">
+          <p className="text-xs uppercase text-mute">Active cases</p>
+          <p className="text-2xl font-semibold">{metrics?.active_cases ?? "—"}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase text-mute">Submitted</p>
+          <p className="text-2xl font-semibold">{metrics?.submitted_cases ?? "—"}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase text-mute">This month executed</p>
+          <p className="text-2xl font-semibold">{metrics?.month_executed ?? "—"}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase text-mute">Budget utilization</p>
+          <p className="text-2xl font-semibold">
+            {metrics?.budget_utilization_percent ?? "—"}
+            {metrics ? "%" : ""}
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase text-mute">Suspended cases</p>
+          <p className="text-2xl font-semibold">{metrics?.suspended_cases ?? "—"}</p>
+        </Card>
+      </div>
+
+      {activeView === "cases" && (
         <>
-          <div className="grid gap-4 md:grid-cols-4" data-tour="sponsorship-filters">
-            <MetricCard
-              icon={Users}
-              label="Active sponsors"
-              value={metrics?.total_active_sponsors ?? sponsorships?.total ?? 0}
-            />
-            <MetricCard
-              icon={HandHeart}
-              label="Newcomers sponsored"
-              value={metrics?.newcomers_sponsored ?? 0}
-            />
-            <MetricCard
-              icon={Bell}
-              label="This month's sponsorships"
-              value={metrics?.month_sponsorships ?? 0}
-            />
-            <MetricCard
-              icon={Megaphone}
-              label="Budget utilization"
-              value={`${metrics?.budget_utilization_percent?.toFixed(0) ?? 0}%`}
-              description={
-                metrics?.current_budget
-                  ? `${metrics.current_budget.used_slots}/${metrics.current_budget.total_slots || 0} slots`
-                  : "No budget set"
-              }
+          <Card className="p-4 space-y-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-2 w-full md:max-w-md">
+            <Search className="h-4 w-4 text-mute" />
+            <Input
+              placeholder="Search sponsor or beneficiary"
+              value={filters.q}
+              onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))}
             />
           </div>
+          <Select
+            value={filters.status}
+            onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value, page: 1 }))}
+          >
+            <option value="">All statuses</option>
+            {["Draft", "Submitted", "Approved", "Rejected", "Active", "Suspended", "Completed"].map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </Select>
+        </div>
 
-          {metrics?.alerts?.length ? (
-            <Card className="border-amber-300 bg-amber-50/80 text-sm text-amber-900 flex flex-wrap gap-3 p-4">
-              {metrics.alerts.map((alert, index) => (
-                <div key={alert} className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span>{alert}</span>
-                </div>
-              ))}
-            </Card>
-          ) : null}
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {activeFilters.map((label) => (
+              <Badge key={label} variant="outline">
+                {label}
+              </Badge>
+            ))}
+          </div>
+        )}
 
-          <Card className="p-0 overflow-hidden" data-tour="sponsorship-list">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3" data-tour="sponsorship-filters">
-              <div className="flex items-center gap-3">
-                <Search className="h-4 w-4 text-mute" />
+        <AnimatePresence>
+          {filterOpen && (
+            <motion.div
+              className="grid gap-3 md:grid-cols-3 xl:grid-cols-6"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Beneficiary type</label>
+                <Select
+                  value={filters.beneficiary_type}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, beneficiary_type: event.target.value, page: 1 }))}
+                >
+                  <option value="">All</option>
+                  <option value="Newcomer">Newcomer</option>
+                  <option value="Member">Member</option>
+                  <option value="External">External</option>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Sponsor</label>
                 <Input
-                  value={filters.q}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))}
-                  placeholder="Search sponsors or beneficiaries…"
+                  placeholder="Search member"
+                  value={sponsorSearch}
+                  onChange={(event) => setSponsorSearch(event.target.value)}
                 />
-              </div>
-              <div className="flex items-center gap-2 text-xs text-mute">
-                <Badge variant="outline">{filters.status || "All statuses"}</Badge>
-                {filters.frequency && <Badge variant="outline">{filters.frequency}</Badge>}
-                {filters.hasNewcomer && (
-                  <Badge variant="outline">{filters.hasNewcomer === "yes" ? "Has newcomer" : "Members only"}</Badge>
+                {sponsorSearchLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
+                {!sponsorSearchLoading && sponsorSearchError && (
+                  <p className="text-xs text-rose-600 mt-1">{sponsorSearchError}</p>
                 )}
-                {(filters.startDate || filters.endDate) && (
-                  <Badge variant="outline">
-                    {filters.startDate || "Any"} → {filters.endDate || "Any"}
-                  </Badge>
+                {!sponsorSearchLoading && sponsorSearch.trim() && sponsorResults.length === 0 && !sponsorSearchError && (
+                  <p className="text-xs text-mute mt-1">No matching members.</p>
                 )}
-              </div>
-            </div>
-
-            {sponsorshipLoading ? (
-              <div className="py-12 text-center text-mute flex items-center justify-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading sponsorships…
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-xs uppercase text-mute border-b border-border">
-                    <tr>
-                      <th className="py-2 px-4">Sponsor</th>
-                      <th className="py-2 px-4">Frequency</th>
-                      <th className="py-2 px-4">Last sponsorship</th>
-                      <th className="py-2 px-4">Status</th>
-                      <th className="py-2 px-4">Budget</th>
-                      <th className="py-2 px-4 text-right">Outstanding</th>
-                      <th className="py-2 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sponsorships?.items.map((item) => (
-                      <tr
-                        key={item.id}
-                        className="border-b border-border/60 last:border-none hover:bg-muted/40 cursor-pointer"
+                {sponsorResults.length > 0 && (
+                  <div className="mt-2 border border-border rounded-xl bg-card max-h-40 overflow-y-auto">
+                    {sponsorResults.map((member) => (
+                      <button
+                        key={member.id}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-accent/10"
                         onClick={() => {
-                          setSelectedSponsorship(item);
-                          setDetailOpen(true);
+                          setFilters((prev) => ({ ...prev, sponsor_id: String(member.id), page: 1 }));
+                          setSponsorSearch(`${member.first_name} ${member.last_name}`.trim());
+                          setSponsorResults([]);
                         }}
                       >
-                        <td className="py-3 px-4">
-                          <div className="font-medium">
-                            {item.sponsor.first_name} {item.sponsor.last_name}
-                          </div>
-                          <div className="text-xs text-mute">
-                            {item.sponsor_status || "Status unknown"}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge>{item.frequency}</Badge>
-                        </td>
-                        <td className="py-3 px-4">
-                          {item.last_sponsored_date ? (
-                            <div>
-                              <div>{new Date(item.last_sponsored_date).toLocaleDateString()}</div>
-                              <div className="text-xs text-mute">
-                                {item.days_since_last_sponsorship ?? 0} days ago
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-mute">Never</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge
-                            variant="outline"
-                            className={
-                              item.status === "Active"
-                                ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                : item.status === "Suspended"
-                                  ? "bg-rose-50 text-rose-600 border-rose-200"
-                                  : "bg-muted text-foreground border-border"
-                            }
-                          >
-                            {item.status}
-                          </Badge>
-                          {item.last_status === "Rejected" && item.last_status_reason && (
-                            <div className="text-xs text-rose-600 mt-1">Reason: {item.last_status_reason}</div>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          {item.budget_slots ? (
-                            <div>
-                              <div className="text-xs">
-                                {item.used_slots}/{item.budget_slots} sponsored
-                              </div>
-                              <div className="h-1.5 w-full bg-border rounded-full mt-1 overflow-hidden">
-                                <div
-                                  className={`h-full ${
-                                    item.budget_over_capacity
-                                      ? "bg-rose-500"
-                                      : (item.budget_utilization_percent ?? 0) > 80
-                                        ? "bg-amber-500"
-                                        : "bg-emerald-500"
-                                  }`}
-                                  style={{ width: `${Math.min(100, item.budget_utilization_percent ?? 0)}%` }}
-                                />
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-mute">No capacity set</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <span className={item.outstanding_balance > 0 ? "text-rose-600 font-semibold" : ""}>
-                            {currency(item.outstanding_balance)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {permissions.manageSponsorships ? (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                className="text-xs"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleRemind(item.id);
-                                }}
-                              >
-                                <Bell className="h-4 w-4" />
-                                Remind
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-mute">Read only</span>
-                          )}
-                        </td>
-                      </tr>
+                        {member.first_name} {member.last_name}
+                      </button>
                     ))}
-                    {!sponsorships?.items.length && (
-                      <tr>
-                        <td className="py-8 text-center text-mute" colSpan={7}>
-                          No sponsorships match your filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                  </div>
+                )}
               </div>
-            )}
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">County</label>
+                <Select
+                  value={filters.county}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, county: event.target.value, page: 1 }))}
+                >
+                  <option value="">All counties</option>
+                  {COUNTY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Assigned admin</label>
+                <Select
+                  value={filters.assigned_staff_id}
+                  onChange={(event) =>
+                    setFilters((prev) => ({ ...prev, assigned_staff_id: event.target.value, page: 1 }))
+                  }
+                >
+                  <option value="">All staff</option>
+                  {staff.map((person) => (
+                    <option key={person.id} value={String(person.id)}>
+                      {person.full_name || person.username}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Created from</label>
+                <Input
+                  type="date"
+                  value={filters.created_from}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, created_from: event.target.value, page: 1 }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Created to</label>
+                <Input
+                  type="date"
+                  value={filters.created_to}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, created_to: event.target.value, page: 1 }))}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+          </Card>
 
-            {sponsorships && sponsorships.total > sponsorships.page_size && (
-              <div className="flex justify-between items-center px-4 py-3 text-sm text-mute">
-                <span>
-                  Page {filters.page} of {Math.ceil(sponsorships.total / sponsorships.page_size)}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    disabled={filters.page === 1}
-                    onClick={() => setFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={filters.page >= Math.ceil(sponsorships.total / sponsorships.page_size)}
-                    onClick={() => setFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
+          <Card className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <p className="text-sm font-medium">Cases</p>
+          <Badge variant="outline">{sponsorships?.total ?? 0} total</Badge>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-mute">
+              <tr>
+                <th className="px-4 py-2 text-left">Case ID</th>
+                <th className="px-4 py-2 text-left">Sponsor</th>
+                <th className="px-4 py-2 text-left">Beneficiary</th>
+                <th className="px-4 py-2 text-left">Status</th>
+                <th className="px-4 py-2 text-left">Created</th>
+                <th className="px-4 py-2 text-left">Last update</th>
+                <th className="px-4 py-2 text-left">Next action</th>
+                <th className="px-4 py-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                    <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                    Loading cases...
+                  </td>
+                </tr>
+              ) : sponsorships?.items.length ? (
+                sponsorships.items.map((item) => (
+                  <tr key={item.id} className="border-t border-border/60 hover:bg-muted/20">
+                    <td className="px-4 py-2 font-medium">SP-{String(item.id).padStart(4, "0")}</td>
+                    <td className="px-4 py-2">
+                      <p className="font-medium">
+                        {item.sponsor.first_name} {item.sponsor.last_name}
+                      </p>
+                      <Badge variant="outline" className="mt-1 text-xs">
+                        {item.sponsor_status || "Unknown"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2">{beneficiaryLabel(item)}</td>
+                    <td className="px-4 py-2">
+                      <Badge variant="outline" className={STATUS_STYLES[item.status]}>
+                        {item.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2">{formatDate(item.created_at)}</td>
+                    <td className="px-4 py-2">{formatDate(item.updated_at)}</td>
+                    <td className="px-4 py-2 text-mute">{nextActionLabel(item.status)}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/sponsorships/${item.id}`)}>
+                          View
+                        </Button>
+                        {canManage && item.status === "Draft" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => updateSearchParams({ draft: String(item.id), view: null })}
+                          >
+                            Continue
+                          </Button>
+                        )}
+                        {canManage && item.status === "Submitted" && (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={!canApprove}
+                              onClick={() => openStatusModal(item, "Approved", "Approve case", false)}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!canApprove}
+                              onClick={() => openStatusModal(item, "Rejected", "Reject case", true)}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                        {canManage && item.status === "Approved" && (
+                          <Button size="sm" onClick={() => openStatusModal(item, "Active", "Activate case", false)}>
+                            Activate
+                          </Button>
+                        )}
+                        {canManage && item.status === "Active" && (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => openStatusModal(item, "Suspended", "Suspend case", false)}>
+                              Suspend
+                            </Button>
+                            <Button size="sm" onClick={() => openStatusModal(item, "Completed", "Complete case", false)}>
+                              Complete
+                            </Button>
+                          </>
+                        )}
+                        {canManage && item.status === "Suspended" && (
+                          <Button size="sm" onClick={() => openStatusModal(item, "Active", "Resume case", false)}>
+                            Resume
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                    No cases found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-border flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={filters.page <= 1}
+            onClick={() => setFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+          >
+            Prev
+          </Button>
+          <span className="text-xs text-mute">
+            Page {filters.page} of {totalPages}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={filters.page >= totalPages}
+            onClick={() => setFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
+          >
+            Next
+          </Button>
+        </div>
           </Card>
         </>
       )}
 
-      {canViewNewcomers && (
-        <Card className="p-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <HandHeart className="h-8 w-8 text-accent" />
+      {activeView === "budget" && (
+        <div className="space-y-4">
+          <Card className="p-4">
+            <div className="flex flex-wrap items-end gap-3">
               <div>
-                <p className="text-sm text-mute uppercase tracking-wide">Newcomer settlement</p>
-                <p className="text-2xl font-semibold">{newcomers?.total ?? "—"}</p>
+                <label className="text-xs uppercase text-mute block mb-1">Budget month</label>
+                <Select
+                  value={budgetMonth}
+                  onChange={(event) => setBudgetMonth(event.target.value)}
+                >
+                  {MONTH_OPTIONS.map((month) => (
+                    <option key={month.value} value={month.value}>
+                      {month.label}
+                    </option>
+                  ))}
+                </Select>
               </div>
+              <div>
+                <label className="text-xs uppercase text-mute block mb-1">Budget year</label>
+                <Select
+                  value={budgetYear}
+                  onChange={(event) => setBudgetYear(event.target.value)}
+                >
+                  {YEAR_OPTIONS.map((year) => (
+                    <option key={year} value={String(year)}>
+                      {year}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button variant="ghost" onClick={() => setBudgetRefreshTick((prev) => prev + 1)}>
+                Refresh budget
+              </Button>
             </div>
-            <Button variant="ghost" onClick={reloadNewcomers}>
-              <RefreshCcw className="h-4 w-4" />
-              Refresh
-            </Button>
+            <p className="mt-3 text-xs text-mute">
+              Manage budget slots and amounts for cases in the selected period.
+            </p>
+          </Card>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <Card className="p-4">
+              <p className="text-xs uppercase text-mute">Total slots</p>
+              <p className="text-2xl font-semibold">{budgetTotals.slots}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs uppercase text-mute">Used slots</p>
+              <p className="text-2xl font-semibold">{budgetTotals.used}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs uppercase text-mute">Utilization</p>
+              <p className="text-2xl font-semibold">{budgetTotals.utilization}%</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs uppercase text-mute">Total budget</p>
+              <p className="text-2xl font-semibold">
+                ${budgetTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </p>
+            </Card>
           </div>
-          {newcomerLoading ? (
-            <div className="py-10 text-center text-mute flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading newcomer pipeline…
+
+          <Card className="overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <p className="text-sm font-medium">Budgeted cases</p>
+              <Badge variant="outline">{budgetCases?.total ?? 0} total</Badge>
             </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-5">
-              {STATUS_ORDER.map((status) => (
-                <div key={status} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold">{status}</h3>
-                    <Badge className="text-xs">{groupedNewcomers[status]?.length ?? 0}</Badge>
-                  </div>
-                  <div className="space-y-3">
-                    {groupedNewcomers[status]?.map((record) => (
-                      <div key={record.id} className="rounded-2xl border border-border/80 bg-card/70 p-3 space-y-2">
-                        <div className="font-medium">{record.first_name} {record.last_name}</div>
-                        <div className="text-xs text-mute">Arrived {new Date(record.arrival_date).toLocaleDateString()}</div>
-                        {record.service_type && (
-                          <div className="text-xs">{record.service_type}</div>
-                        )}
-                        <div className="text-xs text-mute">
-                          {record.contact_phone || record.contact_email || "No contact yet"}
-                        </div>
-                        {permissions.manageNewcomers && status !== "Converted" && (
-                          <div className="flex flex-wrap gap-2 pt-2">
-                            {status === "New" && (
-                              <Button
-                                variant="ghost"
-                                className="text-xs"
-                                onClick={() => handleAdvanceStatus(record, "InProgress")}
-                              >
-                                Start follow-up
-                              </Button>
-                            )}
-                            {status === "InProgress" && (
-                              <Button
-                                variant="ghost"
-                                className="text-xs"
-                                onClick={() => handleAdvanceStatus(record, "Sponsored")}
-                              >
-                                Mark sponsored
-                              </Button>
-                            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-mute">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Case ID</th>
+                    <th className="px-4 py-2 text-left">Sponsor</th>
+                    <th className="px-4 py-2 text-left">Beneficiary</th>
+                    <th className="px-4 py-2 text-left">Status</th>
+                    <th className="px-4 py-2 text-left">Budget slots</th>
+                    <th className="px-4 py-2 text-left">Used slots</th>
+                    <th className="px-4 py-2 text-left">Budget amount</th>
+                    <th className="px-4 py-2 text-left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {budgetLoading ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                        <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                        Loading budget...
+                      </td>
+                    </tr>
+                  ) : budgetCases?.items.length ? (
+                    budgetCases.items.map((item) => {
+                      const draft = getBudgetDraft(item);
+                      const saving = budgetSavingId === item.id;
+                      return (
+                        <tr key={item.id} className="border-t border-border/60">
+                          <td className="px-4 py-2 font-medium">SP-{String(item.id).padStart(4, "0")}</td>
+                          <td className="px-4 py-2">
+                            {item.sponsor.first_name} {item.sponsor.last_name}
+                          </td>
+                          <td className="px-4 py-2">{beneficiaryLabel(item)}</td>
+                          <td className="px-4 py-2">
+                            <Badge variant="outline" className={STATUS_STYLES[item.status]}>
+                              {item.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-2">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={draft.budget_slots}
+                              onChange={(event) => handleBudgetFieldChange(item.id, "budget_slots", event.target.value)}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={draft.used_slots}
+                              onChange={(event) => handleBudgetFieldChange(item.id, "used_slots", event.target.value)}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={draft.budget_amount}
+                              onChange={(event) => handleBudgetFieldChange(item.id, "budget_amount", event.target.value)}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
                             <Button
-                              variant="soft"
-                              className="text-xs"
-                              onClick={() => {
-                                setConvertTarget(record);
-                                setConvertForm({
-                                  phone: record.contact_phone || "",
-                                  email: record.contact_email || "",
-                                  status: "Pending",
-                                  notes: "",
-                                });
-                              }}
+                              size="sm"
+                              onClick={() => handleBudgetSave(item)}
+                              disabled={saving}
                             >
-                              Convert
+                              {saving ? "Saving..." : "Save"}
                             </Button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {!groupedNewcomers[status]?.length && (
-                      <p className="text-xs text-mute italic">No records</p>
-                    )}
-                  </div>
-                </div>
-              ))}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                        No budgeted cases found for this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
-        </Card>
+          </Card>
+        </div>
       )}
 
       <AnimatePresence>
-        {filterDrawerOpen && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-ink/50 backdrop-blur-sm z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setFilterDrawerOpen(false)}
-            />
-            <motion.div
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-card border-l border-border shadow-soft z-50 p-6 overflow-y-auto"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", stiffness: 260, damping: 30 }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Filters</h2>
-                  <p className="text-sm text-mute">Refine sponsorship view.</p>
-                </div>
-                <Button variant="ghost" onClick={() => setFilterDrawerOpen(false)}>
-                  Close
-                </Button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Status</label>
-                  <Select
-                    value={draftFilters.status}
-                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, status: event.target.value, page: 1 }))}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Suspended">Suspended</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Completed">Completed</option>
-                    <option value="">All statuses</option>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Program</label>
-                  <Select
-                    value={draftFilters.program}
-                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, program: event.target.value }))}
-                  >
-                    <option value="">All programs</option>
-                    {PROGRAM_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Frequency</label>
-                  <Select
-                    value={draftFilters.frequency}
-                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, frequency: event.target.value }))}
-                  >
-                    <option value="">Any frequency</option>
-                    {FREQUENCIES.map((freq) => (
-                      <option key={freq} value={freq}>
-                        {freq}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Has newcomer?</label>
-                  <div className="flex gap-2">
-                    {[
-                      { label: "Any", value: "" },
-                      { label: "Yes", value: "yes" },
-                      { label: "No", value: "no" },
-                    ].map((option) => {
-                      const active = draftFilters.hasNewcomer === option.value;
-                      return (
-                        <Button
-                          key={option.value}
-                          type="button"
-                          variant={active ? "default" : "outline"}
-                          onClick={() => setDraftFilters((prev) => ({ ...prev, hasNewcomer: option.value }))}
-                        >
-                          {option.label}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Start date from</label>
-                    <Input
-                      type="date"
-                      value={draftFilters.startDate}
-                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, startDate: event.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Start date to</label>
-                    <Input
-                      type="date"
-                      value={draftFilters.endDate}
-                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, endDate: event.target.value }))}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="ghost" onClick={() => setFilterDrawerOpen(false)}>
-                  Cancel
-                </Button>
-                <Button variant="ghost" onClick={handleFilterReset}>
-                  Reset
-                </Button>
-                <Button onClick={handleFilterApply}>Apply</Button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {detailOpen && selectedSponsorship && (
+        {wizardOpen && (
           <>
             <motion.div
               className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setDetailOpen(false)}
+              onClick={handleWizardClose}
             />
             <motion.div
-              className="fixed right-0 top-0 bottom-0 w-full max-w-3xl bg-card shadow-soft border-l border-border z-50 overflow-y-auto"
+              className="fixed right-0 top-0 bottom-0 w-full max-w-3xl bg-card border-l border-border z-50 flex flex-col"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", stiffness: 260, damping: 30 }}
             >
-              <div className="p-6 space-y-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold">
-                      {selectedSponsorship.sponsor.first_name} {selectedSponsorship.sponsor.last_name}
-                    </h2>
-                    <p className="text-sm text-mute">{selectedSponsorship.beneficiary_name}</p>
-                    {selectedSponsorship.newcomer && (
-                      <Badge variant="outline" className="mt-2">
-                        Linked newcomer
-                      </Badge>
-                    )}
-                  </div>
-                  <Button variant="ghost" onClick={() => setDetailOpen(false)}>
-                    Close
-                  </Button>
+              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase text-mute">Step {wizardStep + 1} of 4</p>
+                  <h2 className="text-xl font-semibold">
+                    {draftEditingId ? `Resume draft SP-${String(draftEditingId).padStart(4, "0")}` : "New sponsorship case"}
+                  </h2>
                 </div>
-                <div className="grid md:grid-cols-3 gap-4">
-                  <Card className="p-4 space-y-2">
-                    <p className="text-xs uppercase text-mute">Father of Repentance</p>
-                    <p className="font-medium">
-                      {selectedSponsorship.father_of_repentance_name || "Not set"}
-                    </p>
-                  </Card>
-                  <Card className="p-4 space-y-2">
-                    <p className="text-xs uppercase text-mute">Frequency</p>
-                    <Badge>{selectedSponsorship.frequency}</Badge>
-                    <p className="text-xs text-mute">Reminder via {selectedSponsorship.reminder_channel || "Email"}</p>
-                  </Card>
-                  <Card className="p-4 space-y-2">
-                    <p className="text-xs uppercase text-mute">Volunteer service</p>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedSponsorship.volunteer_services.length ? (
-                        selectedSponsorship.volunteer_services.map((tag) => (
-                          <Badge key={tag} variant="outline">
-                            {tag}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-xs text-mute">None captured</span>
-                      )}
-                      {selectedSponsorship.volunteer_service_other && (
-                        <Badge variant="outline">{selectedSponsorship.volunteer_service_other}</Badge>
-                      )}
-                    </div>
-                  </Card>
-                </div>
-                {selectedSponsorship.payment_health && (
-                  <Card className="p-4 space-y-2">
-                    <p className="text-xs uppercase text-mute">Payment health</p>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div>
-                        <p className="text-sm text-mute">Monthly contribution</p>
-                        <p className="font-semibold">
-                          {currency(selectedSponsorship.payment_health.monthly_contribution)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-mute">Method</p>
-                        <p className="font-semibold">{selectedSponsorship.payment_health.method || "Not set"}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-mute">Last payment</p>
-                        <p className="font-semibold">
-                          {selectedSponsorship.payment_health.last_payment_date
-                            ? new Date(selectedSponsorship.payment_health.last_payment_date).toLocaleDateString()
-                            : "Never"}
-                        </p>
-                        <p className="text-xs text-mute">
-                          {selectedSponsorship.payment_health.days_since_last_payment ?? "—"} days ago
-                        </p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className={
-                          selectedSponsorship.payment_health.status === "Green"
-                            ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                            : selectedSponsorship.payment_health.status === "Yellow"
-                              ? "bg-amber-50 text-amber-600 border-amber-200"
-                              : "bg-rose-50 text-rose-600 border-rose-200"
-                        }
-                      >
-                        {selectedSponsorship.payment_health.status}
-                      </Badge>
-                    </div>
-                  </Card>
-                )}
-                <Card className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                <Button variant="ghost" onClick={handleWizardClose}>
+                  Close
+                </Button>
+              </div>
+              <div className="px-6 py-4 space-y-6 overflow-y-auto">
+                {wizardStep === 0 && (
+                  <div className="space-y-4">
                     <div>
-                      <p className="text-xs uppercase text-mute">Budget</p>
-                      {selectedSponsorship.budget_slots ? (
-                        <p className="font-semibold">
-                          {selectedSponsorship.used_slots}/{selectedSponsorship.budget_slots} slots used
-                        </p>
-                      ) : (
-                        <p className="text-sm text-mute">No budget configured</p>
+                      <label className="text-xs uppercase text-mute block mb-1">Sponsor search</label>
+                    <Input
+                      placeholder="Search member by name"
+                      value={sponsorSearch}
+                      onChange={(event) => setSponsorSearch(event.target.value)}
+                    />
+                    {sponsorSearchLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
+                    {!sponsorSearchLoading && sponsorSearchError && (
+                      <p className="text-xs text-rose-600 mt-1">{sponsorSearchError}</p>
+                    )}
+                    {!sponsorSearchLoading && sponsorSearch.trim() && sponsorResults.length === 0 && !sponsorSearchError && (
+                      <p className="text-xs text-mute mt-1">No matching members.</p>
+                    )}
+                    {sponsorResults.length > 0 && (
+                      <div className="mt-2 border border-border rounded-xl bg-card max-h-48 overflow-y-auto">
+                        {sponsorResults.map((member) => (
+                          <button
+                              key={member.id}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-accent/10"
+                              onClick={() => handleSponsorSelect(member)}
+                            >
+                              {member.first_name} {member.last_name} • {member.status}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {permissions.manageSponsorships && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          handleRemind(selectedSponsorship.id);
-                        }}
-                      >
-                        <Bell className="h-4 w-4" />
-                        Remind sponsor
-                      </Button>
+
+                    {sponsorContext && (
+                      <Card className="p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="font-semibold">{sponsorContext.member_name}</p>
+                          <Badge variant="outline">{sponsorContext.member_status || "Unknown"}</Badge>
+                        </div>
+                        <div className="text-sm text-mute">
+                          Last sponsorship: {sponsorContext.last_sponsorship_status || "None"} •{" "}
+                          {formatDate(sponsorContext.last_sponsorship_date)}
+                        </div>
+                        <div className="text-sm text-mute">
+                          Sponsorships (last 12 months): {sponsorContext.history_count_last_12_months}
+                        </div>
+                        <div className="text-sm text-mute">
+                          Volunteer services: {sponsorContext.volunteer_services.length ? sponsorContext.volunteer_services.join(", ") : "None"}
+                        </div>
+                        <div className="text-sm text-mute">
+                          Father of repentance: {sponsorContext.father_of_repentance_name || "Not set"}
+                        </div>
+                        {sponsorContext.budget_usage && (
+                          <div className="text-sm text-mute">
+                            Budget usage: {sponsorContext.budget_usage.used_slots}/{sponsorContext.budget_usage.total_slots}
+                          </div>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/members/${sponsorContext.member_id}/edit`)}>
+                          View member profile
+                        </Button>
+                      </Card>
                     )}
+
+                    {wizardError && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
+                        {wizardError}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" onClick={handleWizardClose}>
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={!wizardForm.sponsor_member_id || sponsorBlocked}
+                        onClick={() => setWizardStep(1)}
+                      >
+                        Continue <ChevronRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </div>
                   </div>
-                  {selectedSponsorship.budget_slots && (
-                    <div className="h-2 rounded-full bg-border overflow-hidden">
-                      <div
-                        className={`h-full ${
-                          selectedSponsorship.budget_over_capacity
-                            ? "bg-rose-500"
-                            : (selectedSponsorship.budget_utilization_percent ?? 0) > 80
-                              ? "bg-amber-500"
-                              : "bg-emerald-500"
-                        }`}
-                        style={{
-                          width: `${Math.min(100, selectedSponsorship.budget_utilization_percent ?? 0)}%`,
-                        }}
+                )}
+
+                {wizardStep === 1 && (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <Card
+                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "newcomer_existing" ? "border-accent" : "border-border"}`}
+                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_existing" }))}
+                      >
+                        <p className="font-medium">Link existing newcomer</p>
+                        <p className="text-xs text-mute">Search and select a current newcomer.</p>
+                      </Card>
+                      <Card
+                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "newcomer_create" ? "border-accent" : "border-border"}`}
+                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_create" }))}
+                      >
+                        <p className="font-medium">Create newcomer now</p>
+                        <p className="text-xs text-mute">Quick intake and link the case.</p>
+                      </Card>
+                      <Card
+                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "member" || wizardForm.beneficiary_mode === "external" ? "border-accent" : "border-border"}`}
+                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}
+                      >
+                        <p className="font-medium">External or member</p>
+                        <p className="text-xs text-mute">Select a member or enter external beneficiary.</p>
+                      </Card>
+                    </div>
+
+                    {wizardForm.beneficiary_mode === "newcomer_existing" && (
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Search newcomer</label>
+                        <Input
+                          placeholder="Search by name"
+                          value={beneficiarySearch}
+                          onChange={(event) => setBeneficiarySearch(event.target.value)}
+                        />
+                        {beneficiaryLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
+                        {beneficiaryResults?.items?.length ? (
+                          <div className="mt-2 border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
+                            {beneficiaryResults.items.map((newcomer) => (
+                              <button
+                                key={newcomer.id}
+                                type="button"
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
+                                  wizardForm.newcomer_id === newcomer.id ? "bg-accent/10" : ""
+                                }`}
+                                onClick={() => handleNewcomerSelect(newcomer)}
+                              >
+                                {newcomer.first_name} {newcomer.last_name} • {newcomer.status}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+
+                    {wizardForm.beneficiary_mode === "newcomer_create" && (
+                      <Card className="p-4 space-y-3">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <Input
+                              placeholder="First name"
+                              value={newcomerForm.first_name}
+                              className={newcomerFieldClass("first_name")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({ ...prev, first_name: event.target.value }));
+                                clearNewcomerFieldError("first_name");
+                              }}
+                            />
+                            {newcomerFieldErrors.first_name && (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.first_name}</p>
+                            )}
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="Last name"
+                              value={newcomerForm.last_name}
+                              className={newcomerFieldClass("last_name")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({ ...prev, last_name: event.target.value }));
+                                clearNewcomerFieldError("last_name");
+                              }}
+                            />
+                            {newcomerFieldErrors.last_name && (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.last_name}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <Input
+                              type="number"
+                              min={1}
+                              placeholder="Family size"
+                              value={newcomerForm.family_size}
+                              className={newcomerFieldClass("family_size")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({ ...prev, family_size: event.target.value }));
+                                clearNewcomerFieldError("family_size");
+                              }}
+                            />
+                            {newcomerFieldErrors.family_size && (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.family_size}</p>
+                            )}
+                          </div>
+                          <Select
+                            value={newcomerForm.county}
+                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, county: event.target.value }))}
+                          >
+                            <option value="">Select county</option>
+                            {COUNTY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <Select
+                            value={newcomerForm.country}
+                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, country: event.target.value }))}
+                          >
+                            <option value="">Select country</option>
+                            {COUNTRY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                          <Select
+                            value={newcomerForm.preferred_language}
+                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
+                          >
+                            <option value="">Preferred language</option>
+                            {LANGUAGE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <Input
+                              type="tel"
+                              inputMode="tel"
+                              placeholder="Phone"
+                              value={newcomerForm.contact_phone}
+                              className={newcomerFieldClass("contact_phone")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({ ...prev, contact_phone: event.target.value }));
+                                clearNewcomerFieldError("contact_phone");
+                              }}
+                            />
+                            {newcomerFieldErrors.contact_phone && (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_phone}</p>
+                            )}
+                          </div>
+                          <div>
+                            <Input
+                              type="email"
+                              inputMode="email"
+                              placeholder="Email"
+                              value={newcomerForm.contact_email}
+                              className={newcomerFieldClass("contact_email")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }));
+                                clearNewcomerFieldError("contact_email");
+                              }}
+                            />
+                            {newcomerFieldErrors.contact_email && (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_email}</p>
+                            )}
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-mute">
+                          <input
+                            type="checkbox"
+                            checked={newcomerForm.interpreter_required}
+                            onChange={(event) =>
+                              setNewcomerForm((prev) => ({ ...prev, interpreter_required: event.target.checked }))
+                            }
+                          />
+                          Interpreter required
+                        </label>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <Input
+                            placeholder="Temp address street"
+                            value={newcomerForm.temporary_address_street}
+                            onChange={(event) =>
+                              setNewcomerForm((prev) => ({ ...prev, temporary_address_street: event.target.value }))
+                            }
+                          />
+                          <Input
+                            placeholder="Temp address city"
+                            value={newcomerForm.temporary_address_city}
+                            onChange={(event) =>
+                              setNewcomerForm((prev) => ({ ...prev, temporary_address_city: event.target.value }))
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <Select
+                            value={newcomerForm.temporary_address_province}
+                            onChange={(event) =>
+                              setNewcomerForm((prev) => ({ ...prev, temporary_address_province: event.target.value }))
+                            }
+                          >
+                            <option value="">Select province</option>
+                            {PROVINCE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                          <Input
+                            placeholder="Postal code"
+                            value={newcomerForm.temporary_address_postal_code}
+                            onChange={(event) =>
+                              setNewcomerForm((prev) => ({ ...prev, temporary_address_postal_code: event.target.value }))
+                            }
+                          />
+                        </div>
+                        {wizardError && (
+                          <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
+                            {wizardError}
+                          </div>
+                        )}
+                        <Button onClick={handleCreateNewcomer} disabled={wizardLoading}>
+                          {wizardLoading ? "Saving..." : "Create newcomer"}
+                        </Button>
+                      </Card>
+                    )}
+
+                    {wizardForm.beneficiary_mode === "member" && (
+                      <div className="space-y-3">
+                        <label className="text-xs uppercase text-mute block">Member search</label>
+                        <Input
+                          placeholder="Search member"
+                          value={memberSearch}
+                          onChange={(event) => setMemberSearch(event.target.value)}
+                        />
+                        {memberSearchLoading && <p className="text-xs text-mute">Searching...</p>}
+                        {memberResults.length > 0 && (
+                          <div className="border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
+                            {memberResults.map((member) => (
+                              <button
+                                key={member.id}
+                                type="button"
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
+                                  wizardForm.beneficiary_member_id === member.id ? "bg-accent/10" : ""
+                                }`}
+                                onClick={() => handleMemberSelect(member)}
+                              >
+                                {member.first_name} {member.last_name} • {member.status}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "external" }))}>
+                          Use external beneficiary instead
+                        </Button>
+                      </div>
+                    )}
+
+                    {wizardForm.beneficiary_mode === "external" && (
+                      <div className="space-y-3">
+                        <label className="text-xs uppercase text-mute block">External beneficiary name</label>
+                        <Input
+                          placeholder="Beneficiary name"
+                          value={wizardForm.beneficiary_name}
+                          onChange={(event) =>
+                            setWizardForm((prev) => ({ ...prev, beneficiary_name: event.target.value }))
+                          }
+                        />
+                        <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}>
+                          Switch to member selection
+                        </Button>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between">
+                      <Button variant="ghost" onClick={() => setWizardStep(0)}>
+                        Back
+                      </Button>
+                      <Button onClick={() => setWizardStep(2)} disabled={!wizardForm.beneficiary_name.trim()}>
+                        Continue <ChevronRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {wizardStep === 2 && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Case summary / notes</label>
+                      <Textarea
+                        rows={4}
+                        value={wizardForm.notes}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, notes: event.target.value }))}
                       />
                     </div>
-                  )}
-                  <div className="text-xs text-mute">
-                    Start {new Date(selectedSponsorship.start_date).toLocaleDateString()}
-                    {selectedSponsorship.end_date ? ` • End ${new Date(selectedSponsorship.end_date).toLocaleDateString()}` : ""}
-                  </div>
-                </Card>
-                <Card className="p-4 space-y-3">
-                  <p className="text-xs uppercase text-mute">Timeline</p>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-sm font-medium">Last status</p>
-                      <p className="text-sm text-mute">
-                        {selectedSponsorship.last_status || "Pending"}
-                        {selectedSponsorship.last_status_reason ? ` – ${selectedSponsorship.last_status_reason}` : ""}
-                      </p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Select
+                        value={wizardForm.program}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, program: event.target.value as Sponsorship["program"] | "" }))}
+                      >
+                        <option value="">Select program</option>
+                        {SPONSORSHIP_PROGRAM_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={wizardForm.frequency}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, frequency: event.target.value }))}
+                      >
+                        <option value="">Select frequency</option>
+                        {SPONSORSHIP_FREQUENCY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Select
+                        value={wizardForm.pledge_channel}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, pledge_channel: event.target.value as Sponsorship["pledge_channel"] | "" }))}
+                      >
+                        <option value="">Pledge channel</option>
+                        {SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={wizardForm.reminder_channel}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, reminder_channel: event.target.value as Sponsorship["reminder_channel"] | "" }))}
+                      >
+                        <option value="">Reminder channel</option>
+                        {SPONSORSHIP_REMINDER_CHANNEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Select
+                        value={wizardForm.motivation}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, motivation: event.target.value as Sponsorship["motivation"] | "" }))}
+                      >
+                        <option value="">Motivation</option>
+                        {SPONSORSHIP_MOTIVATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="Pledge amount"
+                        value={wizardForm.monthly_amount}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, monthly_amount: event.target.value }))}
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Input
+                        type="date"
+                        value={wizardForm.start_date}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, start_date: event.target.value }))}
+                      />
+                      <Input
+                        type="date"
+                        value={wizardForm.end_date}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, end_date: event.target.value }))}
+                      />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">Reminder cadence</p>
-                      <p className="text-sm text-mute">
-                        Next reminder {selectedSponsorship.reminder_next_due ? new Date(selectedSponsorship.reminder_next_due).toLocaleDateString() : "not scheduled"}
-                      </p>
+                      <label className="text-xs uppercase text-mute block mb-1">Volunteer services</label>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {VOLUNTEER_SERVICE_OPTIONS.map((option) => (
+                          <label key={option.value} className="flex items-center gap-2 text-sm text-mute">
+                            <input
+                              type="checkbox"
+                              checked={wizardForm.volunteer_services.includes(option.value)}
+                              onChange={() => toggleVolunteerService(option.value)}
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                      <Input
+                        className="mt-2"
+                        placeholder="Other volunteer service (optional)"
+                        value={wizardForm.volunteer_service_other}
+                        onChange={(event) =>
+                          setWizardForm((prev) => ({ ...prev, volunteer_service_other: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <Select
+                        value={wizardForm.budget_month}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, budget_month: event.target.value }))}
+                      >
+                        <option value="">Budget month</option>
+                        {MONTH_OPTIONS.map((month) => (
+                          <option key={month.value} value={month.value}>
+                            {month.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={wizardForm.budget_year}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, budget_year: event.target.value }))}
+                      >
+                        <option value="">Budget year</option>
+                        {YEAR_OPTIONS.map((year) => (
+                          <option key={year} value={String(year)}>
+                            {year}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={wizardForm.budget_slots}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, budget_slots: event.target.value }))}
+                      >
+                        <option value="">Budget slots</option>
+                        {SLOT_OPTIONS.map((slot) => (
+                          <option key={slot} value={String(slot)}>
+                            {slot}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="flex justify-between">
+                      <Button variant="ghost" onClick={() => setWizardStep(1)}>
+                        Back
+                      </Button>
+                      <Button onClick={() => setWizardStep(3)}>
+                        Continue <ChevronRight className="h-4 w-4 ml-2" />
+                      </Button>
                     </div>
                   </div>
-                </Card>
+                )}
+
+                {wizardStep === 3 && (
+                  <div className="space-y-4">
+                    <Card className="p-4 space-y-2">
+                      <p className="text-xs uppercase text-mute">Sponsor</p>
+                      <p className="font-medium">{wizardForm.sponsor_name || "—"}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Beneficiary</p>
+                      <p className="font-medium">{wizardForm.beneficiary_name || "—"}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Program</p>
+                      <p className="font-medium">
+                        {resolveOptionLabel(SPONSORSHIP_PROGRAM_OPTIONS, wizardForm.program)}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Frequency</p>
+                      <p className="font-medium">
+                        {resolveOptionLabel(SPONSORSHIP_FREQUENCY_OPTIONS, wizardForm.frequency)}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Pledge channel</p>
+                      <p className="font-medium">
+                        {resolveOptionLabel(SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS, wizardForm.pledge_channel)}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Reminder channel</p>
+                      <p className="font-medium">
+                        {resolveOptionLabel(SPONSORSHIP_REMINDER_CHANNEL_OPTIONS, wizardForm.reminder_channel)}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Motivation</p>
+                      <p className="font-medium">
+                        {resolveOptionLabel(SPONSORSHIP_MOTIVATION_OPTIONS, wizardForm.motivation)}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Volunteer services</p>
+                      <p className="font-medium">
+                        {[
+                          ...wizardForm.volunteer_services.map((service) =>
+                            resolveOptionLabel(VOLUNTEER_SERVICE_OPTIONS, service),
+                          ),
+                          wizardForm.volunteer_service_other,
+                        ]
+                          .map((value) => value?.trim())
+                          .filter(Boolean)
+                          .join(", ") || "—"}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Start date</p>
+                      <p className="font-medium">{formatDate(wizardForm.start_date)}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Expected end</p>
+                      <p className="font-medium">{formatDate(wizardForm.end_date)}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Notes</p>
+                      <p className="text-sm text-mute whitespace-pre-line">{wizardForm.notes || "—"}</p>
+                    </Card>
+
+                    {wizardError && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
+                        {wizardError}
+                      </div>
+                    )}
+
+                    <div className="flex justify-between">
+                      <Button variant="ghost" onClick={() => setWizardStep(2)}>
+                        Back
+                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" disabled={wizardLoading} onClick={() => handleWizardSubmit("Draft")}>
+                          {draftEditingId ? "Update draft" : "Save draft"}
+                        </Button>
+                        <Button disabled={wizardLoading} onClick={() => handleWizardSubmit("Submitted")}>
+                          Submit
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
 
-
-<AnimatePresence>
-  {showSponsorshipForm && (
-    <>
-      <motion.div
-        className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={handleCloseSponsorshipModal}
-      />
-      <motion.div
-        className="fixed right-0 top-0 bottom-0 w-full max-w-3xl bg-card border-l border-border z-50 flex flex-col"
-        initial={{ x: "100%" }}
-        animate={{ x: 0 }}
-        exit={{ x: "100%" }}
-        transition={{ type: "spring", stiffness: 260, damping: 30 }}
-      >
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase text-mute">Step {wizardStep + 1} of {WIZARD_STEPS.length}</p>
-            <h2 className="text-xl font-semibold">New sponsorship</h2>
-          </div>
-          <Button variant="ghost" onClick={handleCloseSponsorshipModal}>
-            Close
-          </Button>
-        </div>
-        <div className="px-6 py-3 border-b border-border">
-          <div className="flex items-center gap-3">
-            {WIZARD_STEPS.map((label, index) => (
-              <div key={label} className="flex items-center gap-2 flex-1 min-w-[80px]">
-                <div
-                  className={`h-8 w-8 rounded-full flex items-center justify-center text-sm ${index <= wizardStep ? "bg-accent text-white" : "bg-muted text-mute"}`}
-                >
-                  {index + 1}
-                </div>
-                <span className={`text-xs md:text-sm ${index === wizardStep ? "font-semibold" : "text-mute"}`}>
-                  {label}
-                </span>
-                {index < WIZARD_STEPS.length - 1 && (
-                  <div className={`flex-1 h-0.5 ${index < wizardStep ? "bg-accent" : "bg-border"}`} />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-          {wizardStep === 0 && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Sponsor search</label>
-                      <Input
-                        placeholder="Search by name"
-                        value={sponsorSearch}
-                        onChange={(event) => {
-                          setSelectedSponsor(null);
-                          setSponsorSearch(event.target.value);
-                        }}
-                      />
-                {sponsorLookupLoading ? (
-                  <div className="text-xs text-mute mt-1">Searching…</div>
-                ) : (
-                  sponsorResults.length > 0 && (
-                    <ul className="mt-2 border border-border rounded-xl divide-y divide-border/60">
-                      {sponsorResults.map((result) => (
-                        <li
-                          key={result.id}
-                          className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer flex items-center justify-between gap-3"
-                          onClick={() => handleSponsorSelect(result)}
-                        >
-                          <div>
-                            {result.first_name} {result.last_name}
-                            <span className="text-xs text-mute ml-2">#{result.id}</span>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={
-                              result.status === "Active"
-                                ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                : "bg-amber-50 text-amber-700 border-amber-200"
-                            }
-                          >
-                            {result.status}
-                          </Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  )
-                )}
-              </div>
-              {selectedSponsor && (
-                <Card className="p-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold">
-                      {selectedSponsor.first_name} {selectedSponsor.last_name}
-                    </p>
-                    <p className="text-xs text-mute">
-                      {selectedSponsor.email || "No email"} • {selectedSponsor.phone || "No phone"}
-                    </p>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={
-                      selectedSponsor.status === "Active"
-                        ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                        : "bg-amber-50 text-amber-600 border-amber-200"
-                    }
-                  >
-                    {selectedSponsor.status}
-                  </Badge>
-                </Card>
-              )}
-              {sponsorDetailLoading && (
-                <p className="text-xs text-mute">Syncing membership profile…</p>
-              )}
-              {selectedSponsor && selectedSponsor.status !== "Active" && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/80 text-xs text-amber-900 p-3">
-                  Sponsor status is {selectedSponsor.status}. Only active members can fund sponsorships—confirm their status
-                  in Membership or select a different sponsor.
-                </div>
-              )}
-              {sponsorError && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3 flex gap-2">
-                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                  <div>
-                    <p>{sponsorError}</p>
-                    <p className="mt-1 text-[11px] text-rose-700/80">
-                      Update their record in Membership or choose another sponsor.
-                    </p>
-                  </div>
-                </div>
-              )}
-              {sponsorshipForm.sponsor_member_id && (
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Father of Repentance</label>
-                  {autoFatherLocked ? (
-                    <>
-                      <Input value={selectedFatherName || "Synced from membership"} disabled />
-                      <p className="text-xs text-mute mt-1">
-                        This sponsor already has a Father of Repentance in Membership. Update their profile to change it.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Search priests"
-                          value={priestQuery}
-                          onChange={(event) => setPriestQuery(event.target.value)}
-                        />
-                        {sponsorshipForm.father_of_repentance_id && (
-                          <Button type="button" variant="ghost" onClick={handleClearFather}>
-                            Clear
-                          </Button>
-                        )}
-                      </div>
-                      <div className="mt-2 border border-border rounded-2xl max-h-40 overflow-y-auto">
-                        {filteredPriests.length ? (
-                          <ul className="divide-y divide-border/60">
-                            {filteredPriests.slice(0, 6).map((priest) => (
-                              <li key={priest.id}>
-                                <button
-                                  type="button"
-                                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between ${
-                                    String(priest.id) === sponsorshipForm.father_of_repentance_id
-                                      ? "bg-accent/10"
-                                      : "hover:bg-muted/60"
-                                  }`}
-                                  onClick={() => handlePriestSelect(priest)}
-                                >
-                                  <span>{priest.full_name}</span>
-                                  <Badge variant="outline" className="text-[10px]">
-                                    {priest.status}
-                                  </Badge>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-xs text-mute px-3 py-2">
-                            {priestLoading ? "Loading priests…" : "No matching priests"}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Sponsor ID</label>
-                        <Input
-                          type="number"
-                          value={sponsorshipForm.sponsor_member_id}
-                          onChange={(event) => {
-                            setSelectedSponsor(null);
-                            setSponsorshipForm((prev) => ({ ...prev, sponsor_member_id: event.target.value }));
-                          }}
-                        />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Beneficiary member ID</label>
-                  <Input
-                    type="number"
-                    value={sponsorshipForm.beneficiary_member_id}
-                    onChange={(event) =>
-                      setSponsorshipForm((prev) => ({ ...prev, beneficiary_member_id: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Link newcomer</label>
-                <Select
-                  value={sponsorshipForm.newcomer_id}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, newcomer_id: event.target.value }))
-                  }
-                >
-                  <option value="">Select newcomer</option>
-                  {newcomers?.items
-                    .filter((item) => item.status !== "Converted")
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.first_name} {item.last_name}
-                      </option>
-                    ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Beneficiary name (fallback)</label>
-                <Input
-                  value={sponsorshipForm.beneficiary_name}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, beneficiary_name: event.target.value }))
-                  }
-                  placeholder="Family or newcomer name"
-                />
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Monthly amount (CAD)</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    step="10"
-                    value={sponsorshipForm.monthly_amount}
-                    onChange={(event) =>
-                      setSponsorshipForm((prev) => ({ ...prev, monthly_amount: event.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Start date</label>
-                  <Input
-                    type="date"
-                    value={sponsorshipForm.start_date}
-                    onChange={(event) =>
-                      setSponsorshipForm((prev) => ({ ...prev, start_date: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {wizardStep === 1 && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Frequency</label>
-                <div className="flex flex-wrap gap-2">
-                  {FREQUENCIES.map((frequency) => (
-                    <ChipButton
-                      key={frequency}
-                      label={frequency}
-                      active={sponsorshipForm.frequency === frequency}
-                      onClick={() => setSponsorshipForm((prev) => ({ ...prev, frequency }))}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Program</label>
-                <Select
-                  value={sponsorshipForm.program}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, program: event.target.value as SponsorshipProgram }))
-                  }
-                >
-                  {PROGRAM_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-2">Pledge channel</label>
-                <div className="grid md:grid-cols-2 gap-3">
-                      {PLEDGE_CHANNELS.map((channel) => {
-                        const active = sponsorshipForm.pledge_channel === channel.value;
-                        const Icon = channel.icon;
-                        return (
-                          <button
-                            key={channel.value}
-                            type="button"
-                            className={`rounded-2xl border p-3 text-left flex items-center gap-3 ${
-                              active ? "border-accent bg-accent/5" : "border-border hover:border-accent/60"
-                            }`}
-                            onClick={() =>
-                              setSponsorshipForm((prev) => ({ ...prev, pledge_channel: channel.value }))
-                        }
-                      >
-                        <Icon className="h-5 w-5 text-accent" />
-                        <div>
-                          <div className="font-medium text-sm">{channel.label}</div>
-                          <div className="text-xs text-mute">{channel.description}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-2">Reminder channel</label>
-                <div className="grid md:grid-cols-2 gap-3">
-                      {REMINDER_CHANNELS.map((channel) => {
-                        const active = sponsorshipForm.reminder_channel === channel.value;
-                        const Icon = channel.icon;
-                        return (
-                          <button
-                            key={channel.value}
-                            type="button"
-                            className={`rounded-2xl border p-3 text-left flex items-center gap-3 ${
-                              active ? "border-accent bg-accent/5" : "border-border hover:border-accent/60"
-                            }`}
-                        onClick={() =>
-                          setSponsorshipForm((prev) => ({ ...prev, reminder_channel: channel.value }))
-                        }
-                      >
-                        <Icon className="h-5 w-5 text-accent" />
-                        <div>
-                          <div className="font-medium text-sm">{channel.label}</div>
-                          <div className="text-xs text-mute">{channel.description}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Motivation</label>
-                <Select
-                  value={sponsorshipForm.motivation}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({
-                      ...prev,
-                      motivation: event.target.value as SponsorshipMotivation,
-                    }))
-                  }
-                >
-                  {MOTIVATION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Volunteer service</label>
-                <div className="flex flex-wrap gap-2">
-                  {combinedVolunteerOptions.map((option) => {
-                    const active = sponsorshipForm.volunteer_services.includes(option);
-                    return (
-                      <ChipButton
-                        key={option}
-                        label={option}
-                        active={active}
-                        className={!VOLUNTEER_OPTIONS.includes(option) ? "border-dashed" : undefined}
-                        onClick={() => toggleVolunteerService(option)}
-                      />
-                    );
-                  })}
-                </div>
-                <Input
-                  className="mt-2"
-                  placeholder="Other service"
-                  value={sponsorshipForm.volunteer_service_other}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, volunteer_service_other: event.target.value }))
-                  }
-                />
-                <div className="flex items-center gap-2 mt-2">
-                  <Button type="button" variant="outline" onClick={handleAddCustomVolunteer}>
-                    Add custom service
-                  </Button>
-                </div>
-                {(() => {
-                  const value = sponsorshipForm.volunteer_service_other.trim();
-                  if (!value) return null;
-                  const existingChip = combinedVolunteerOptions.find(
-                    (name) => name.toLowerCase() === value.toLowerCase(),
-                  );
-                  if (existingChip) {
-                    return (
-                      <p className="text-xs text-amber-600 mt-2">
-                        Looks like "{existingChip}" already exists—tap it above to select.
-                      </p>
-                    );
-                  }
-                  return null;
-                })()}
-                {volunteerSuggestions.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
-                    <span className="text-mute">Suggestions:</span>
-                    {volunteerSuggestions.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        className="rounded-full border border-dashed px-2 py-0.5 hover:border-accent transition"
-                        onClick={() => handleVolunteerSuggestionApply(suggestion)}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Payment information (optional)</label>
-                <Input
-                  value={sponsorshipForm.payment_information}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, payment_information: event.target.value }))
-                  }
-                  placeholder="E.g., linked to membership contribution"
-                />
-              </div>
-            </div>
-          )}
-
-          {wizardStep === 2 && (
-            <div className="space-y-4">
-              <div className="grid md:grid-cols-3 gap-3">
-                <div className="md:col-span-2 space-y-3">
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Planning month (calendar)</label>
-                    <Input
-                      type="month"
-                      value={sponsorshipForm.budget_month_year}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        const [year, month] = value.split("-");
-                        setSponsorshipForm((prev) => ({
-                          ...prev,
-                          budget_month_year: value,
-                          budget_month: month ?? "",
-                          budget_year: year ?? "",
-                        }));
-                      }}
-                    />
-                    <p className="text-xs text-mute mt-1">Use your browser picker to lock the exact month and fiscal year.</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase text-mute mb-1">Quick month shortcuts</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {MONTH_OPTIONS.map((option) => (
-                        <ChipButton
-                          key={option.value}
-                          label={option.label.slice(0, 3)}
-                          active={sponsorshipForm.budget_month === option.value}
-                          className="justify-center text-xs font-semibold"
-                          onClick={() => handleBudgetMonthSelect(option.value)}
-                        />
-                      ))}
-                    </div>
-                    {selectedBudgetMonthLabel && (
-                      <p className="text-xs text-mute mt-1">
-                        Selected: {selectedBudgetMonthLabel}{" "}
-                        {sponsorshipForm.budget_year || "(choose a year to finalize)"}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Budget year</label>
-                    <Select
-                      value={sponsorshipForm.budget_year}
-                      onChange={(event) =>
-                        setSponsorshipForm((prev) => {
-                          const nextYear = event.target.value;
-                          return {
-                            ...prev,
-                            budget_year: nextYear,
-                            budget_month_year: formatBudgetMonthYear(prev.budget_month, nextYear),
-                          };
-                        })
-                      }
-                    >
-                      <option value="">Select year</option>
-                      {YEAR_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                    <p className="text-xs text-mute mt-1">Needed for utilization + budget reports.</p>
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Capacity (slots)</label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={sponsorshipForm.budget_slots}
-                      onChange={(event) =>
-                        setSponsorshipForm((prev) => ({ ...prev, budget_slots: event.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Notes template</label>
-                <div className="flex flex-wrap gap-2">
-                  {NOTE_TEMPLATES.map((template) => {
-                    const active = sponsorshipForm.notes_template === template.value;
-                    return (
-                      <Button
-                        key={template.value}
-                        type="button"
-                        variant={active ? "default" : "outline"}
-                        className="text-xs"
-                        onClick={() => handleNotesTemplateApply(template.value)}
-                      >
-                        {template.label}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Notes</label>
-                <Textarea
-                  rows={3}
-                  placeholder="Document stewardship context, reminders, or special handling."
-                  value={sponsorshipForm.notes}
-                  onChange={(event) =>
-                    setSponsorshipForm((prev) => ({ ...prev, notes: event.target.value }))
-                  }
-                />
-                {sponsorshipForm.motivation === "Other" && (
-                  <p className="text-xs text-amber-700 mt-1">A short note is required when choosing Other.</p>
-                )}
-              </div>
-                    <Card className="p-4 space-y-2">
-                      <p className="text-xs uppercase text-mute">Review</p>
-                      <div className="grid md:grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-mute">Sponsor</p>
-                          <p className="font-medium">
-                            {selectedSponsor
-                              ? `${selectedSponsor.first_name} ${selectedSponsor.last_name} (#${selectedSponsor.id})`
-                              : sponsorshipForm.sponsor_member_id
-                                ? `Member #${sponsorshipForm.sponsor_member_id}`
-                                : "Not selected"}
-                          </p>
-                        </div>
-                  <div>
-                    <p className="text-xs text-mute">Beneficiary</p>
-                    <p className="font-medium">
-                      {sponsorshipForm.beneficiary_member_id
-                        ? `Member #${sponsorshipForm.beneficiary_member_id}`
-                        : sponsorshipForm.beneficiary_name || "Pending"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Father of Repentance</p>
-                    <p className="font-medium">
-                      {selectedFatherName || (autoFatherLocked ? "Synced from membership" : "Not selected")}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Frequency</p>
-                    <p className="font-medium">{sponsorshipForm.frequency}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Program</p>
-                    <p className="font-medium">{sponsorshipForm.program}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Monthly amount</p>
-                    <p className="font-medium">{currency(Number(sponsorshipForm.monthly_amount || 0))}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Budget</p>
-                    <p className="font-medium">
-                      {selectedBudgetMonthLabel && sponsorshipForm.budget_year
-                        ? `${selectedBudgetMonthLabel} ${sponsorshipForm.budget_year}`
-                        : "Not set"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-mute">Volunteer tags</p>
-                    <p className="font-medium">
-                      {sponsorshipForm.volunteer_services.length
-                        ? sponsorshipForm.volunteer_services.join(", ")
-                        : "No volunteer service recorded"}
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          )}
-        </div>
-        <div className="px-6 py-4 border-t border-border flex items-center justify-between gap-3">
-          <Button variant="ghost" onClick={handleCloseSponsorshipModal}>
-            Cancel
-          </Button>
-          <div className="flex gap-2">
-            {wizardStep > 0 && (
-              <Button variant="outline" onClick={() => setWizardStep((prev) => Math.max(0, prev - 1))}>
-                Back
-              </Button>
-            )}
-            {wizardStep < WIZARD_STEPS.length - 1 ? (
-              <Button onClick={handleNextStep}>Next</Button>
-            ) : (
-              <Button onClick={handleSponsorshipSubmit}>Create sponsorship</Button>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    </>
-  )}
-</AnimatePresence>
-
       <AnimatePresence>
-        {showNewcomerForm && (
-          <Modal title="Register newcomer" onClose={() => setShowNewcomerForm(false)}>
-            <div className="space-y-3">
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">First name</label>
-                  <Input
-                    value={newcomerForm.first_name}
-                    onChange={(event) =>
-                      setNewcomerForm((prev) => ({ ...prev, first_name: event.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Last name</label>
-                  <Input
-                    value={newcomerForm.last_name}
-                    onChange={(event) =>
-                      setNewcomerForm((prev) => ({ ...prev, last_name: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Phone</label>
-                  <PhoneInput value={newcomerForm.contact_phone} onChange={handleNewcomerPhoneChange} />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Email</label>
-                  <Input
-                    type="email"
-                    value={newcomerForm.contact_email}
-                    onChange={(event) =>
-                      setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Arrival date</label>
-                  <Input
-                    type="date"
-                    value={newcomerForm.arrival_date}
-                    onChange={(event) =>
-                      setNewcomerForm((prev) => ({ ...prev, arrival_date: event.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Service type</label>
-                  <Input
-                    value={newcomerForm.service_type}
-                    onChange={(event) =>
-                      setNewcomerForm((prev) => ({ ...prev, service_type: event.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Notes</label>
-                <Textarea
-                  rows={3}
-                  value={newcomerForm.notes}
-                  onChange={(event) =>
-                    setNewcomerForm((prev) => ({ ...prev, notes: event.target.value }))
-                  }
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="ghost" onClick={() => setShowNewcomerForm(false)}>
-                  Cancel
+        {statusModal.open && statusModal.sponsorship && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+            />
+            <motion.div
+              className="fixed inset-x-0 top-24 mx-auto w-full max-w-lg bg-card border border-border rounded-2xl z-50 p-6 space-y-4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">{statusModal.title}</h3>
+                <Button
+                  variant="ghost"
+                  onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+                >
+                  Close
                 </Button>
-                <Button onClick={handleNewcomerSubmit}>Save newcomer</Button>
               </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {convertTarget && (
-          <Modal
-            title={`Convert ${convertTarget.first_name} ${convertTarget.last_name}`}
-            onClose={() => setConvertTarget(null)}
-          >
-            <div className="space-y-3">
-              <div className="grid md:grid-cols-2 gap-3">
+              {statusModal.reasonRequired && (
                 <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Phone</label>
-                  <PhoneInput value={convertForm.phone} onChange={handleConvertPhoneChange} />
+                  <label className="text-xs uppercase text-mute block mb-1">Reason</label>
+                  <Textarea value={statusReason} onChange={(event) => setStatusReason(event.target.value)} rows={4} />
                 </div>
-                <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Email</label>
-                  <Input
-                    type="email"
-                    value={convertForm.email}
-                    onChange={(event) => setConvertForm((prev) => ({ ...prev, email: event.target.value }))}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Member status</label>
-                <Select
-                  value={convertForm.status}
-                  onChange={(event) =>
-                    setConvertForm((prev) => ({ ...prev, status: event.target.value }))
-                  }
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs uppercase text-mute block mb-1">Notes</label>
-                <Textarea
-                  rows={3}
-                  value={convertForm.notes}
-                  onChange={(event) => setConvertForm((prev) => ({ ...prev, notes: event.target.value }))}
-                />
-              </div>
+              )}
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => setConvertTarget(null)}>
+                <Button
+                  variant="ghost"
+                  onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+                >
                   Cancel
                 </Button>
-                <Button onClick={handleConvertSubmit}>Convert</Button>
+                <Button onClick={handleStatusTransition} disabled={statusSubmitting}>
+                  {statusSubmitting ? "Updating..." : "Confirm"}
+                </Button>
               </div>
-            </div>
-          </Modal>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-type MetricCardProps = {
-  icon: LucideIcon;
-  label: string;
-  value: number | string;
-  description?: string;
-};
-
-function MetricCard({ icon: Icon, label, value, description }: MetricCardProps) {
-  return (
-    <Card className="p-4 flex items-center gap-3">
-      <div className="rounded-2xl bg-muted/40 p-3">
-        <Icon className="h-5 w-5 text-accent" />
-      </div>
-      <div>
-        <p className="text-xs uppercase tracking-wide text-mute">{label}</p>
-        <p className="text-xl font-semibold">{value}</p>
-        {description && <p className="text-xs text-mute">{description}</p>}
-      </div>
-    </Card>
-  );
-}
-
-function currency(value: number) {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(
-    value || 0,
-  );
-}
-
-function formatBudgetMonthYear(month: string, year: string) {
-  if (!month || !year) return "";
-  const padded = month.padStart(2, "0");
-  return `${year}-${padded}`;
-}
-
-type ChipButtonProps = {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  className?: string;
-};
-
-function ChipButton({ label, active, onClick, className }: ChipButtonProps) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`inline-flex items-center rounded-full px-4 py-1.5 text-sm border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-accent cursor-pointer ${
-        active ? "bg-accent text-white border-accent shadow-sm" : "bg-card border-border hover:border-accent/60"
-      } ${className ?? ""}`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 10 }}
-          className="w-full max-w-2xl bg-card rounded-2xl border border-border shadow-2xl p-6 space-y-4"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{title}</h2>
-            <Button variant="ghost" onClick={onClose}>
-              Close
-            </Button>
-          </div>
-          {children}
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
   );
 }

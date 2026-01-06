@@ -29,7 +29,7 @@ def test_sponsorship_flow_with_newcomer_conversion(
         "newcomer_id": newcomer_id,
         "monthly_amount": "150.00",
         "start_date": date.today().isoformat(),
-        "status": "Active",
+        "status": "Submitted",
         "frequency": "Monthly",
         "program": "Education",
         "pledge_channel": "InPerson",
@@ -49,7 +49,7 @@ def test_sponsorship_flow_with_newcomer_conversion(
         json={"phone": "+251911223344", "status": "Active"},
     )
     assert convert_resp.status_code == 200, convert_resp.text
-    assert convert_resp.json()["status"] == "Converted"
+    assert convert_resp.json()["status"] == "Closed"
 
     authorize(sponsorship_user)
     detail_resp = client.get(f"/sponsorships/{sponsorship_id}")
@@ -59,7 +59,6 @@ def test_sponsorship_flow_with_newcomer_conversion(
     assert detail["newcomer"] is None
     assert detail["volunteer_services"] == ["HolyDayCleanup", "MealSupport"]
     assert detail["volunteer_service_other"] == "Weekend outreach"
-    assert "payment_health" in detail
 
 
 def test_office_admin_cannot_create_sponsorship(
@@ -100,7 +99,7 @@ def test_sponsorship_metrics_endpoint(client, authorize, sponsorship_user, sampl
         "beneficiary_name": "Metrics Beneficiary",
         "monthly_amount": "75.00",
         "start_date": date.today().isoformat(),
-        "status": "Active",
+        "status": "Draft",
         "frequency": "Monthly",
     }
     create_resp = client.post("/sponsorships", json=payload)
@@ -109,6 +108,8 @@ def test_sponsorship_metrics_endpoint(client, authorize, sponsorship_user, sampl
     metrics_resp = client.get("/sponsorships/metrics")
     assert metrics_resp.status_code == 200, metrics_resp.text
     metrics = metrics_resp.json()
-    assert "total_active_sponsors" in metrics
+    assert "active_cases" in metrics
+    assert "submitted_cases" in metrics
+    assert "month_executed" in metrics
     assert "budget_utilization_percent" in metrics
     assert "alerts" in metrics

@@ -12,6 +12,7 @@ def test_create_member_under_18_fails(client, authorize, registrar_user):
         "birth_date": birth_date.isoformat(),
         "status": "Active",
         "phone": "6135550199",
+        "pays_contribution": True,
     }
     response = client.post("/members", json=payload)
     assert response.status_code == 400
@@ -27,6 +28,7 @@ def test_create_member_with_child_over_18_fails(client, authorize, registrar_use
         "birth_date": today.replace(year=today.year - 40).isoformat(),
         "status": "Active",
         "phone": "6135550198",
+        "pays_contribution": True,
         "children": [
             {"first_name": "Adult", "last_name": "Child", "birth_date": child_birth_date.isoformat()}
         ]

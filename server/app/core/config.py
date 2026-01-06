@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     CHILD_PROMOTION_DIGEST_LOOKAHEAD_DAYS: int = 60
     CHILD_PROMOTION_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
+    SPONSORSHIP_REMINDER_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -56,6 +57,10 @@ class Settings(BaseSettings):
     @property
     def CHILD_PROMOTION_NOTIFY_ROLES_LIST(self) -> list[str]:
         return _split_csv(self.CHILD_PROMOTION_NOTIFY_ROLES)
+
+    @property
+    def SPONSORSHIP_REMINDER_NOTIFY_ROLES_LIST(self) -> list[str]:
+        return _split_csv(self.SPONSORSHIP_REMINDER_NOTIFY_ROLES)
 
 
 def _split_csv(value: str | None) -> list[str]:

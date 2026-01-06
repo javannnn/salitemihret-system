@@ -16,7 +16,10 @@ const CreateMember = lazy(() => import("@/pages/Members/Create"));
 const EditMember = lazy(() => import("@/pages/Members/Edit"));
 const PaymentsLedger = lazy(() => import("@/pages/Payments/Ledger"));
 const MemberPaymentTimeline = lazy(() => import("@/pages/Payments/MemberTimeline"));
+const NewcomersWorkspace = lazy(() => import("@/pages/Newcomers"));
+const NewcomerProfile = lazy(() => import("@/pages/Newcomers/Profile"));
 const SponsorshipWorkspace = lazy(() => import("@/pages/Sponsorships"));
+const SponsorshipCaseProfile = lazy(() => import("@/pages/Sponsorships/CaseProfile"));
 const SchoolsWorkspace = lazy(() => import("@/pages/Schools"));
 const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
@@ -45,7 +48,10 @@ export default function App() {
           <Route path="/members/:id/edit" element={<EditMember />} />
           <Route path="/payments" element={<PaymentsLedger />} />
           <Route path="/payments/members/:memberId" element={<MemberPaymentTimeline />} />
+          <Route path="/newcomers" element={<NewcomersWorkspace />} />
+          <Route path="/newcomers/:id" element={<NewcomerProfile />} />
           <Route path="/sponsorships" element={<SponsorshipWorkspace />} />
+          <Route path="/sponsorships/:id" element={<SponsorshipCaseProfile />} />
           <Route path="/schools" element={<SchoolsWorkspace />} />
           <Route
             path="/admin/users"

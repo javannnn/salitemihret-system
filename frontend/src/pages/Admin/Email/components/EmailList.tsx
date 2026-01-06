@@ -1,7 +1,7 @@
 import { Search, RotateCw } from "lucide-react";
 import { Input } from "@/components/ui";
 import { AdminEmailSummary } from "@/lib/api";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 interface EmailListProps {
     emails: AdminEmailSummary[];
@@ -15,6 +15,9 @@ interface EmailListProps {
 
 export function EmailList({ emails, selectedId, onSelect, loading, folderLabel, onRefresh, refreshing }: EmailListProps) {
     const [searchQuery, setSearchQuery] = useState("");
+    useEffect(() => {
+        setSearchQuery("");
+    }, [folderLabel]);
 
     const filteredEmails = useMemo(() => {
         if (!searchQuery.trim()) return emails;

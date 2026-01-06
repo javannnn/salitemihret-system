@@ -6,8 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, validator
 
-SponsorshipStatus = Literal["Draft", "Active", "Suspended", "Completed", "Closed"]
-SponsorshipFrequency = Literal["OneTime", "Monthly", "Quarterly", "Yearly"]
+SponsorshipStatus = Literal["Draft", "Submitted", "Approved", "Rejected", "Active", "Suspended", "Completed", "Closed"]
 SponsorshipDecision = Literal["Approved", "Rejected", "Pending"]
 SponsorshipProgram = Literal[
     "Education",
@@ -53,13 +52,14 @@ class SponsorshipBase(BaseModel):
     volunteer_service_other: Optional[str] = Field(None, max_length=255)
     payment_information: Optional[str] = Field(None, max_length=255)
     last_sponsored_date: Optional[date] = None
-    frequency: SponsorshipFrequency = "Monthly"
+    frequency: str = Field(default="Monthly", max_length=50)
     last_status: Optional[SponsorshipDecision] = None
     last_status_reason: Optional[str] = Field(None, max_length=255)
     start_date: date
     end_date: Optional[date] = None
     status: SponsorshipStatus = "Draft"
     monthly_amount: Decimal = Field(..., gt=0)
+    received_amount: Optional[Decimal] = Field(None, ge=0)
     program: Optional[SponsorshipProgram] = None
     pledge_channel: Optional[SponsorshipPledgeChannel] = None
     reminder_channel: Optional[SponsorshipReminderChannel] = "Email"
@@ -100,13 +100,14 @@ class SponsorshipUpdate(BaseModel):
     volunteer_service_other: Optional[str] = Field(None, max_length=255)
     payment_information: Optional[str] = Field(None, max_length=255)
     last_sponsored_date: Optional[date] = None
-    frequency: Optional[SponsorshipFrequency] = None
+    frequency: Optional[str] = Field(None, max_length=50)
     last_status: Optional[SponsorshipDecision] = None
     last_status_reason: Optional[str] = Field(None, max_length=255)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: Optional[SponsorshipStatus] = None
     monthly_amount: Optional[Decimal] = Field(None, gt=0)
+    received_amount: Optional[Decimal] = Field(None, ge=0)
     program: Optional[SponsorshipProgram] = None
     pledge_channel: Optional[SponsorshipPledgeChannel] = None
     reminder_channel: Optional[SponsorshipReminderChannel] = None
@@ -119,6 +120,7 @@ class SponsorshipUpdate(BaseModel):
     assigned_staff_id: Optional[int] = None
     used_slots: Optional[int] = Field(None, ge=0)
     notes_template: Optional[SponsorshipNotesTemplate] = None
+    rejection_reason: Optional[str] = None
 
     @validator("end_date")
     def validate_dates(cls, value: Optional[date], values: dict) -> Optional[date]:
@@ -135,14 +137,6 @@ class SponsorshipUpdate(BaseModel):
         return value
 
 
-class PaymentHealth(BaseModel):
-    monthly_contribution: Optional[Decimal]
-    method: Optional[str]
-    last_payment_date: Optional[date]
-    status: Literal["Green", "Yellow", "Red"]
-    days_since_last_payment: Optional[int]
-
-
 class SponsorshipOut(BaseModel):
     id: int
     sponsor: MemberSummary
@@ -155,9 +149,10 @@ class SponsorshipOut(BaseModel):
     payment_information: Optional[str]
     last_sponsored_date: Optional[date]
     days_since_last_sponsorship: Optional[int]
-    frequency: SponsorshipFrequency
+    frequency: str
     status: SponsorshipStatus
     monthly_amount: Decimal
+    received_amount: Decimal
     program: Optional[SponsorshipProgram]
     pledge_channel: Optional[SponsorshipPledgeChannel]
     reminder_channel: Optional[SponsorshipReminderChannel]
@@ -178,12 +173,15 @@ class SponsorshipOut(BaseModel):
     reminder_last_sent: Optional[datetime]
     reminder_next_due: Optional[datetime]
     assigned_staff_id: Optional[int]
-    amount_paid: Decimal
-    pledged_total: Decimal
-    outstanding_balance: Decimal
+    submitted_at: Optional[datetime]
+    submitted_by_id: Optional[int]
+    approved_at: Optional[datetime]
+    approved_by_id: Optional[int]
+    rejected_at: Optional[datetime]
+    rejected_by_id: Optional[int]
+    rejection_reason: Optional[str]
     sponsor_status: Optional[str]
     father_of_repentance_name: Optional[str]
-    payment_health: Optional["PaymentHealth"]
     created_at: datetime
     updated_at: datetime
 
@@ -210,9 +208,64 @@ class BudgetSummary(BaseModel):
 
 
 class SponsorshipMetrics(BaseModel):
-    total_active_sponsors: int
-    newcomers_sponsored: int
-    month_sponsorships: int
+    active_cases: int
+    submitted_cases: int
+    suspended_cases: int
+    month_executed: int
     budget_utilization_percent: float
     current_budget: Optional[BudgetSummary]
     alerts: list[str]
+
+
+class SponsorshipSponsorContext(BaseModel):
+    member_id: int
+    member_name: str
+    member_status: Optional[str]
+    last_sponsorship_id: Optional[int]
+    last_sponsorship_date: Optional[date]
+    last_sponsorship_status: Optional[str]
+    history_count_last_12_months: int
+    volunteer_services: list[str]
+    father_of_repentance_id: Optional[int]
+    father_of_repentance_name: Optional[str]
+    budget_usage: Optional[BudgetSummary]
+
+
+class SponsorshipTimelineEvent(BaseModel):
+    id: int
+    event_type: str
+    label: str
+    from_status: Optional[str]
+    to_status: Optional[str]
+    reason: Optional[str]
+    actor_id: Optional[int]
+    actor_name: Optional[str]
+    occurred_at: datetime
+
+
+class SponsorshipTimelineResponse(BaseModel):
+    items: list[SponsorshipTimelineEvent]
+    total: int
+
+
+class SponsorshipNoteCreate(BaseModel):
+    note: str = Field(..., min_length=1)
+
+
+class SponsorshipNoteOut(BaseModel):
+    id: int
+    note: Optional[str]
+    restricted: bool
+    created_at: datetime
+    created_by_id: Optional[int]
+    created_by_name: Optional[str]
+
+
+class SponsorshipNotesListResponse(BaseModel):
+    items: list[SponsorshipNoteOut]
+    total: int
+
+
+class SponsorshipStatusTransitionRequest(BaseModel):
+    status: SponsorshipStatus
+    reason: Optional[str] = Field(None, max_length=500)

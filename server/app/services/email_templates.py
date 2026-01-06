@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Sequence
 
 from app.core.config import settings
@@ -304,4 +305,148 @@ def render_payment_reminder_email(
     if pay_url:
         text += f"Review payment: {pay_url}\n"
     text += "If you already paid, you can ignore this reminder.\n"
+    return html, text
+
+
+def _format_amount(value: str | float | Decimal | None) -> str:
+    if value is None:
+        return "—"
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"))
+        return f"${amount:,.2f}"
+    except Exception:
+        return str(value)
+
+
+def render_sponsorship_reminder_email(
+    *,
+    sponsor_name: str,
+    beneficiary_name: str,
+    amount: str | float | Decimal | None,
+    frequency: str,
+    program: str | None,
+    reminder_channel: str | None,
+    case_label: str,
+    last_sent: str | None,
+    next_due: str | None,
+) -> tuple[str, str]:
+    amount_text = _format_amount(amount)
+    program_text = program or "General support"
+    channel_text = reminder_channel or "Email"
+    last_sent_text = last_sent or "Just now"
+    next_due_text = next_due or "To be scheduled"
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">Hi {sponsor_name},</p>
+      <p style="margin:0 0 16px 0;">This is a gentle reminder about your sponsorship pledge.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Sponsorship details</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Case:</strong> {case_label}<br>
+          <strong>Beneficiary:</strong> {beneficiary_name}<br>
+          <strong>Program:</strong> {program_text}<br>
+          <strong>Pledge:</strong> {amount_text} ({frequency})<br>
+          <strong>Preferred channel:</strong> {channel_text}<br>
+          <strong>Last reminder:</strong> {last_sent_text}<br>
+          <strong>Next reminder:</strong> {next_due_text}
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">Thank you for supporting the community. If you need to update your pledge, please reply to this message.</p>
+    """
+    html = _wrap_brand_email(
+        headline="Sponsorship reminder",
+        body_html=body_html,
+        preview_text=f"Reminder for sponsorship case {case_label}",
+        footer_lines=["This reminder was sent automatically by the sponsorship system."],
+    )
+    text = (
+        f"Hi {sponsor_name},\n\n"
+        f"This is a reminder about your sponsorship pledge.\n\n"
+        f"Case: {case_label}\n"
+        f"Beneficiary: {beneficiary_name}\n"
+        f"Program: {program_text}\n"
+        f"Pledge: {amount_text} ({frequency})\n"
+        f"Preferred channel: {channel_text}\n"
+        f"Last reminder: {last_sent_text}\n"
+        f"Next reminder: {next_due_text}\n\n"
+        "Thank you for supporting the community. Reply to this email if you need to update your pledge.\n"
+    )
+    return html, text
+
+
+def render_sponsorship_admin_reminder_email(
+    *,
+    sponsor_name: str,
+    sponsor_email: str | None,
+    sponsor_phone: str | None,
+    beneficiary_name: str,
+    amount: str | float | Decimal | None,
+    frequency: str,
+    program: str | None,
+    reminder_channel: str | None,
+    case_label: str,
+    last_sent: str | None,
+    next_due: str | None,
+    dashboard_url: str,
+    whatsapp_message: str,
+) -> tuple[str, str]:
+    amount_text = _format_amount(amount)
+    program_text = program or "General support"
+    channel_text = reminder_channel or "Email"
+    last_sent_text = last_sent or "Just now"
+    next_due_text = next_due or "To be scheduled"
+    sponsor_email_text = sponsor_email or "Not on file"
+    sponsor_phone_text = sponsor_phone or "Not on file"
+    whatsapp_html = whatsapp_message.replace("\n", "<br>")
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">A sponsorship reminder was triggered for the case below.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Case summary</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Case:</strong> {case_label}<br>
+          <strong>Beneficiary:</strong> {beneficiary_name}<br>
+          <strong>Program:</strong> {program_text}<br>
+          <strong>Pledge:</strong> {amount_text} ({frequency})<br>
+          <strong>Preferred channel:</strong> {channel_text}<br>
+          <strong>Last reminder:</strong> {last_sent_text}<br>
+          <strong>Next reminder:</strong> {next_due_text}
+        </div>
+      </div>
+      <div style="margin-top:16px; padding:14px 16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Sponsor contact</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Name:</strong> {sponsor_name}<br>
+          <strong>Email:</strong> {sponsor_email_text}<br>
+          <strong>Phone:</strong> {sponsor_phone_text}
+        </div>
+      </div>
+      <div style="margin-top:16px; padding:14px 16px; background:#f1f5f9; border-radius:12px; border:1px solid #e2e8f0;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">WhatsApp message</div>
+        <div style="color:{TEXT}; line-height:1.6;">{whatsapp_html}</div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">Use the message above for WhatsApp outreach when needed.</p>
+    """
+    html = _wrap_brand_email(
+        headline="Sponsorship reminder sent",
+        body_html=body_html,
+        preview_text=f"Reminder sent for sponsorship case {case_label}",
+        cta_label="Open case",
+        cta_url=dashboard_url,
+        footer_lines=["This notification was generated automatically."],
+    )
+    text = (
+        "Sponsorship reminder sent.\n\n"
+        f"Case: {case_label}\n"
+        f"Beneficiary: {beneficiary_name}\n"
+        f"Program: {program_text}\n"
+        f"Pledge: {amount_text} ({frequency})\n"
+        f"Preferred channel: {channel_text}\n"
+        f"Last reminder: {last_sent_text}\n"
+        f"Next reminder: {next_due_text}\n\n"
+        f"Sponsor: {sponsor_name}\n"
+        f"Email: {sponsor_email_text}\n"
+        f"Phone: {sponsor_phone_text}\n\n"
+        "WhatsApp message:\n"
+        f"{whatsapp_message}\n\n"
+        f"Open case: {dashboard_url}\n"
+    )
     return html, text

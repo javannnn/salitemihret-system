@@ -1,6 +1,49 @@
 import { notifySessionExpired } from "@/lib/session";
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8001";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+
+export type ApiCapabilities = {
+  supportsStaff: boolean;
+  supportsSponsorContext: boolean;
+  supportsSubmittedStatus: boolean;
+};
+
+let apiCapabilitiesPromise: Promise<ApiCapabilities> | null = null;
+
+export async function getApiCapabilities(): Promise<ApiCapabilities> {
+  if (apiCapabilitiesPromise) return apiCapabilitiesPromise;
+  apiCapabilitiesPromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/openapi.json`, { headers: { Accept: "application/json" } });
+      if (!response.ok) {
+        return { supportsStaff: true, supportsSponsorContext: true, supportsSubmittedStatus: true };
+      }
+      const payload = (await response.json()) as {
+        paths?: Record<string, unknown>;
+        components?: {
+          schemas?: {
+            SponsorshipCreate?: {
+              properties?: {
+                status?: {
+                  enum?: string[];
+                };
+              };
+            };
+          };
+        };
+      };
+      const paths = payload.paths ?? {};
+      const supportsStaff = Boolean(paths["/staff"] || paths["/staff/"]);
+      const supportsSponsorContext = Boolean(paths["/sponsorships/sponsors/{member_id}/context"]);
+      const statusEnum = payload.components?.schemas?.SponsorshipCreate?.properties?.status?.enum;
+      const supportsSubmittedStatus = Array.isArray(statusEnum) ? statusEnum.includes("Submitted") : true;
+      return { supportsStaff, supportsSponsorContext, supportsSubmittedStatus };
+    } catch {
+      return { supportsStaff: true, supportsSponsorContext: true, supportsSubmittedStatus: true };
+    }
+  })();
+  return apiCapabilitiesPromise;
+}
 
 export type MemberStatus = "Active" | "Inactive" | "Pending" | "Archived";
 
@@ -326,6 +369,19 @@ export type AccountProfile = {
   next_username_change_at?: string | null;
 };
 
+export type StaffSummary = {
+  id: number;
+  email: string;
+  username: string;
+  full_name?: string | null;
+  roles: string[];
+};
+
+export type StaffListResponse = {
+  items: StaffSummary[];
+  total: number;
+};
+
 export type SponsorshipProgram =
   | "Education"
   | "Nutrition"
@@ -344,14 +400,6 @@ export type SponsorshipMotivation =
   | "Other";
 export type SponsorshipNotesTemplate = "FollowUp" | "PaymentIssue" | "Gratitude" | "Escalation";
 
-export type PaymentHealth = {
-  monthly_contribution: number;
-  method?: string | null;
-  last_payment_date?: string | null;
-  status: "Green" | "Yellow" | "Red";
-  days_since_last_payment?: number | null;
-};
-
 export type Sponsorship = {
   id: number;
   sponsor: MemberSummary;
@@ -365,9 +413,10 @@ export type Sponsorship = {
   payment_information?: string | null;
   last_sponsored_date?: string | null;
   days_since_last_sponsorship?: number | null;
-  frequency: "OneTime" | "Monthly" | "Quarterly" | "Yearly";
-  status: "Draft" | "Active" | "Suspended" | "Completed" | "Closed";
+  frequency: string;
+  status: "Draft" | "Submitted" | "Approved" | "Rejected" | "Active" | "Suspended" | "Completed" | "Closed";
   monthly_amount: number;
+  received_amount: number;
   program?: SponsorshipProgram | null;
   pledge_channel?: SponsorshipPledgeChannel | null;
   reminder_channel?: SponsorshipReminderChannel | null;
@@ -388,11 +437,14 @@ export type Sponsorship = {
   reminder_last_sent?: string | null;
   reminder_next_due?: string | null;
   assigned_staff_id?: number | null;
-  amount_paid: number;
-  pledged_total: number;
-  outstanding_balance: number;
+  submitted_at?: string | null;
+  submitted_by_id?: number | null;
+  approved_at?: string | null;
+  approved_by_id?: number | null;
+  rejected_at?: string | null;
+  rejected_by_id?: number | null;
+  rejection_reason?: string | null;
   sponsor_status?: string | null;
-  payment_health?: PaymentHealth | null;
   created_at: string;
   updated_at: string;
 };
@@ -401,13 +453,21 @@ export type SponsorshipFilters = {
   status?: string;
   program?: string;
   sponsor_id?: number;
+  newcomer_id?: number;
   frequency?: string;
+  beneficiary_type?: string;
+  county?: string;
+  assigned_staff_id?: number;
+  budget_month?: number;
+  budget_year?: number;
   page?: number;
   page_size?: number;
   q?: string;
   has_newcomer?: boolean;
   start_date?: string;
   end_date?: string;
+  created_from?: string;
+  created_to?: string;
 };
 
 export type SponsorshipPayload = {
@@ -421,6 +481,7 @@ export type SponsorshipPayload = {
   payment_information?: string;
   last_sponsored_date?: string;
   monthly_amount: number;
+  received_amount?: number;
   start_date: string;
   frequency: Sponsorship["frequency"];
   status: Sponsorship["status"];
@@ -434,8 +495,14 @@ export type SponsorshipPayload = {
   budget_year?: number;
   budget_amount?: number;
   budget_slots?: number;
+  used_slots?: number;
   notes?: string;
   notes_template?: SponsorshipNotesTemplate;
+};
+
+export type SponsorshipStatusTransitionPayload = {
+  status: Sponsorship["status"];
+  reason?: string;
 };
 
 export type BudgetSummary = {
@@ -447,15 +514,65 @@ export type BudgetSummary = {
 };
 
 export type SponsorshipMetrics = {
-  total_active_sponsors: number;
-  newcomers_sponsored: number;
-  month_sponsorships: number;
+  active_cases: number;
+  submitted_cases: number;
+  suspended_cases: number;
+  month_executed: number;
   budget_utilization_percent: number;
   current_budget?: BudgetSummary | null;
   alerts: string[];
 };
 
 export type SponsorshipListResponse = Page<Sponsorship>;
+
+export type SponsorshipSponsorContext = {
+  member_id: number;
+  member_name: string;
+  member_status?: string | null;
+  last_sponsorship_id?: number | null;
+  last_sponsorship_date?: string | null;
+  last_sponsorship_status?: string | null;
+  history_count_last_12_months: number;
+  volunteer_services: string[];
+  father_of_repentance_id?: number | null;
+  father_of_repentance_name?: string | null;
+  budget_usage?: BudgetSummary | null;
+};
+
+export type SponsorshipTimelineEvent = {
+  id: number;
+  event_type: string;
+  label: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  reason?: string | null;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  occurred_at: string;
+};
+
+export type SponsorshipTimelineResponse = {
+  items: SponsorshipTimelineEvent[];
+  total: number;
+};
+
+export type SponsorshipNote = {
+  id: number;
+  note?: string | null;
+  restricted: boolean;
+  created_at: string;
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+};
+
+export type SponsorshipNotesListResponse = {
+  items: SponsorshipNote[];
+  total: number;
+};
+
+export type SponsorshipNotePayload = {
+  note: string;
+};
 
 export type Lesson = {
   id: number;
@@ -537,34 +654,140 @@ export type AbenetEnrollmentList = Page<AbenetEnrollment>;
 
 export type Newcomer = {
   id: number;
+  newcomer_code: string;
   first_name: string;
   last_name: string;
+  household_type: "Individual" | "Family";
   preferred_language?: string | null;
+  interpreter_required: boolean;
   contact_phone?: string | null;
+  contact_whatsapp?: string | null;
   contact_email?: string | null;
   family_size?: number | null;
   service_type?: string | null;
   arrival_date: string;
   country?: string | null;
   temporary_address?: string | null;
+  temporary_address_street?: string | null;
+  temporary_address_city?: string | null;
+  temporary_address_province?: string | null;
+  temporary_address_postal_code?: string | null;
+  current_address_street?: string | null;
+  current_address_city?: string | null;
+  current_address_province?: string | null;
+  current_address_postal_code?: string | null;
+  county?: string | null;
   referred_by?: string | null;
+  past_profession?: string | null;
   notes?: string | null;
-  status: "New" | "InProgress" | "Sponsored" | "Converted" | "Closed";
+  status: "New" | "Contacted" | "Assigned" | "InProgress" | "Settled" | "Closed";
+  is_inactive: boolean;
+  inactive_reason?: string | null;
+  inactive_notes?: string | null;
+  inactive_at?: string | null;
+  inactive_by_id?: number | null;
   sponsored_by_member_id?: number | null;
   father_of_repentance_id?: number | null;
   assigned_owner_id?: number | null;
   followup_due_date?: string | null;
   converted_member_id?: number | null;
+  assigned_owner_name?: string | null;
+  sponsored_by_member_name?: string | null;
+  last_interaction_at?: string | null;
+  latest_sponsorship_id?: number | null;
+  latest_sponsorship_status?: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export type NewcomerListResponse = Page<Newcomer>;
 
+export type NewcomerMetrics = {
+  new_count: number;
+  contacted_count: number;
+  assigned_count: number;
+  in_progress_count: number;
+  settled_count: number;
+  closed_count: number;
+  inactive_count: number;
+};
+
+export type NewcomerInteraction = {
+  id: number;
+  newcomer_id: number;
+  interaction_type: "Call" | "Visit" | "Meeting" | "Note" | "Other";
+  visibility: "Restricted" | "Shared";
+  note: string;
+  occurred_at: string;
+  created_at: string;
+  created_by_id?: number | null;
+};
+
+export type NewcomerInteractionListResponse = {
+  items: NewcomerInteraction[];
+  total: number;
+};
+
+export type NewcomerInteractionPayload = {
+  interaction_type?: NewcomerInteraction["interaction_type"];
+  visibility?: NewcomerInteraction["visibility"];
+  note: string;
+  occurred_at?: string;
+};
+
+export type NewcomerAddressHistory = {
+  id: number;
+  newcomer_id: number;
+  address_type: "Temporary" | "Current";
+  street?: string | null;
+  city?: string | null;
+  province?: string | null;
+  postal_code?: string | null;
+  changed_at: string;
+  changed_by_id?: number | null;
+};
+
+export type NewcomerAddressHistoryListResponse = {
+  items: NewcomerAddressHistory[];
+  total: number;
+};
+
+export type NewcomerTimelineEvent = {
+  id: number;
+  event_type: string;
+  label: string;
+  detail?: string | null;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  occurred_at: string;
+};
+
+export type NewcomerTimelineResponse = {
+  items: NewcomerTimelineEvent[];
+  total: number;
+};
+
+export type NewcomerStatusTransitionPayload = {
+  status: Newcomer["status"];
+  reason?: string;
+};
+
+export type NewcomerInactivatePayload = {
+  reason: string;
+  notes: string;
+};
+
+export type NewcomerReactivatePayload = {
+  reason?: string;
+};
+
 export type NewcomerFilters = {
   status?: string;
-  owner_id?: number;
+  assigned_owner_id?: number;
   sponsor_id?: number;
+  county?: string;
+  interpreter_required?: boolean;
+  inactive?: boolean;
   q?: string;
   page?: number;
   page_size?: number;
@@ -573,10 +796,28 @@ export type NewcomerFilters = {
 export type NewcomerPayload = {
   first_name: string;
   last_name: string;
+  household_type?: Newcomer["household_type"];
+  preferred_language?: string;
+  interpreter_required?: boolean;
   arrival_date: string;
   contact_phone?: string;
+  contact_whatsapp?: string;
   contact_email?: string;
   service_type?: string;
+  family_size?: number;
+  country?: string;
+  temporary_address?: string;
+  temporary_address_street?: string;
+  temporary_address_city?: string;
+  temporary_address_province?: string;
+  temporary_address_postal_code?: string;
+  current_address_street?: string;
+  current_address_city?: string;
+  current_address_province?: string;
+  current_address_postal_code?: string;
+  county?: string;
+  referred_by?: string;
+  past_profession?: string;
   notes?: string;
   status?: Newcomer["status"];
 };
@@ -759,8 +1000,16 @@ export async function listSponsorships(params: SponsorshipFilters = {}): Promise
   return api<SponsorshipListResponse>(`/sponsorships${query ? `?${query}` : ""}`);
 }
 
+export async function getSponsorship(id: number): Promise<Sponsorship> {
+  return api<Sponsorship>(`/sponsorships/${id}`);
+}
+
 export async function getSponsorshipMetrics(): Promise<SponsorshipMetrics> {
   return api<SponsorshipMetrics>("/sponsorships/metrics");
+}
+
+export async function getSponsorContext(memberId: number): Promise<SponsorshipSponsorContext> {
+  return api<SponsorshipSponsorContext>(`/sponsorships/sponsors/${memberId}/context`);
 }
 
 export async function createSponsorship(payload: SponsorshipPayload): Promise<Sponsorship> {
@@ -777,8 +1026,55 @@ export async function updateSponsorship(id: number, payload: Partial<Sponsorship
   });
 }
 
+export async function transitionSponsorshipStatus(id: number, payload: SponsorshipStatusTransitionPayload): Promise<Sponsorship> {
+  return api<Sponsorship>(`/sponsorships/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSponsorshipTimeline(id: number): Promise<SponsorshipTimelineResponse> {
+  return api<SponsorshipTimelineResponse>(`/sponsorships/${id}/timeline`);
+}
+
+export async function listSponsorshipNotes(id: number): Promise<SponsorshipNotesListResponse> {
+  return api<SponsorshipNotesListResponse>(`/sponsorships/${id}/notes`);
+}
+
+export async function createSponsorshipNote(id: number, payload: SponsorshipNotePayload): Promise<SponsorshipNote> {
+  return api<SponsorshipNote>(`/sponsorships/${id}/notes`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function remindSponsorship(id: number): Promise<Sponsorship> {
   return api<Sponsorship>(`/sponsorships/${id}/remind`, { method: "POST" });
+}
+
+let staffEndpointAvailable: boolean | null = null;
+
+export async function listStaff(params: { search?: string; role?: string; limit?: number } = {}): Promise<StaffListResponse> {
+  if (staffEndpointAvailable === false) {
+    return { items: [], total: 0 };
+  }
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  try {
+    const response = await api<StaffListResponse>(`/staff${query ? `?${query}` : ""}`);
+    staffEndpointAvailable = true;
+    return response;
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
+      staffEndpointAvailable = false;
+      return { items: [], total: 0 };
+    }
+    throw error;
+  }
 }
 
 export async function listNewcomers(params: NewcomerFilters = {}): Promise<NewcomerListResponse> {
@@ -790,6 +1086,14 @@ export async function listNewcomers(params: NewcomerFilters = {}): Promise<Newco
   });
   const query = search.toString();
   return api<NewcomerListResponse>(`/newcomers${query ? `?${query}` : ""}`);
+}
+
+export async function getNewcomerMetrics(): Promise<NewcomerMetrics> {
+  return api<NewcomerMetrics>("/newcomers/metrics");
+}
+
+export async function getNewcomer(id: number): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}`);
 }
 
 export async function createNewcomer(payload: NewcomerPayload): Promise<Newcomer> {
@@ -806,11 +1110,51 @@ export async function updateNewcomer(id: number, payload: NewcomerUpdatePayload)
   });
 }
 
+export async function transitionNewcomerStatus(id: number, payload: NewcomerStatusTransitionPayload): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}/status`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function inactivateNewcomer(id: number, payload: NewcomerInactivatePayload): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}/inactivate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reactivateNewcomer(id: number, payload: NewcomerReactivatePayload): Promise<Newcomer> {
+  return api<Newcomer>(`/newcomers/${id}/reactivate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getNewcomerTimeline(id: number): Promise<NewcomerTimelineResponse> {
+  return api<NewcomerTimelineResponse>(`/newcomers/${id}/timeline`);
+}
+
 export async function convertNewcomer(id: number, payload: NewcomerConvertPayload): Promise<Newcomer> {
   return api<Newcomer>(`/newcomers/${id}/convert`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function listNewcomerInteractions(id: number): Promise<NewcomerInteractionListResponse> {
+  return api<NewcomerInteractionListResponse>(`/newcomers/${id}/interactions`);
+}
+
+export async function createNewcomerInteraction(id: number, payload: NewcomerInteractionPayload): Promise<NewcomerInteraction> {
+  return api<NewcomerInteraction>(`/newcomers/${id}/interactions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listNewcomerAddressHistory(id: number): Promise<NewcomerAddressHistoryListResponse> {
+  return api<NewcomerAddressHistoryListResponse>(`/newcomers/${id}/address-history`);
 }
 
 export async function listLessons(level?: Lesson["level"]): Promise<Lesson[]> {
@@ -1095,8 +1439,9 @@ export async function searchMembers(query: string, limit = 5): Promise<Page<Memb
   return api<Page<Member>>(`/members?${params.toString()}`);
 }
 
-export async function getPromotionPreview(withinDays = 30): Promise<ChildPromotionPreview> {
-  return api<ChildPromotionPreview>(`/members/promotions?within_days=${withinDays}`);
+export async function getPromotionPreview(withinDays?: number): Promise<ChildPromotionPreview> {
+  const query = withinDays !== undefined ? `?within_days=${withinDays}` : "";
+  return api<ChildPromotionPreview>(`/members/promotions${query}`);
 }
 
 export async function runChildPromotions(): Promise<ChildPromotionRunResponse> {

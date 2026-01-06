@@ -40,33 +40,50 @@ export default function EmailClient() {
   const hasSyncedOnceRef = useRef(false);
   const [initialSyncing, setInitialSyncing] = useState(false);
   const prefetchRef = useRef(false);
+  const currentFolderRef = useRef(folderMap[view]);
+  const listRequestRef = useRef<Record<string, number>>({});
+  const detailRequestRef = useRef(0);
 
   const toast = useToast();
   const currentFolder = folderMap[view];
   const currentFolderLabel = folderLabels[view];
 
+  useEffect(() => {
+    currentFolderRef.current = currentFolder;
+  }, [currentFolder]);
+
   const loadEmails = useCallback(
     async (force = false) => {
+      const folder = currentFolder;
+      const requestId = (listRequestRef.current[folder] || 0) + 1;
+      listRequestRef.current[folder] = requestId;
+      const isActive = () =>
+        currentFolderRef.current === folder && listRequestRef.current[folder] === requestId;
       const isFirstSync = !hasSyncedOnceRef.current;
       if (isFirstSync) {
         setInitialSyncing(true);
       }
-      const cached = listCacheRef.current[currentFolder];
+      const cached = listCacheRef.current[folder];
       setLoadingList(force ? true : !cached);
       // show cached messages immediately to avoid flicker
-      if (cached && !force) {
+      if (cached && !force && currentFolderRef.current === folder) {
         setEmails(cached);
       }
       try {
-        const data = await getAdminInbox(25, currentFolder);
+        const data = await getAdminInbox(25, folder);
+        listCacheRef.current = { ...listCacheRef.current, [folder]: data };
+        if (!isActive()) {
+          return;
+        }
         setEmails(data);
-        listCacheRef.current = { ...listCacheRef.current, [currentFolder]: data };
       } catch (error) {
         console.error("Failed to load emails:", error);
         toast.push("Failed to load emails", { type: "error" });
       } finally {
-        setLoadingList(false);
-        if (isFirstSync) {
+        if (isActive()) {
+          setLoadingList(false);
+        }
+        if (isFirstSync && currentFolderRef.current === folder) {
           hasSyncedOnceRef.current = true;
           setInitialSyncing(false);
         }
@@ -100,10 +117,14 @@ export default function EmailClient() {
   useEffect(() => {
     if (!selectedEmailId) {
       setSelectedEmail(null);
+      setLoadingDetail(false);
+      detailRequestRef.current += 1;
       return;
     }
 
     const loadEmailDetail = async () => {
+      const requestId = detailRequestRef.current + 1;
+      detailRequestRef.current = requestId;
       const folderForMessage = selectedEmailFolder || currentFolder;
       const cacheKey = `${folderForMessage}:${selectedEmailId}`;
       const cached = detailCacheRef.current[cacheKey];
@@ -113,13 +134,18 @@ export default function EmailClient() {
       }
       try {
         const data = await getAdminEmail(selectedEmailId, folderForMessage);
-        setSelectedEmail(data);
         detailCacheRef.current = { ...detailCacheRef.current, [cacheKey]: data };
+        if (detailRequestRef.current !== requestId) {
+          return;
+        }
+        setSelectedEmail(data);
       } catch (error) {
         console.error("Failed to load email detail:", error);
         toast.push("Failed to load email details", { type: "error" });
       } finally {
-        setLoadingDetail(false);
+        if (detailRequestRef.current === requestId) {
+          setLoadingDetail(false);
+        }
       }
     };
 
@@ -197,8 +223,10 @@ export default function EmailClient() {
     const cached = listCacheRef.current[nextFolder];
     if (cached) {
       setEmails(cached);
+      setLoadingList(false);
     } else {
       setEmails([]); // avoid showing the previous folder while syncing
+      setLoadingList(true);
     }
   };
 

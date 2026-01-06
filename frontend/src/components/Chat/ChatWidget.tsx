@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, useAnimation } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls, DragControls } from 'framer-motion';
 import { MessageCircle, X, Send, Paperclip, Image as ImageIcon, Smile, MoreVertical, Phone, Video, Search, ChevronLeft, Check, CheckCheck, Trash2 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
 
@@ -8,6 +8,7 @@ export function ChatWidget() {
     const unreadTotal = conversations.reduce((acc, curr) => acc + curr.unreadCount, 0);
     const [isBouncing, setIsBouncing] = useState(false);
     const prevUnreadRef = useRef(unreadTotal);
+    const dragControls = useDragControls();
 
     // Cute dance on new unread messages
     useEffect(() => {
@@ -19,17 +20,28 @@ export function ChatWidget() {
         prevUnreadRef.current = unreadTotal;
     }, [unreadTotal]);
 
+    const handleDragStart = (event: React.PointerEvent) => {
+        dragControls.start(event);
+    };
+
     return (
-        <>
+        <motion.div
+            drag
+            dragControls={dragControls}
+            dragMomentum={false}
+            dragElastic={0.1}
+            className="fixed bottom-6 left-6 z-[1000]"
+        >
             <AnimatePresence>
                 {isOpen && (
-                    <ChatWindow />
+                    <ChatWindow dragControls={dragControls} />
                 )}
             </AnimatePresence>
 
             <motion.button
-                className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
+                className={`absolute bottom-0 left-0 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
                     }`}
+                onPointerDown={handleDragStart}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 onClick={chatAvailable ? toggleChat : undefined}
@@ -73,11 +85,11 @@ export function ChatWidget() {
                     </span>
                 )}
             </motion.button>
-        </>
+        </motion.div>
     );
 }
 
-function ChatWindow() {
+function ChatWindow({ dragControls }: { dragControls: DragControls }) {
     const { activeConversationId, setActiveConversationId, conversations, messages, sendMessage, sendAttachment, deleteMessage, currentUser, setIsOpen, allUsers, startConversation, refreshUsers, chatAvailable } = useChat();
     const [inputValue, setInputValue] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -85,7 +97,12 @@ function ChatWindow() {
     const [conversationFilter, setConversationFilter] = useState('');
     const [newChatQuery, setNewChatQuery] = useState('');
     const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+    const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const autoScrollRef = useRef(true);
+    const lastConversationRef = useRef<string | null>(null);
+    const lastScrollTopRef = useRef(0);
     const emojiPickerRef = useRef<HTMLDivElement>(null);
     const emojiButtonRef = useRef<HTMLButtonElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,12 +114,49 @@ function ChatWindow() {
     const participantAvatar = otherParticipant?.avatar
         ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(otherParticipant?.name || "User")}&background=random`;
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
     };
 
     useEffect(() => {
-        scrollToBottom();
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        const handleScroll = () => {
+            const scrollTop = container.scrollTop;
+            const distanceFromBottom = container.scrollHeight - scrollTop - container.clientHeight;
+            const nearBottom = distanceFromBottom < 80;
+            const scrollingUp = scrollTop < lastScrollTopRef.current;
+            lastScrollTopRef.current = scrollTop;
+            if (scrollingUp) {
+                autoScrollRef.current = false;
+                setShowJumpToLatest(true);
+                return;
+            }
+            autoScrollRef.current = nearBottom;
+            setShowJumpToLatest(!nearBottom);
+        };
+        handleScroll();
+        container.addEventListener("scroll", handleScroll, { passive: true });
+        return () => {
+            container.removeEventListener("scroll", handleScroll);
+        };
+    }, [activeConversationId]);
+
+    useEffect(() => {
+        if (!activeConversationId) {
+            return;
+        }
+        if (lastConversationRef.current !== activeConversationId) {
+            lastConversationRef.current = activeConversationId;
+            autoScrollRef.current = true;
+            setShowJumpToLatest(false);
+            scrollToBottom("auto");
+            return;
+        }
+        if (autoScrollRef.current) {
+            setShowJumpToLatest(false);
+            scrollToBottom();
+        }
     }, [activeMessages, activeConversationId]);
 
     useEffect(() => {
@@ -135,6 +189,8 @@ function ChatWindow() {
 
     const handleSend = () => {
         if (inputValue.trim()) {
+            autoScrollRef.current = true;
+            setShowJumpToLatest(false);
             sendMessage(inputValue);
             setInputValue('');
         }
@@ -161,6 +217,8 @@ function ChatWindow() {
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
+            autoScrollRef.current = true;
+            setShowJumpToLatest(false);
             sendAttachment(file);
         }
         // Allow re-selecting the same file
@@ -169,23 +227,29 @@ function ChatWindow() {
 
     return (
         <motion.div
-            className="fixed bottom-24 right-6 z-40 flex h-[600px] w-[380px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900"
+            className="absolute bottom-16 left-0 z-40 flex h-[600px] w-[380px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900"
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
         >
             {/* Header */}
-            <div className="flex h-16 items-center justify-between border-b border-gray-100 bg-white px-4 dark:border-gray-800 dark:bg-gray-900">
+            <div
+                className="flex h-16 items-center justify-between border-b border-gray-100 bg-white px-4 dark:border-gray-800 dark:bg-gray-900 cursor-grab active:cursor-grabbing"
+                onPointerDown={(e) => dragControls.start(e)}
+            >
                 {activeConversationId ? (
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={() => setActiveConversationId(null)}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveConversationId(null);
+                            }}
                             className="mr-1 rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
                             <ChevronLeft size={20} className="text-gray-500" />
                         </button>
-                        <div className="relative">
+                        <div className="relative pointer-events-none">
                             <img
                                 src={participantAvatar}
                                 alt={otherParticipant?.name}
@@ -195,7 +259,7 @@ function ChatWindow() {
                                 otherParticipant?.status === 'busy' ? 'bg-red-500' : 'bg-gray-400'
                                 }`} />
                         </div>
-                        <div>
+                        <div className="pointer-events-none">
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
                                 {otherParticipant?.name}
                             </h3>
@@ -205,7 +269,7 @@ function ChatWindow() {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 pointer-events-none">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400">
                             <MessageCircle size={20} />
                         </div>
@@ -215,123 +279,147 @@ function ChatWindow() {
 
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setIsOpen(false)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setIsOpen(false);
+                        }}
                         className="rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
                         title="Close chat"
                     >
                         <X size={18} />
                     </button>
-                    <button className="rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">
+                    <button
+                        className="rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        onPointerDown={(e) => e.stopPropagation()}
+                    >
                         <MoreVertical size={18} />
                     </button>
                 </div>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-black/20">
+            <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-black/20" onPointerDown={(e) => e.stopPropagation()}>
                 {activeConversationId ? (
                     <div className="flex h-full flex-col">
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700">
-                            {activeMessages.map((msg, idx) => {
-                                const isMe = meId !== null && msg.senderId === meId;
-                                const showAvatar = !isMe && (idx === 0 || activeMessages[idx - 1].senderId !== msg.senderId);
+                        <div className="relative flex-1 min-h-0">
+                            <div
+                                ref={messagesContainerRef}
+                                className="absolute inset-0 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700"
+                            >
+                                {activeMessages.map((msg, idx) => {
+                                    const isMe = meId !== null && msg.senderId === meId;
+                                    const showAvatar = !isMe && (idx === 0 || activeMessages[idx - 1].senderId !== msg.senderId);
 
-                                return (
-                                    <motion.div
-                                        key={msg.renderKey || msg.id}
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                                    >
-                                        <div className={`flex max-w-[80%] gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                            {!isMe && (
-                                                <div className="w-8 flex-shrink-0">
-                                                    {showAvatar && (
-                                                        <motion.img
-                                                            initial={{ scale: 0 }}
-                                                            animate={{ scale: 1 }}
-                                                            src={participantAvatar}
-                                                            alt="Avatar"
-                                                            className="h-8 w-8 rounded-full"
-                                                        />
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            <motion.div
-                                                initial={{ scale: 0, borderRadius: "50%" }}
-                                                animate={{
-                                                    scale: 1,
-                                                    borderRadius: isMe ? "16px 0px 16px 16px" : "0px 16px 16px 16px"
-                                                }}
-                                                style={{ originX: isMe ? 1 : 0, originY: 1 }}
-                                                transition={{
-                                                    type: "spring",
-                                                    stiffness: 350,
-                                                    damping: 25,
-                                                    mass: 0.8
-                                                }}
-                                                className={`group relative px-4 py-2 shadow-sm ${isMe
-                                                    ? 'bg-indigo-600 text-white'
-                                                    : 'bg-white text-gray-900 dark:bg-gray-800 dark:text-white'
-                                                    }`}
-                                            >
-                                                <div className="flex items-start gap-2">
-                                                    <div className="flex-1">
-                                                        {msg.isDeleted ? (
-                                                            <p className="text-sm italic text-gray-300 dark:text-gray-500">Message deleted</p>
-                                                        ) : msg.type === "image" && msg.attachmentUrl ? (
-                                                            <a
-                                                                href={msg.attachmentUrl}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="block overflow-hidden rounded-xl ring-1 ring-indigo-100 transition hover:brightness-105 dark:ring-gray-700"
-                                                            >
-                                                                <img
-                                                                    src={msg.attachmentUrl}
-                                                                    alt={msg.attachmentName || msg.content}
-                                                                    className="max-h-64 rounded-xl object-cover"
-                                                                />
-                                                            </a>
-                                                        ) : msg.type === "file" && msg.attachmentUrl ? (
-                                                            <a
-                                                                href={msg.attachmentUrl}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className={`flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 ${isMe ? "bg-indigo-500/10 text-white hover:bg-indigo-500/20" : ""}`}
-                                                            >
-                                                                <Paperclip size={16} />
-                                                                <span className="truncate">{msg.attachmentName || msg.content}</span>
-                                                            </a>
-                                                        ) : (
-                                                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                                    return (
+                                        <motion.div
+                                            key={msg.renderKey || msg.id}
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                                        >
+                                            <div className={`flex max-w-[80%] gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                                                {!isMe && (
+                                                    <div className="w-8 flex-shrink-0">
+                                                        {showAvatar && (
+                                                            <motion.img
+                                                                initial={{ scale: 0 }}
+                                                                animate={{ scale: 1 }}
+                                                                src={participantAvatar}
+                                                                alt="Avatar"
+                                                                className="h-8 w-8 rounded-full"
+                                                            />
                                                         )}
-                                                        <div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${isMe ? 'text-indigo-200' : 'text-gray-400'}`}>
-                                                            <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                            {isMe && (
-                                                                <span>
-                                                                    {msg.status === 'read' ? <CheckCheck size={12} /> : <Check size={12} />}
-                                                                </span>
-                                                            )}
-                                                        </div>
                                                     </div>
-                                                    {isMe && !msg.isDeleted && !msg.id.startsWith("temp-") && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setConfirmDeleteId(msg.id)}
-                                                            className="opacity-0 transition-opacity group-hover:opacity-100 text-indigo-100 hover:text-white"
-                                                            title="Delete message"
-                                                        >
-                                                            <Trash2 size={14} />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </motion.div>
-                                        </div>
-                                    </motion.div>
-                                );
-                            })}
-                            <div ref={messagesEndRef} />
+                                                )}
+
+                                                <motion.div
+                                                    initial={{ scale: 0, borderRadius: "50%" }}
+                                                    animate={{
+                                                        scale: 1,
+                                                        borderRadius: isMe ? "16px 0px 16px 16px" : "0px 16px 16px 16px"
+                                                    }}
+                                                    style={{ originX: isMe ? 1 : 0, originY: 1 }}
+                                                    transition={{
+                                                        type: "spring",
+                                                        stiffness: 350,
+                                                        damping: 25,
+                                                        mass: 0.8
+                                                    }}
+                                                    className={`group relative px-4 py-2 shadow-sm ${isMe
+                                                        ? 'bg-indigo-600 text-white'
+                                                        : 'bg-white text-gray-900 dark:bg-gray-800 dark:text-white'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-start gap-2">
+                                                        <div className="flex-1">
+                                                            {msg.isDeleted ? (
+                                                                <p className="text-sm italic text-gray-300 dark:text-gray-500">Message deleted</p>
+                                                            ) : msg.type === "image" && msg.attachmentUrl ? (
+                                                                <a
+                                                                    href={msg.attachmentUrl}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="block overflow-hidden rounded-xl ring-1 ring-indigo-100 transition hover:brightness-105 dark:ring-gray-700"
+                                                                >
+                                                                    <img
+                                                                        src={msg.attachmentUrl}
+                                                                        alt={msg.attachmentName || msg.content}
+                                                                        className="max-h-64 rounded-xl object-cover"
+                                                                    />
+                                                                </a>
+                                                            ) : msg.type === "file" && msg.attachmentUrl ? (
+                                                                <a
+                                                                    href={msg.attachmentUrl}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className={`flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 ${isMe ? "bg-indigo-500/10 text-white hover:bg-indigo-500/20" : ""}`}
+                                                                >
+                                                                    <Paperclip size={16} />
+                                                                    <span className="truncate">{msg.attachmentName || msg.content}</span>
+                                                                </a>
+                                                            ) : (
+                                                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                                                            )}
+                                                            <div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${isMe ? 'text-indigo-200' : 'text-gray-400'}`}>
+                                                                <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                {isMe && (
+                                                                    <span>
+                                                                        {msg.status === 'read' ? <CheckCheck size={12} /> : <Check size={12} />}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {isMe && !msg.isDeleted && !msg.id.startsWith("temp-") && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setConfirmDeleteId(msg.id)}
+                                                                className="opacity-0 transition-opacity group-hover:opacity-100 text-indigo-100 hover:text-white"
+                                                                title="Delete message"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </motion.div>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
+                                <div ref={messagesEndRef} />
+                            </div>
+                            {showJumpToLatest && activeMessages.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        autoScrollRef.current = true;
+                                        setShowJumpToLatest(false);
+                                        scrollToBottom();
+                                    }}
+                                    className="absolute bottom-4 right-4 rounded-full bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-md hover:bg-indigo-700"
+                                >
+                                    Jump to latest
+                                </button>
+                            )}
                         </div>
 
                         {/* Input Area */}
@@ -513,7 +601,7 @@ function ChatWindow() {
             {/* Delete confirmation */}
             <AnimatePresence>
                 {confirmDeleteId && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onPointerDown={(e) => e.stopPropagation()}>
                         <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
@@ -547,7 +635,7 @@ function ChatWindow() {
                 )}
 
                 {isNewChatOpen && (
-                    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+                    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm" onPointerDown={(e) => e.stopPropagation()}>
                         <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}

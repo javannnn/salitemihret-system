@@ -151,8 +151,8 @@ export function Overview({ onNavigate }: OverviewProps) {
                         <p className="text-sm text-muted">Overview of system usage over the last 7 days</p>
                     </div>
                 </div>
-                <div className="h-[350px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                <div className="h-[350px] w-full min-h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280}>
                         <AreaChart data={activityData}>
                             <defs>
                                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">

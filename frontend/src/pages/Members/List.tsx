@@ -42,6 +42,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
+import { getCache, setCache } from "@/lib/cache";
 import ImportWizard from "./ImportWizard";
 import HouseholdAssignDrawer, { HouseholdTarget } from "./components/HouseholdAssignDrawer";
 import PriestDirectoryModal from "./components/PriestDirectoryModal";
@@ -121,6 +122,7 @@ export default function MembersList() {
   const canExport = permissions.exportMembers;
 
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const listRequestRef = useRef(0);
   const [priestSearch, setPriestSearch] = useState("");
   const [priests, setPriests] = useState<Priest[]>([]);
   const filteredPriests = useMemo(() => {
@@ -244,6 +246,19 @@ export default function MembersList() {
   }, [canBulk, selectedIds]);
 
 
+  const applyMembersResult = useCallback((result: Page<Member>) => {
+    setData(result);
+    setRowMenu(null);
+    setActionsMenuOpen(false);
+    setSelectedIds((prev) => {
+      const keep = new Set<number>();
+      result.items.forEach((item) => {
+        if (prev.has(item.id)) keep.add(item.id);
+      });
+      return keep;
+    });
+  }, []);
+
   const loadMembers = useCallback(
     async (
       nextPage = 1,
@@ -278,8 +293,29 @@ export default function MembersList() {
       if (nextPage !== page) {
         setPage(nextPage);
       }
-      setLoading(true);
+      const cacheKey = `members:list:${JSON.stringify({
+        page: nextPage,
+        page_size: PAGE_SIZE,
+        q: nextQuery || "",
+        sort: nextSort || "",
+        status: nextFilters.status || "",
+        gender: nextFilters.gender || "",
+        tag: nextFilters.tag || "",
+        ministry: nextFilters.ministry || "",
+        district: nextFilters.district || "",
+        hasChildren: nextFilters.hasChildren ? "1" : "0",
+        missingPhone: nextFilters.missingPhone ? "1" : "0",
+        newThisMonth: nextFilters.newThisMonth ? "1" : "0",
+      })}`;
+      const cached = getCache<Page<Member>>(cacheKey);
+      if (cached) {
+        applyMembersResult(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       setAccessIssue(null);
+      const requestId = ++listRequestRef.current;
       try {
         const params = new URLSearchParams({
           page: String(nextPage),
@@ -297,18 +333,12 @@ export default function MembersList() {
         if (nextSort) params.set("sort", nextSort);
 
         const result = await api<Page<Member>>(`/members?${params.toString()}`);
-        setData(result);
-        setRowMenu(null);
-        setActionsMenuOpen(false);
-        setSelectedIds((prev) => {
-          const keep = new Set<number>();
-          result.items.forEach((item) => {
-            if (prev.has(item.id)) keep.add(item.id);
-          });
-          return keep;
-        });
+        if (requestId !== listRequestRef.current) return;
+        applyMembersResult(result);
+        setCache(cacheKey, result);
         syncSearchParams({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage });
       } catch (error) {
+        if (requestId !== listRequestRef.current) return;
         console.error(error);
         if (error instanceof ApiError) {
           if (error.status === 401) {
@@ -327,10 +357,22 @@ export default function MembersList() {
         }
         toast.push("Failed to load members");
       } finally {
-        setLoading(false);
+        if (requestId === listRequestRef.current) {
+          setLoading(false);
+        }
       }
     },
-    [filters, permissions.viewMembers, query, sort, token, toast, page, syncSearchParams]
+    [
+      applyMembersResult,
+      filters,
+      permissions.viewMembers,
+      query,
+      sort,
+      token,
+      toast,
+      page,
+      syncSearchParams,
+    ]
   );
 
   const activeFilters = useMemo(() => {
@@ -385,10 +427,15 @@ export default function MembersList() {
       return;
     }
     let cancelled = false;
+    const cachedMeta = getCache<MembersMeta>("members:meta", 5 * 60_000);
+    if (cachedMeta) {
+      syncMeta(cachedMeta);
+    }
     getMembersMeta()
       .then((next) => {
         if (!cancelled) {
           syncMeta(next);
+          setCache("members:meta", next);
         }
       })
       .catch((error) => {

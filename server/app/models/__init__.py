@@ -10,7 +10,14 @@ from .member_contribution_payment import MemberContributionPayment  # noqa: F401
 from .payment import PaymentServiceType, Payment, PaymentReceipt  # noqa: F401
 from .payment_day_lock import PaymentDayLock  # noqa: F401
 from .newcomer import Newcomer  # noqa: F401
+from .newcomer_tracking import (  # noqa: F401
+    NewcomerAddressHistory,
+    NewcomerInteraction,
+    NewcomerStatusAudit,
+)
 from .sponsorship import Sponsorship  # noqa: F401
+from .sponsorship_audit import SponsorshipStatusAudit  # noqa: F401
+from .sponsorship_note import SponsorshipNote  # noqa: F401
 from .schools import (  # noqa: F401
     Lesson,
     Mezmur,

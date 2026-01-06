@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Sequence, Tuple
 from urllib.parse import quote_plus
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.member import Child, Member
+from app.models.sponsorship import Sponsorship
 from app.models.payment import Payment
 from app.models.payment_day_lock import PaymentDayLock
 from app.models.role import Role
@@ -56,6 +58,64 @@ def _get_child_notification_recipients(db: Session) -> list[str]:
     recipients.extend(getattr(settings, "EMAIL_FALLBACK_RECIPIENTS_LIST", []) or [])
     # Deduplicate while preserving order
     return list(dict.fromkeys([email for email in recipients if email]))
+
+
+def _get_sponsorship_notification_recipients(db: Session) -> list[str]:
+    recipients: list[str] = []
+    role_filter = getattr(settings, "SPONSORSHIP_REMINDER_NOTIFY_ROLES_LIST", []) or []
+    if role_filter:
+        rows = (
+            db.query(User.email)
+            .join(User.roles)
+            .filter(User.is_active.is_(True), Role.name.in_(role_filter))
+            .distinct()
+            .all()
+        )
+        recipients.extend(email for (email,) in rows if email)
+    super_admin_rows = (
+        db.query(User.email)
+        .filter(User.is_active.is_(True), User.is_super_admin.is_(True))
+        .all()
+    )
+    recipients.extend(email for (email,) in super_admin_rows if email)
+    recipients.extend(getattr(settings, "EMAIL_FALLBACK_RECIPIENTS_LIST", []) or [])
+    return list(dict.fromkeys([email for email in recipients if email]))
+
+
+def _format_amount(value: Decimal | float | int | None) -> str:
+    if value is None:
+        return "—"
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"))
+        return f"${amount:,.2f}"
+    except Exception:
+        return str(value)
+
+
+def _resolve_beneficiary_label(sponsorship: Sponsorship) -> str:
+    if sponsorship.newcomer:
+        return f"{sponsorship.newcomer.first_name} {sponsorship.newcomer.last_name}".strip()
+    if sponsorship.beneficiary_member:
+        return f"{sponsorship.beneficiary_member.first_name} {sponsorship.beneficiary_member.last_name}".strip()
+    return sponsorship.beneficiary_name or "Unknown beneficiary"
+
+
+def _build_whatsapp_message(
+    *,
+    sponsor_name: str,
+    beneficiary_name: str,
+    amount_text: str,
+    frequency: str,
+    brand_name: str,
+    case_label: str,
+) -> str:
+    return (
+        f"Hello {sponsor_name},\n"
+        f"This is a reminder from {brand_name} about your sponsorship for {beneficiary_name}.\n"
+        f"Pledge: {amount_text} ({frequency}).\n"
+        f"Case: {case_label}\n"
+        "Thank you for your support."
+    )
 
 
 def send_user_invitation_email(invitation: UserInvitation, token: str, invited_by: User | None) -> bool:
@@ -177,6 +237,91 @@ def send_child_promotion_digest(db: Session, candidates: Sequence[Tuple[Child, d
         },
     )
     return sent
+
+
+def send_sponsorship_reminder(db: Session, sponsorship: Sponsorship) -> None:
+    sponsor = sponsorship.sponsor
+    sponsor_name = (
+        f"{sponsor.first_name} {sponsor.last_name}".strip() if sponsor else "Sponsor"
+    )
+    beneficiary_name = _resolve_beneficiary_label(sponsorship)
+    amount_value = sponsorship.monthly_amount
+    amount_text = _format_amount(amount_value)
+    channel_text = sponsorship.reminder_channel or "Email"
+    case_label = f"SP-{sponsorship.id:04d}"
+    last_sent = _format_date(sponsorship.reminder_last_sent)
+    next_due = _format_date(sponsorship.reminder_next_due)
+    brand_name = BRAND_NAME
+    whatsapp_message = _build_whatsapp_message(
+        sponsor_name=sponsor_name,
+        beneficiary_name=beneficiary_name,
+        amount_text=amount_text,
+        frequency=sponsorship.frequency or "Monthly",
+        brand_name=brand_name,
+        case_label=case_label,
+    )
+
+    admin_recipients = _get_sponsorship_notification_recipients(db)
+    admin_sent = False
+    sponsor_sent = False
+
+    sender = get_email_sender()
+
+    if admin_recipients:
+        admin_html, admin_text = email_templates.render_sponsorship_admin_reminder_email(
+            sponsor_name=sponsor_name,
+            sponsor_email=getattr(sponsor, "email", None),
+            sponsor_phone=getattr(sponsor, "phone", None),
+            beneficiary_name=beneficiary_name,
+            amount=amount_value,
+            frequency=sponsorship.frequency or "Monthly",
+            program=sponsorship.program,
+            reminder_channel=channel_text,
+            case_label=case_label,
+            last_sent=last_sent,
+            next_due=next_due,
+            dashboard_url=_app_url(f"/sponsorships/{sponsorship.id}"),
+            whatsapp_message=whatsapp_message,
+        )
+        admin_sent, _ = sender.send(
+            subject=f"Sponsorship reminder sent ({case_label})",
+            html_body=admin_html,
+            text_body=admin_text,
+            to=admin_recipients,
+        )
+
+    sponsor_email = getattr(sponsor, "email", None) if sponsor else None
+    if sponsor_email:
+        sponsor_html, sponsor_text = email_templates.render_sponsorship_reminder_email(
+            sponsor_name=sponsor_name,
+            beneficiary_name=beneficiary_name,
+            amount=amount_value,
+            frequency=sponsorship.frequency or "Monthly",
+            program=sponsorship.program,
+            reminder_channel=channel_text,
+            case_label=case_label,
+            last_sent=last_sent,
+            next_due=next_due,
+        )
+        sponsor_sent, _ = sender.send(
+            subject=f"Sponsorship reminder ({case_label})",
+            html_body=sponsor_html,
+            text_body=sponsor_text,
+            to=[sponsor_email],
+        )
+
+    logger.info(
+        "sponsorship_reminder_sent",
+        extra={
+            "sponsorship_id": sponsorship.id,
+            "case_label": case_label,
+            "admin_sent": admin_sent,
+            "sponsor_sent": sponsor_sent,
+            "reminder_channel": channel_text,
+            "admin_recipients": admin_recipients,
+            "sponsor_email": sponsor_email,
+        },
+    )
 
 
 def notify_contribution_change(member: Member, field: str, previous: Any, current: Any) -> None:

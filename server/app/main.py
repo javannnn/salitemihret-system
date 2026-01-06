@@ -32,6 +32,7 @@ from app.routers import users as users_router
 from app.routers import sponsorships as sponsorships_router
 from app.routers import sunday_school as sunday_school_router
 from app.routers import reports as reports_router
+from app.routers import staff as staff_router
 from app.routers import schools as schools_router
 from app.routers import newcomers as newcomers_router
 from app.routers import chat as chat_router
@@ -81,6 +82,7 @@ app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
 app.include_router(users_router.router)
+app.include_router(staff_router.router)
 app.include_router(households_router.router)
 app.include_router(payments_router.router)
 app.include_router(sponsorships_router.router)
