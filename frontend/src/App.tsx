@@ -21,6 +21,7 @@ const NewcomerProfile = lazy(() => import("@/pages/Newcomers/Profile"));
 const SponsorshipWorkspace = lazy(() => import("@/pages/Sponsorships"));
 const SponsorshipCaseProfile = lazy(() => import("@/pages/Sponsorships/CaseProfile"));
 const SchoolsWorkspace = lazy(() => import("@/pages/Schools"));
+const VolunteersWorkspace = lazy(() => import("@/pages/Volunteers"));
 const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
 const EmailClient = lazy(() => import("@/pages/Admin/Email/Client"));
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/newcomers/:id" element={<NewcomerProfile />} />
           <Route path="/sponsorships" element={<SponsorshipWorkspace />} />
           <Route path="/sponsorships/:id" element={<SponsorshipCaseProfile />} />
+          <Route path="/volunteers" element={<VolunteersWorkspace />} />
           <Route path="/schools" element={<SchoolsWorkspace />} />
           <Route
             path="/admin/users"

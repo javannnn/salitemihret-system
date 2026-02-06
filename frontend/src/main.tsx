@@ -8,10 +8,25 @@ import { ToastProvider } from "@/components/Toast";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { TourProvider } from "@/context/TourContext";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
+import { attemptChunkReload } from "@/lib/recovery";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Root element not found");
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (event) => {
+    if (attemptChunkReload(event.reason)) {
+      event.preventDefault();
+    }
+  });
+  window.addEventListener("error", (event) => {
+    if (attemptChunkReload(event.error || event.message)) {
+      event.preventDefault();
+    }
+  });
 }
 
 createRoot(rootElement).render(
@@ -21,7 +36,9 @@ createRoot(rootElement).render(
         <ToastProvider>
           <AuthProvider>
             <TourProvider>
-              <App />
+              <AppErrorBoundary>
+                <App />
+              </AppErrorBoundary>
             </TourProvider>
           </AuthProvider>
         </ToastProvider>

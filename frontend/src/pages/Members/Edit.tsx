@@ -257,6 +257,8 @@ const createBlankMemberDetail = (): MemberDetail => {
       next_due_at: null,
       days_until_due: null,
       overdue_days: null,
+      consecutive_months: 0,
+      required_consecutive_months: 6,
     },
     membership_events: [],
     contribution_history: [],
@@ -686,6 +688,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
   const baselineMemberRef = useRef<MemberDetail | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("identity");
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionId, boolean>>({
@@ -922,7 +925,14 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     initializeFormsFromMember(draft);
     baselineMemberRef.current = cloneMemberDetail(draft);
     setHasUnsavedChanges(true);
+    setSendWelcomeEmail(true);
   }, [initializeFormsFromMember, isCreateMode]);
+
+  useEffect(() => {
+    if (!isCreateMode) {
+      setSendWelcomeEmail(false);
+    }
+  }, [isCreateMode]);
 
   useEffect(() => {
     if (!token) {
@@ -1443,6 +1453,12 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         return;
       }
 
+      if (!disableCore && (!member.address_postal_code || !member.address_postal_code.trim())) {
+        toast.push("Postal code is required");
+        setUpdating(false);
+        return;
+      }
+
       if (!disableSpiritual && member.has_father_confessor && !fatherConfessorId) {
         toast.push("Select a father confessor or disable the flag");
         setUpdating(false);
@@ -1584,6 +1600,10 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           .filter((child) => child.first_name && child.last_name);
       }
 
+      if (isCreateMode) {
+        payload.send_welcome_email = sendWelcomeEmail;
+      }
+
       const endpoint = isCreateMode ? "/members" : `/members/${member.id}`;
       const method = isCreateMode ? "POST" : "PATCH";
       const updated = await api<MemberDetail>(endpoint, {
@@ -1719,14 +1739,22 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const headerSubtitle = isCreateMode
     ? "New member · Username will be generated when saved"
     : `Username: ${member.username} · Member ID: ${member.id}`;
+  const pendingRequirement =
+    membershipHealth &&
+    membershipHealth.auto_status === "Pending" &&
+    membershipHealth.required_consecutive_months > 1
+      ? `Pending · ${membershipHealth.consecutive_months}/${membershipHealth.required_consecutive_months} consecutive months`
+      : null;
   const statusDescription = membershipHealth
     ? membershipHealth.override_active
       ? `Manual override · Auto status ${membershipHealth.auto_status}`
-      : membershipHealth.days_until_due !== null && membershipHealth.days_until_due !== undefined
-        ? membershipHealth.days_until_due >= 0
-          ? `Next due in ${membershipHealth.days_until_due} days`
-          : `Overdue by ${Math.abs(membershipHealth.days_until_due)} days`
-        : "Automatic status"
+      : pendingRequirement
+        ? pendingRequirement
+        : membershipHealth.days_until_due !== null && membershipHealth.days_until_due !== undefined
+          ? membershipHealth.days_until_due >= 0
+            ? `Next due in ${membershipHealth.days_until_due} days`
+            : `Overdue by ${Math.abs(membershipHealth.days_until_due)} days`
+          : "Automatic status"
     : "";
   const nextContributionLabel = membershipHealth?.next_due_at ? formatDate(membershipHealth.next_due_at) : "—";
   const lastContributionLabel = membershipHealth?.last_paid_at ? formatDate(membershipHealth.last_paid_at) : "—";
@@ -1749,6 +1777,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const lastContributionDateLabel = contributionHistory.length ? formatDate(contributionHistory[0].paid_at) : "No payments yet";
   const lastSundayPaymentLabel = sundayPayments.length ? formatDate(sundayPayments[0].posted_at) : "No payments yet";
   const unsavedLabel = hasUnsavedChanges ? "Unsaved changes" : "All changes saved";
+  const canSendWelcome = Boolean(member.email && member.email.trim());
 
   return (
     <div className="min-h-screen bg-bg text-ink flex flex-col">
@@ -1999,6 +2028,12 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       {member.status_override_reason ? ` — ${member.status_override_reason}` : ""}
                     </div>
                   )}
+                  {membershipHealth?.auto_status === "Pending" &&
+                    (membershipHealth?.required_consecutive_months ?? 0) > 1 && (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        {membershipHealth.consecutive_months} of {membershipHealth.required_consecutive_months} consecutive months paid. Record payments to activate status automatically.
+                      </div>
+                    )}
                   {membershipHealth?.overdue_days && membershipHealth.overdue_days > 0 && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
                       Contribution overdue by {membershipHealth.overdue_days} days. Record a payment to reactivate status.
@@ -2222,6 +2257,29 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       <Input value={member.address ?? ""} onChange={handleChange("address")} disabled={disableCore} />
                     </div>
                   </div>
+                  {isCreateMode && (
+                    <div className="rounded-xl border border-border bg-card/50 px-4 py-3">
+                      <label className="flex items-start gap-3 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          className="mt-1 accent-accent"
+                          checked={sendWelcomeEmail}
+                          onChange={(event) => {
+                            setSendWelcomeEmail(event.target.checked);
+                            markDirty();
+                          }}
+                          disabled={disableCore}
+                        />
+                        <span className="leading-relaxed">
+                          <span className="font-medium">Send welcome email</span>
+                          <span className="block text-xs text-mute">Send a friendly welcome message to the member after saving.</span>
+                        </span>
+                      </label>
+                      {!canSendWelcome && (
+                        <p className="mt-2 text-xs text-mute">Add an email address to send the welcome email.</p>
+                      )}
+                    </div>
+                  )}
                   <div className="grid md:grid-cols-3 gap-4">
                     <div>
                       <label className="text-xs uppercase text-mute">Street</label>
@@ -2245,6 +2303,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                         disabled={disableCore}
                         placeholder="A1A 1A1"
                         maxLength={7}
+                        required={!disableCore}
                       />
                     </div>
                     <div>

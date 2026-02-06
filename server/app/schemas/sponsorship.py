@@ -6,6 +6,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, validator
 
+from app.schemas.member import ContributionPaymentOut
+
 SponsorshipStatus = Literal["Draft", "Submitted", "Approved", "Rejected", "Active", "Suspended", "Completed", "Closed"]
 SponsorshipDecision = Literal["Approved", "Rejected", "Pending"]
 SponsorshipProgram = Literal[
@@ -66,7 +68,7 @@ class SponsorshipBase(BaseModel):
     motivation: Optional[SponsorshipMotivation] = None
     budget_month: Optional[int] = Field(None, ge=1, le=12)
     budget_year: Optional[int] = Field(None, ge=2000, le=2100)
-    budget_amount: Optional[Decimal] = Field(None, gt=0)
+    budget_round_id: Optional[int] = None
     budget_slots: Optional[int] = Field(None, ge=1)
     notes: Optional[str] = None
     assigned_staff_id: Optional[int] = None
@@ -114,7 +116,7 @@ class SponsorshipUpdate(BaseModel):
     motivation: Optional[SponsorshipMotivation] = None
     budget_month: Optional[int] = Field(None, ge=1, le=12)
     budget_year: Optional[int] = Field(None, ge=2000, le=2100)
-    budget_amount: Optional[Decimal] = Field(None, gt=0)
+    budget_round_id: Optional[int] = None
     budget_slots: Optional[int] = Field(None, ge=1)
     notes: Optional[str] = None
     assigned_staff_id: Optional[int] = None
@@ -163,8 +165,9 @@ class SponsorshipOut(BaseModel):
     last_status_reason: Optional[str]
     budget_month: Optional[int]
     budget_year: Optional[int]
-    budget_amount: Optional[Decimal]
+    budget_round_id: Optional[int]
     budget_slots: Optional[int]
+    budget_round: Optional[SponsorshipBudgetRoundSummary] = None
     used_slots: int
     budget_utilization_percent: Optional[float]
     budget_over_capacity: bool
@@ -196,15 +199,73 @@ class SponsorshipListResponse(BaseModel):
     page_size: int
 
 
-SponsorshipOut.update_forward_refs()
-
-
 class BudgetSummary(BaseModel):
     month: int
     year: int
     total_slots: int
     used_slots: int
     utilization_percent: float
+
+
+class SponsorshipBudgetRoundSummary(BaseModel):
+    id: int
+    year: int
+    round_number: int
+    start_date: Optional[date]
+    end_date: Optional[date]
+    slot_budget: int
+
+    class Config:
+        from_attributes = True
+
+
+SponsorshipOut.update_forward_refs()
+
+
+class SponsorshipBudgetRoundBase(BaseModel):
+    year: int = Field(..., ge=2000, le=2100)
+    round_number: int = Field(..., ge=1, le=12)
+    start_date: Optional[date]
+    end_date: Optional[date]
+    slot_budget: int = Field(..., ge=1)
+
+    @validator("end_date")
+    def validate_end_date(cls, value: Optional[date], values: dict) -> Optional[date]:
+        start_date = values.get("start_date")
+        if value and start_date and value < start_date:
+            raise ValueError("End date must be on or after the start date")
+        return value
+
+
+class SponsorshipBudgetRoundCreate(SponsorshipBudgetRoundBase):
+    pass
+
+
+class SponsorshipBudgetRoundUpdate(BaseModel):
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    round_number: Optional[int] = Field(None, ge=1, le=12)
+    start_date: Optional[date]
+    end_date: Optional[date]
+    slot_budget: Optional[int] = Field(None, ge=1)
+
+    @validator("end_date")
+    def validate_end_date(cls, value: Optional[date], values: dict) -> Optional[date]:
+        start_date = values.get("start_date")
+        if value and start_date and value < start_date:
+            raise ValueError("End date must be on or after the start date")
+        return value
+
+
+class SponsorshipBudgetRoundOut(SponsorshipBudgetRoundBase):
+    id: int
+    allocated_slots: int
+    used_slots: int
+    utilization_percent: float
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class SponsorshipMetrics(BaseModel):
@@ -229,6 +290,9 @@ class SponsorshipSponsorContext(BaseModel):
     father_of_repentance_id: Optional[int]
     father_of_repentance_name: Optional[str]
     budget_usage: Optional[BudgetSummary]
+    payment_history_start: Optional[date]
+    payment_history_end: Optional[date]
+    payment_history: list[ContributionPaymentOut] = Field(default_factory=list)
 
 
 class SponsorshipTimelineEvent(BaseModel):

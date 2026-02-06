@@ -17,6 +17,8 @@ import {
   listAdminUsers,
   listHouseholds,
   listPayments,
+  listVolunteerGroups,
+  listVolunteerWorkers,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -260,6 +262,37 @@ export default function Dashboard() {
         )
       );
     }
+    if (permissions.viewVolunteers) {
+      tasks.push(
+        listVolunteerWorkers({ page: 1, page_size: 5, q: term }).then((response) =>
+          response.items.map((worker) => ({
+            id: `volunteer-worker-${worker.id}`,
+            section: "Volunteers",
+            title: `${worker.first_name} ${worker.last_name}`.trim(),
+            subtitle: `${worker.group?.name ?? "Group"} · ${worker.service_type} · ${new Date(worker.service_date).toLocaleDateString()}`,
+            badge: "Volunteer",
+            href: "/volunteers",
+          }))
+        )
+      );
+      tasks.push(
+        listVolunteerGroups().then((groups) =>
+          groups
+            .filter((group) => group.name.toLowerCase().includes(normalizedTerm))
+            .slice(0, 5)
+            .map((group) => ({
+              id: `volunteer-group-${group.id}`,
+              section: "Volunteer groups",
+              title: group.name,
+              subtitle: group.team_lead_first_name || group.team_lead_last_name
+                ? `Lead: ${[group.team_lead_first_name, group.team_lead_last_name].filter(Boolean).join(" ")}`
+                : "Team lead not set",
+              badge: `${group.volunteer_count} volunteers`,
+              href: "/volunteers",
+            }))
+        )
+      );
+    }
     if (!tasks.length) {
       setSearchStatus("restricted");
       setSearchMessage("Global search is disabled for this role.");
@@ -295,7 +328,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [searchTerm, permissions.viewMembers, permissions.viewPayments, isSuperAdmin]);
+  }, [searchTerm, permissions.viewMembers, permissions.viewPayments, permissions.viewVolunteers, isSuperAdmin]);
 
   const completion = useMemo(() => {
     if (!summary) return 0;
@@ -357,6 +390,12 @@ export default function Dashboard() {
       { label: "Add new member", href: "/members/new", enabled: permissions.createMembers, description: "Open the member intake form." },
       { label: "Record a payment", href: "/payments", enabled: permissions.managePayments, description: "Post a new contribution." },
       {
+        label: "Volunteer roster",
+        href: "/volunteers",
+        enabled: permissions.viewVolunteers || permissions.manageVolunteers,
+        description: "Track teams and volunteer service.",
+      },
+      {
         label: "Open sponsorship board",
         href: "/sponsorships",
         enabled: permissions.manageSponsorships || permissions.viewSponsorships,
@@ -364,7 +403,15 @@ export default function Dashboard() {
       },
       { label: "User management", href: "/admin/users", enabled: isSuperAdmin, description: "Invite or manage admins." },
     ],
-    [permissions.createMembers, permissions.managePayments, permissions.manageSponsorships, permissions.viewSponsorships, isSuperAdmin]
+    [
+      permissions.createMembers,
+      permissions.managePayments,
+      permissions.viewVolunteers,
+      permissions.manageVolunteers,
+      permissions.manageSponsorships,
+      permissions.viewSponsorships,
+      isSuperAdmin,
+    ]
   ).filter((action) => action.enabled);
 
   const mobileQuickActions = useMemo(() => quickActions.slice(0, 4), [quickActions]);
@@ -397,7 +444,7 @@ export default function Dashboard() {
         <section className="rounded-3xl border border-white/80 bg-white/95 dark:bg-[#0A0A0A]/90 backdrop-blur-2xl p-5 sm:p-6 shadow-sm space-y-4 dark:border-white/5">
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold tracking-tight text-ink">Global search</h2>
-            <p className="text-[12px] text-muted">Search members, admins, and payments from one place.</p>
+            <p className="text-[12px] text-muted">Search members, admins, payments, and volunteers from one place.</p>
           </div>
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 rounded-2xl sm:rounded-full border border-border bg-card px-4 py-3 text-base text-ink shadow-sm">
@@ -405,7 +452,7 @@ export default function Dashboard() {
               <input
                 data-tour="dashboard-search"
                 className="flex-1 bg-transparent focus:outline-none placeholder:text-muted text-base text-ink"
-                placeholder="Search members, admins, payments..."
+                placeholder="Search members, admins, payments, volunteers..."
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
               />

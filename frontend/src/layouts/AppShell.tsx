@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, ChevronDown, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus, HandHeart } from "lucide-react";
 
-import { logout, login } from "@/lib/auth";
+import { isTokenExpired, login, logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
-import { activateLicense, ApiError, getLicenseStatus, LicenseStatusResponse } from "@/lib/api";
-import { subscribeSessionExpired, resetSessionExpiryNotice } from "@/lib/session";
+import { activateLicense, ApiError, getLicenseStatus, getToken, LicenseStatusResponse } from "@/lib/api";
+import { notifySessionExpired, resetSessionExpiryNotice, subscribeSessionExpired } from "@/lib/session";
+import { attemptChunkReload } from "@/lib/recovery";
 import { useTour } from "@/context/TourContext";
 import { TourOverlay } from "@/components/Tour/TourOverlay";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -30,6 +31,7 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   "/newcomers": () => import("@/pages/Newcomers"),
   "/sponsorships": () => import("@/pages/Sponsorships"),
   "/schools": () => import("@/pages/Schools"),
+  "/volunteers": () => import("@/pages/Volunteers"),
   "/admin/users": () => import("@/pages/Admin/Users/List"),
   "/admin/email": () => import("@/pages/Admin/Email/Client"),
   "/admin/reports": () => import("@/pages/Admin/Reports/Client"),
@@ -39,7 +41,9 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
 const preloadRoute = (path: string) => {
   const loader = routePreloaders[path];
   if (loader) {
-    loader();
+    loader().catch((error) => {
+      attemptChunkReload(error);
+    });
   }
 };
 
@@ -56,6 +60,7 @@ export default function AppShell() {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatusResponse | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseModalOpen, setLicenseModalOpen] = useState(false);
+  const [licenseStatusOpen, setLicenseStatusOpen] = useState(false);
   const [licenseToken, setLicenseToken] = useState("");
   const [licenseSubmitting, setLicenseSubmitting] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -99,6 +104,12 @@ export default function AppShell() {
         visible: permissions.viewSponsorships || permissions.manageSponsorships,
       },
       {
+        label: "Volunteers",
+        to: "/volunteers",
+        icon: HandHeart,
+        visible: permissions.viewVolunteers || permissions.manageVolunteers,
+      },
+      {
         label: "Schools",
         to: "/schools",
         icon: GraduationCap,
@@ -120,6 +131,8 @@ export default function AppShell() {
     permissions.viewPayments,
     permissions.viewSponsorships,
     permissions.manageSponsorships,
+    permissions.viewVolunteers,
+    permissions.manageVolunteers,
     permissions.viewNewcomers,
     permissions.manageNewcomers,
     permissions.viewSchools,
@@ -132,7 +145,6 @@ export default function AppShell() {
     [location.pathname, navItems]
   );
 
-  const [licenseCollapsed, setLicenseCollapsed] = useState(false);
   const isMobile = useMediaQuery("(max-width: 1023px)");
 
   if (loading) {
@@ -200,8 +212,27 @@ export default function AppShell() {
   }, [user]);
 
   useEffect(() => {
-    setLicenseCollapsed(isMobile);
-  }, [isMobile]);
+    if (typeof window === "undefined") return;
+    const checkSession = () => {
+      if (sessionExpired) return;
+      const token = getToken();
+      if (!token || isTokenExpired(token)) {
+        notifySessionExpired();
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        checkSession();
+      }
+    };
+    window.addEventListener("focus", checkSession);
+    document.addEventListener("visibilitychange", handleVisibility);
+    checkSession();
+    return () => {
+      window.removeEventListener("focus", checkSession);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [sessionExpired]);
 
   useEffect(() => {
     if (!navItems.length) return;
@@ -254,6 +285,8 @@ export default function AppShell() {
       : licenseIntent === "warning"
         ? "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-200"
         : "border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-200";
+  const isLicenseActive = licenseStatus?.state === "active";
+  const licenseCustomerLabel = isLicenseActive ? "SaliteMihret EOTC" : licenseStatus?.customer;
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -428,6 +461,15 @@ export default function AppShell() {
                   </button>
                 )}
                 <button
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-accent/10"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    setLicenseStatusOpen(true);
+                  }}
+                >
+                  License status
+                </button>
+                <button
                   className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 hover:text-rose-600"
                   onClick={() => {
                     setAccountMenuOpen(false);
@@ -440,72 +482,6 @@ export default function AppShell() {
             </motion.div>
           )}
         </AnimatePresence>
-        <div className="px-6 lg:px-10 py-4 space-y-4">
-          {licenseStatus && (
-            <Card data-tour="license-banner" className={`p-4 border ${licenseClasses}`}>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ShieldAlert size={18} />
-                  <span>
-                    {licenseStatus.state === "active"
-                      ? "License active"
-                      : licenseStatus.state === "trial"
-                        ? "Trial mode"
-                        : "License required"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setLicenseCollapsed((prev) => !prev)}
-                    className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] uppercase tracking-wide text-mute transition hover:bg-accent/5 lg:hidden"
-                    aria-expanded={!licenseCollapsed}
-                  >
-                    {licenseCollapsed ? "Details" : "Hide"}
-                    <ChevronDown className={`h-3 w-3 transition-transform ${licenseCollapsed ? "" : "rotate-180"}`} />
-                  </button>
-                </div>
-                <div className={`${licenseCollapsed ? "hidden lg:block" : ""}`}>
-                  <p className="text-sm">
-                    {licenseStatus.message}{" "}
-                    {licenseStatus.expires_at && (
-                      <span>
-                        Expires{" "}
-                        <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
-                      </span>
-                    )}
-                    {licenseStatus.days_remaining >= 0 && (
-                      <span className="ml-1">
-                        {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
-                      </span>
-                    )}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs uppercase tracking-wide">
-                      Mode: {licenseStatus.state.toUpperCase()}
-                    </span>
-                    {licenseStatus.customer && (
-                      <span className="text-xs uppercase tracking-wide">
-                        Licensed to: {licenseStatus.customer}
-                      </span>
-                    )}
-                    {licenseLoading && <span className="text-xs text-mute">Refreshing…</span>}
-                    {canManageLicense && (
-                      <Button
-                        variant="ghost"
-                        className="text-xs"
-                        onClick={() => setLicenseModalOpen(true)}
-                      >
-                        {licenseStatus.state === "active" ? "Update license" : "Install license"}
-                      </Button>
-                    )}
-                    <Button variant="ghost" className="text-xs" onClick={refreshLicense}>
-                      Refresh
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
         <section className="px-6 lg:px-10 py-8">
           <AnimatePresence mode="sync">
             <motion.div
@@ -580,6 +556,79 @@ export default function AppShell() {
               <Button onClick={handleLicenseActivate} disabled={licenseSubmitting}>
                 {licenseSubmitting ? "Saving…" : "Activate license"}
               </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+      {licenseStatusOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">License status</h2>
+              <Button variant="ghost" onClick={() => setLicenseStatusOpen(false)}>
+                Close
+              </Button>
+            </div>
+            {licenseStatus ? (
+              <div className={`p-4 border rounded-2xl ${licenseClasses}`}>
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <ShieldAlert size={18} />
+                  <span>
+                    {licenseStatus.state === "active"
+                      ? "Permanent license active"
+                      : licenseStatus.state === "trial"
+                        ? "Trial mode"
+                        : "License required"}
+                  </span>
+                </div>
+                <p className="text-sm mt-2">
+                  {isLicenseActive
+                    ? "Permanent license activated for SaliteMihret EOTC. Full access is enabled for this deployment."
+                    : licenseStatus.message}{" "}
+                  {!isLicenseActive && licenseStatus.expires_at && (
+                    <span>
+                      Expires{" "}
+                      <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
+                    </span>
+                  )}
+                  {!isLicenseActive && licenseStatus.days_remaining >= 0 && (
+                    <span className="ml-1">
+                      {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
+                    </span>
+                  )}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-xs uppercase tracking-wide">
+                    Status: {licenseStatus.state.toUpperCase()}
+                  </span>
+                  {isLicenseActive && (
+                    <span className="text-xs uppercase tracking-wide">Type: Permanent</span>
+                  )}
+                  {licenseCustomerLabel && (
+                    <span className="text-xs uppercase tracking-wide">
+                      Licensed to: {licenseCustomerLabel}
+                    </span>
+                  )}
+                  {licenseLoading && <span className="text-xs text-mute">Refreshing…</span>}
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-mute">Loading license status…</div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={refreshLicense} disabled={licenseLoading}>
+                Refresh
+              </Button>
+              {canManageLicense && (
+                <Button
+                  onClick={() => {
+                    setLicenseStatusOpen(false);
+                    setLicenseModalOpen(true);
+                  }}
+                >
+                  {licenseStatus?.state === "active" ? "Update license" : "Install license"}
+                </Button>
+              )}
             </div>
           </Card>
         </div>

@@ -165,7 +165,7 @@ class MemberBase(BaseModel):
     address_street: Optional[str] = Field(None, max_length=255)
     address_city: Optional[str] = Field(None, max_length=120)
     address_region: Optional[str] = Field(None, max_length=120)
-    address_postal_code: Optional[str] = Field(None, max_length=30)
+    address_postal_code: str = Field(..., max_length=30)
     address_country: Optional[str] = Field(None, max_length=120)
     district: Optional[str] = Field(None, max_length=100)
     status: str = Field(default="Active")
@@ -212,6 +212,12 @@ class MemberBase(BaseModel):
             raise ValueError("Phone number is required")
         return normalize_member_phone(value.strip())
 
+    @validator("address_postal_code")
+    def validate_postal_code(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("Postal code is required")
+        return value.strip()
+
     @validator("marital_status")
     def validate_marital_status(cls, value: Optional[str]) -> Optional[str]:
         if value and value not in ALLOWED_MEMBER_MARITAL_STATUSES:
@@ -244,7 +250,7 @@ class MemberBase(BaseModel):
 
 
 class MemberCreate(MemberBase):
-    pass
+    send_welcome_email: bool = False
 
 
 class MemberUpdate(BaseModel):
@@ -308,6 +314,12 @@ class MemberUpdate(BaseModel):
         if value and value not in ALLOWED_MEMBER_MARITAL_STATUSES:
             raise ValueError("Invalid marital status value")
         return value
+
+    @validator("address_postal_code")
+    def validate_postal_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("Postal code is required")
+        return value.strip() if value is not None else value
 
     @validator("contribution_method")
     def validate_contribution_method(cls, value: Optional[str]) -> Optional[str]:
@@ -420,6 +432,8 @@ class MembershipHealthOut(BaseModel):
     next_due_at: Optional[datetime]
     days_until_due: Optional[int]
     overdue_days: Optional[int]
+    consecutive_months: int
+    required_consecutive_months: int
 
 
 class MemberDetailOut(MemberListOut):

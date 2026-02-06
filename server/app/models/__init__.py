@@ -17,7 +17,10 @@ from .newcomer_tracking import (  # noqa: F401
 )
 from .sponsorship import Sponsorship  # noqa: F401
 from .sponsorship_audit import SponsorshipStatusAudit  # noqa: F401
+from .sponsorship_budget_round import SponsorshipBudgetRound  # noqa: F401
 from .sponsorship_note import SponsorshipNote  # noqa: F401
+from .volunteer_group import VolunteerGroup  # noqa: F401
+from .volunteer_worker import VolunteerWorker  # noqa: F401
 from .schools import (  # noqa: F401
     Lesson,
     Mezmur,

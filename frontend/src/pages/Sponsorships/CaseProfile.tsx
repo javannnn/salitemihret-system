@@ -316,7 +316,7 @@ export default function SponsorshipCaseProfile() {
               <>
                 <Button
                   disabled={!canApprove}
-                  onClick={() => openStatusModal("Approved", "Approve case", false)}
+                  onClick={() => openStatusModal("Approved", "Approve case", true)}
                 >
                   Approve
                 </Button>
@@ -424,14 +424,29 @@ export default function SponsorshipCaseProfile() {
                 <div>Reminder channel: {sponsorship.reminder_channel || "-"}</div>
                 <div>Last reminder: {formatDateTime(sponsorship.reminder_last_sent)}</div>
                 <div>Next reminder: {formatDateTime(sponsorship.reminder_next_due)}</div>
+                <div>Last sponsored date: {formatDate(sponsorship.last_sponsored_date)}</div>
+                <div>Payment information: {sponsorship.payment_information || "-"}</div>
+                <div>
+                  Last sponsored status: {sponsorship.last_status || "-"}
+                  {sponsorship.last_status === "Rejected" && sponsorship.last_status_reason
+                    ? ` (${sponsorship.last_status_reason})`
+                    : ""}
+                </div>
                 <div>Start date: {formatDate(sponsorship.start_date)}</div>
                 <div>Expected end: {formatDate(sponsorship.end_date)}</div>
+                <div>
+                  Budget round:{" "}
+                  {sponsorship.budget_round
+                    ? `Round ${sponsorship.budget_round.round_number} (${sponsorship.budget_round.year})`
+                    : "-"}
+                </div>
                 <div>
                   Budget period: {sponsorship.budget_month && sponsorship.budget_year
                     ? `${sponsorship.budget_month}/${sponsorship.budget_year}`
                     : "-"}
                 </div>
                 <div>Budget slots: {sponsorship.budget_slots ?? "-"}</div>
+                <div>Used slots: {sponsorship.used_slots ?? 0}</div>
                 {sponsorship.notes && (
                   <div className="pt-2">
                     <div className="text-xs uppercase text-mute">Case summary</div>

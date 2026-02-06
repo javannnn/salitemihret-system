@@ -21,10 +21,46 @@ This deployment carries two cross-cutting controls that should be reviewed befor
 - The backend enforces licensing through `app/core/license.py`. Without a license token the system falls back to a 365‑day trial that starts the first time the API runs (tracked in `server/runtime/license_state.json`).
 - When the trial or license expires every API call (except `/health`, `/auth/login`, and `/license/*`) returns `403` with `code=license_inactive`, and the UI surfaces a blocking banner.
 - The active license token is stored in `server/runtime/license.key` (preferred). You can also inject via `LICENSE_TOKEN` env var for immutable deployments.
+- Optional remote confirmation: set `LICENSE_REMOTE_STATUS_URL` to a JSON or plain-text file URL to require yearly confirmation. The backend caches the remote response in `server/runtime/license_remote.json` and only re-checks after `LICENSE_REMOTE_CHECK_INTERVAL_HOURS` (default 24). If the remote is unreachable it will honor the last cached confirmation for up to `LICENSE_REMOTE_GRACE_DAYS` (default 7).
 - Health endpoints:
   - `GET /license/status` – returns `state`, `message`, `expires_at`, `days_remaining`, and `customer`.
   - `POST /license/activate` – Admin‑only; persist a new token after validating its signature/expiry.
 - Admins can open **Install license** from the header banner in the web app, paste the token, and activate it; the API writes `license.key`.
+
+### Remote Confirmation File Format (optional)
+
+Use a JSON file (e.g., a raw GitHub URL) with the license ID and an annual `valid_until`. The license is considered active only when:
+- `status` is `"active"`, and
+- `valid_until` is in the future.
+
+```json
+{
+  "licenses": {
+    "LIC-2026-0129-0001": {
+      "status": "active",
+      "valid_until": "2027-01-29T00:00:00Z"
+    }
+  }
+}
+```
+
+You can also provide a single-license payload:
+
+```json
+{
+  "license_id": "LIC-2026-0129-0001",
+  "status": "active",
+  "valid_until": "2027-01-29T00:00:00Z"
+}
+```
+
+### Remote Confirmation Plain Text (optional)
+
+You can also use a plain text file with just `active` or `inactive`. For plain text, the backend enforces yearly confirmation using either:
+- `Last-Modified` (preferred), or
+- `ETag` (if `Last-Modified` is missing, the license stays valid for 365 days since the last observed content change).
+
+For GitHub-hosted files, use the `raw.githubusercontent.com` URL (not the `blob` URL). To renew annually with `ETag`, make a small content change at least once per year (e.g., add a timestamp line).
 
 ### Generating a License (internal use only)
 

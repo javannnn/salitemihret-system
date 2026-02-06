@@ -60,6 +60,7 @@ class Sponsorship(Base):
     motivation = Column(SponsorshipMotivation, nullable=True)
     budget_month = Column(Integer, nullable=True)
     budget_year = Column(Integer, nullable=True)
+    budget_round_id = Column(Integer, ForeignKey("sponsorship_budget_rounds.id", ondelete="SET NULL"), nullable=True, index=True)
     budget_amount = Column(Numeric(12, 2), nullable=True)
     budget_slots = Column(Integer, nullable=True)
     used_slots = Column(Integer, nullable=False, default=0)
@@ -87,6 +88,7 @@ class Sponsorship(Base):
     submitted_by = relationship("User", foreign_keys=[submitted_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
     rejected_by = relationship("User", foreign_keys=[rejected_by_id])
+    budget_round = relationship("SponsorshipBudgetRound")
     status_audits = relationship(
         "SponsorshipStatusAudit",
         back_populates="sponsorship",

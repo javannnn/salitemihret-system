@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  CheckCircle2,
-  ChevronRight,
-  Filter,
-  Loader2,
-  PlusCircle,
-  RefreshCcw,
-  Search,
-  XCircle,
-} from "lucide-react";
+import { ChevronRight, Filter, Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
 
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -19,25 +10,31 @@ import { getCache, setCache } from "@/lib/cache";
 import {
   ApiCapabilities,
   ApiError,
+  ContributionPayment,
   Member,
   NewcomerListResponse,
   Sponsorship,
+  SponsorshipBudgetRound,
   SponsorshipListResponse,
   SponsorshipMetrics,
   SponsorshipPayload,
   SponsorshipSponsorContext,
   StaffSummary,
+  createSponsorshipBudgetRound,
   createNewcomer,
   createSponsorship,
+  deleteSponsorshipBudgetRound,
   getApiCapabilities,
   getSponsorContext,
   getSponsorship,
   getSponsorshipMetrics,
+  listSponsorshipBudgetRounds,
   listNewcomers,
   listSponsorships,
   listStaff,
   searchMembers,
   transitionSponsorshipStatus,
+  updateSponsorshipBudgetRound,
   updateSponsorship,
 } from "@/lib/api";
 import { parseApiFieldErrors } from "@/lib/formErrors";
@@ -81,8 +78,13 @@ type SponsorshipWizardForm = {
   start_date: string;
   end_date: string;
   monthly_amount: string;
+  last_sponsored_date: string;
+  payment_information: string;
+  last_status: Sponsorship["last_status"] | "";
+  last_status_reason: string;
   budget_month: string;
   budget_year: string;
+  budget_round_id: string;
   budget_slots: string;
   notes: string;
 };
@@ -114,7 +116,13 @@ type StatusModalState = {
 
 type NewcomerListItem = NewcomerListResponse["items"][number];
 type SelectOption = { value: string; label: string };
-type BudgetDraft = { budget_slots: string; used_slots: string; budget_amount: string };
+type BudgetDraft = { budget_slots: string; used_slots: string; budget_round_id: string };
+type BudgetRoundDraft = {
+  round_number: string;
+  start_date: string;
+  end_date: string;
+  slot_budget: string;
+};
 
 const STATUS_STYLES: Record<Sponsorship["status"], string> = {
   Draft: "bg-slate-50 text-slate-600 border-slate-200",
@@ -144,6 +152,7 @@ const MONTH_OPTIONS = [
 ];
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - 1 + index);
+const ROUND_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1));
 const SLOT_OPTIONS = Array.from({ length: 100 }, (_, index) => index + 1);
 
 const emptyWizardForm = (): SponsorshipWizardForm => ({
@@ -163,8 +172,13 @@ const emptyWizardForm = (): SponsorshipWizardForm => ({
   start_date: new Date().toISOString().slice(0, 10),
   end_date: "",
   monthly_amount: "150",
+  last_sponsored_date: "",
+  payment_information: "",
+  last_status: "",
+  last_status_reason: "",
   budget_month: "",
   budget_year: "",
+  budget_round_id: "",
   budget_slots: "",
   notes: "",
 });
@@ -197,6 +211,9 @@ const buildSponsorContextFallback = (member: Member): SponsorshipSponsorContext 
   father_of_repentance_id: null,
   father_of_repentance_name: null,
   budget_usage: null,
+  payment_history_start: null,
+  payment_history_end: null,
+  payment_history: [],
 });
 
 function formatDate(value?: string | null) {
@@ -204,6 +221,126 @@ function formatDate(value?: string | null) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
 }
+
+type PaymentContinuityMonth = {
+  key: string;
+  year: number;
+  month: number;
+  label: string;
+  paid: boolean;
+  paymentCount: number;
+  latestPaidAt?: string;
+};
+
+type PaymentContinuitySegment = {
+  label: string;
+  months: PaymentContinuityMonth[];
+  paidMonths: number;
+};
+
+type PaymentContinuitySummary = {
+  segments: PaymentContinuitySegment[];
+  totalMonths: number;
+  paidMonths: number;
+  missedMonths: number;
+  continuityPercent: number;
+  lastPaymentAt?: string;
+};
+
+type PaymentContinuityOptions = {
+  startDate?: string | null;
+  endDate?: string | null;
+  months?: number;
+};
+
+const parseDateInput = (value?: string | null) => {
+  if (!value) return null;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr ?? "1");
+  if (!year || !month) return null;
+  return new Date(year, month - 1, day || 1);
+};
+
+const countMonthsInclusive = (start: Date, end: Date) =>
+  (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+
+const buildPaymentContinuity = (
+  payments: ContributionPayment[],
+  options: PaymentContinuityOptions = {},
+): PaymentContinuitySummary => {
+  const endDate = parseDateInput(options.endDate) ?? new Date();
+  const startDate = parseDateInput(options.startDate);
+  const totalMonths = startDate
+    ? Math.max(1, countMonthsInclusive(startDate, endDate))
+    : Math.max(1, options.months ?? 36);
+
+  const monthMap = new Map<string, { count: number; latestPaidAt: string }>();
+  let lastPaymentAt: string | undefined;
+  payments.forEach((payment) => {
+    const paidDate = parseDateInput(payment.paid_at);
+    if (!paidDate) return;
+    const monthNumber = paidDate.getMonth() + 1;
+    const key = `${paidDate.getFullYear()}-${String(monthNumber).padStart(2, "0")}`;
+    const existing = monthMap.get(key);
+    if (!existing) {
+      monthMap.set(key, { count: 1, latestPaidAt: payment.paid_at });
+    } else {
+      existing.count += 1;
+      if (existing.latestPaidAt < payment.paid_at) {
+        existing.latestPaidAt = payment.paid_at;
+      }
+    }
+    if (!lastPaymentAt || lastPaymentAt < payment.paid_at) {
+      lastPaymentAt = payment.paid_at;
+    }
+  });
+
+  const months: PaymentContinuityMonth[] = [];
+  for (let i = totalMonths - 1; i >= 0; i--) {
+    const date = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1);
+    const year = date.getFullYear();
+    const monthIndex = date.getMonth();
+    const monthNumber = monthIndex + 1;
+    const key = `${year}-${String(monthNumber).padStart(2, "0")}`;
+    const entry = monthMap.get(key);
+    months.push({
+      key,
+      year,
+      month: monthNumber,
+      label: date.toLocaleString(undefined, { month: "short" }),
+      paid: Boolean(entry),
+      paymentCount: entry?.count ?? 0,
+      latestPaidAt: entry?.latestPaidAt,
+    });
+  }
+
+  const segments: PaymentContinuitySegment[] = [];
+  for (let i = 0; i < months.length; i += 12) {
+    const slice = months.slice(i, i + 12);
+    if (!slice.length) continue;
+    const start = slice[0];
+    const end = slice[slice.length - 1];
+    segments.push({
+      label: `${start.label} ${start.year} – ${end.label} ${end.year}`,
+      months: slice,
+      paidMonths: slice.filter((month) => month.paid).length,
+    });
+  }
+
+  const paidMonths = months.filter((month) => month.paid).length;
+  const totalMonthsNormalized = months.length || totalMonths;
+  const continuityPercent = Math.round((paidMonths / totalMonthsNormalized) * 100);
+  return {
+    segments,
+    totalMonths: totalMonthsNormalized,
+    paidMonths,
+    missedMonths: totalMonthsNormalized - paidMonths,
+    continuityPercent,
+    lastPaymentAt,
+  };
+};
 
 function beneficiaryLabel(item: Sponsorship) {
   if (item.newcomer) return `${item.newcomer.first_name} ${item.newcomer.last_name} (Newcomer)`;
@@ -261,8 +398,13 @@ function mapSponsorshipToWizardForm(record: Sponsorship): SponsorshipWizardForm 
     start_date: record.start_date || new Date().toISOString().slice(0, 10),
     end_date: record.end_date || "",
     monthly_amount: record.monthly_amount ? String(record.monthly_amount) : "",
+    last_sponsored_date: record.last_sponsored_date || "",
+    payment_information: record.payment_information || "",
+    last_status: record.last_status ?? "",
+    last_status_reason: record.last_status_reason || "",
     budget_month: record.budget_month ? String(record.budget_month) : "",
     budget_year: record.budget_year ? String(record.budget_year) : "",
+    budget_round_id: record.budget_round_id ? String(record.budget_round_id) : "",
     budget_slots: record.budget_slots ? String(record.budget_slots) : "",
     notes: record.notes || "",
   };
@@ -286,6 +428,10 @@ function resolveDraftStep(record: Sponsorship): WizardStep {
       record.reminder_channel ||
       record.motivation ||
       record.monthly_amount ||
+      record.last_sponsored_date ||
+      record.payment_information ||
+      record.last_status ||
+      record.last_status_reason ||
       record.notes ||
       record.budget_month ||
       record.budget_year ||
@@ -348,6 +494,20 @@ export default function SponsorshipWorkspace() {
   const [budgetRefreshTick, setBudgetRefreshTick] = useState(0);
   const [budgetEdits, setBudgetEdits] = useState<Record<number, BudgetDraft>>({});
   const [budgetSavingId, setBudgetSavingId] = useState<number | null>(null);
+  const [roundYear, setRoundYear] = useState(String(today.getFullYear()));
+  const [budgetRounds, setBudgetRounds] = useState<SponsorshipBudgetRound[]>([]);
+  const [roundsLoading, setRoundsLoading] = useState(false);
+  const [roundsError, setRoundsError] = useState<string | null>(null);
+  const [roundRefreshTick, setRoundRefreshTick] = useState(0);
+  const [roundEdits, setRoundEdits] = useState<Record<number, BudgetRoundDraft>>({});
+  const [newRoundDraft, setNewRoundDraft] = useState<BudgetRoundDraft>({
+    round_number: "",
+    start_date: "",
+    end_date: "",
+    slot_budget: "",
+  });
+  const [roundSavingId, setRoundSavingId] = useState<number | "new" | null>(null);
+  const [roundDeletingId, setRoundDeletingId] = useState<number | null>(null);
 
   const [beneficiarySearch, setBeneficiarySearch] = useState("");
   const [beneficiaryResults, setBeneficiaryResults] = useState<NewcomerListResponse | null>(null);
@@ -511,6 +671,41 @@ export default function SponsorshipWorkspace() {
   }, [budgetMonth, budgetYear]);
 
   useEffect(() => {
+    if (!canView || (!wizardOpen && activeView !== "budget")) return;
+    let active = true;
+    setRoundsLoading(true);
+    setRoundsError(null);
+    listSponsorshipBudgetRounds(roundYear ? Number(roundYear) : undefined)
+      .then((rounds) => {
+        if (!active) return;
+        setBudgetRounds(rounds);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(error);
+        setRoundsError("Unable to load slot budgets.");
+      })
+      .finally(() => {
+        if (active) {
+          setRoundsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [roundYear, roundRefreshTick, activeView, canView, wizardOpen]);
+
+  useEffect(() => {
+    setRoundEdits({});
+    setNewRoundDraft({
+      round_number: "",
+      start_date: "",
+      end_date: "",
+      slot_budget: "",
+    });
+  }, [roundYear]);
+
+  useEffect(() => {
     if (!canView) return;
     const cachedMetrics = getCache<SponsorshipMetrics>("sponsorships:metrics", 60_000);
     if (cachedMetrics) {
@@ -666,6 +861,9 @@ export default function SponsorshipWorkspace() {
         setWizardOpen(true);
         setWizardStep(resolveDraftStep(record));
         setWizardForm(mapSponsorshipToWizardForm(record));
+        if (record.budget_round?.year) {
+          setRoundYear(String(record.budget_round.year));
+        }
         setWizardError(null);
         setNewcomerFieldErrors({});
         setDraftEditingId(record.id);
@@ -738,15 +936,56 @@ export default function SponsorshipWorkspace() {
 
   const budgetTotals = useMemo(() => {
     const items = budgetCases?.items ?? [];
-    const totals = { slots: 0, used: 0, amount: 0 };
+    const totals = { slots: 0, used: 0 };
     items.forEach((item) => {
       totals.slots += item.budget_slots ?? 0;
       totals.used += item.used_slots ?? 0;
-      totals.amount += item.budget_amount ?? 0;
     });
     const utilization = totals.slots > 0 ? Math.round((totals.used / totals.slots) * 1000) / 10 : 0;
     return { ...totals, utilization };
   }, [budgetCases]);
+
+  const budgetRoundTotals = useMemo(() => {
+    const totalSlots = budgetRounds.reduce((sum, round) => sum + (round.slot_budget || 0), 0);
+    const usedSlots = budgetRounds.reduce((sum, round) => sum + (round.used_slots || 0), 0);
+    const utilization = totalSlots > 0 ? Math.round((usedSlots / totalSlots) * 1000) / 10 : 0;
+    return { slots: totalSlots, used: usedSlots, utilization, rounds: budgetRounds.length };
+  }, [budgetRounds]);
+
+  const budgetRoundLookup = useMemo(
+    () => new Map(budgetRounds.map((round) => [String(round.id), round])),
+    [budgetRounds],
+  );
+  const selectedWizardRound = useMemo(() => {
+    if (!wizardForm.budget_round_id) return null;
+    return budgetRoundLookup.get(wizardForm.budget_round_id) ?? null;
+  }, [budgetRoundLookup, wizardForm.budget_round_id]);
+
+  useEffect(() => {
+    if (!wizardForm.budget_round_id) return;
+    if (roundsLoading) return;
+    if (!budgetRoundLookup.has(wizardForm.budget_round_id)) {
+      setWizardForm((prev) => ({ ...prev, budget_round_id: "" }));
+    }
+  }, [budgetRoundLookup, wizardForm.budget_round_id, roundsLoading]);
+
+  const nextRoundNumber = useMemo(() => {
+    const used = new Set(budgetRounds.map((round) => round.round_number));
+    for (let index = 0; index < ROUND_OPTIONS.length; index += 1) {
+      const roundNumber = Number(ROUND_OPTIONS[index]);
+      if (!used.has(roundNumber)) {
+        return String(roundNumber);
+      }
+    }
+    return "";
+  }, [budgetRounds]);
+
+  useEffect(() => {
+    if (newRoundDraft.round_number) return;
+    if (nextRoundNumber) {
+      setNewRoundDraft((prev) => ({ ...prev, round_number: nextRoundNumber }));
+    }
+  }, [nextRoundNumber, newRoundDraft.round_number]);
 
   if (!canView) {
     return <Navigate to="/dashboard" replace />;
@@ -767,6 +1006,7 @@ export default function SponsorshipWorkspace() {
     setFilters((prev) => ({ ...prev }));
     if (activeView === "budget") {
       setBudgetRefreshTick((prev) => prev + 1);
+      setRoundRefreshTick((prev) => prev + 1);
     }
   };
 
@@ -806,7 +1046,7 @@ export default function SponsorshipWorkspace() {
         budgetEdits[item.id] ?? {
           budget_slots: item.budget_slots ? String(item.budget_slots) : "",
           used_slots: item.used_slots !== undefined && item.used_slots !== null ? String(item.used_slots) : "",
-          budget_amount: item.budget_amount !== null && item.budget_amount !== undefined ? String(item.budget_amount) : "",
+          budget_round_id: item.budget_round_id ? String(item.budget_round_id) : "",
         }
       );
     },
@@ -815,7 +1055,7 @@ export default function SponsorshipWorkspace() {
 
   const handleBudgetFieldChange = (id: number, field: keyof BudgetDraft, value: string) => {
     setBudgetEdits((prev) => {
-      const current = prev[id] ?? { budget_slots: "", used_slots: "", budget_amount: "" };
+      const current = prev[id] ?? { budget_slots: "", used_slots: "", budget_round_id: "" };
       return { ...prev, [id]: { ...current, [field]: value } };
     });
   };
@@ -824,7 +1064,7 @@ export default function SponsorshipWorkspace() {
     const draft = getBudgetDraft(item);
     const nextSlots = draft.budget_slots.trim();
     const nextUsed = draft.used_slots.trim();
-    const nextAmount = draft.budget_amount.trim();
+    const nextRound = draft.budget_round_id.trim();
     const payload: Partial<SponsorshipPayload> = {};
 
     if (nextSlots) {
@@ -848,13 +1088,17 @@ export default function SponsorshipWorkspace() {
       }
       payload.used_slots = parsed;
     }
-    if (nextAmount) {
-      const parsed = Number(nextAmount);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        toast.push("Budget amount must be greater than 0.");
-        return;
+    if (nextRound !== String(item.budget_round_id ?? "")) {
+      if (nextRound) {
+        const parsed = Number(nextRound);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+          toast.push("Select a valid budget round.");
+          return;
+        }
+        payload.budget_round_id = parsed;
+      } else {
+        payload.budget_round_id = null;
       }
-      payload.budget_amount = parsed;
     }
     if (Object.keys(payload).length === 0) {
       toast.push("No budget changes to save.");
@@ -879,6 +1123,146 @@ export default function SponsorshipWorkspace() {
       toast.push("Unable to update budget.");
     } finally {
       setBudgetSavingId(null);
+    }
+  };
+
+  const getRoundDraft = useCallback(
+    (round: SponsorshipBudgetRound): BudgetRoundDraft => {
+      return (
+        roundEdits[round.id] ?? {
+          round_number: String(round.round_number),
+          start_date: round.start_date ?? "",
+          end_date: round.end_date ?? "",
+          slot_budget: String(round.slot_budget ?? ""),
+        }
+      );
+    },
+    [roundEdits],
+  );
+
+  const handleRoundFieldChange = (round: SponsorshipBudgetRound, field: keyof BudgetRoundDraft, value: string) => {
+    setRoundEdits((prev) => {
+      const current =
+        prev[round.id] ?? {
+          round_number: String(round.round_number),
+          start_date: round.start_date ?? "",
+          end_date: round.end_date ?? "",
+          slot_budget: String(round.slot_budget ?? ""),
+        };
+      return { ...prev, [round.id]: { ...current, [field]: value } };
+    });
+  };
+
+  const validateRoundDraft = (draft: BudgetRoundDraft, existingRounds: SponsorshipBudgetRound[], editingId?: number) => {
+    const roundNumber = Number(draft.round_number);
+    if (!draft.round_number || !Number.isFinite(roundNumber) || roundNumber < 1) {
+      return "Select a valid round number.";
+    }
+    const slotBudget = Number(draft.slot_budget);
+    if (!draft.slot_budget || !Number.isFinite(slotBudget) || slotBudget < 1) {
+      return "Slot budget must be a positive number.";
+    }
+    if (draft.start_date && draft.end_date && draft.end_date < draft.start_date) {
+      return "End date must be on or after the start date.";
+    }
+    const duplicate = existingRounds.some(
+      (round) => round.round_number === roundNumber && round.id !== editingId,
+    );
+    if (duplicate) {
+      return "This round number is already configured for the year.";
+    }
+    return null;
+  };
+
+  const handleRoundSave = async (round: SponsorshipBudgetRound) => {
+    if (!canManage) return;
+    const draft = getRoundDraft(round);
+    const errorMessage = validateRoundDraft(draft, budgetRounds, round.id);
+    if (errorMessage) {
+      toast.push(errorMessage);
+      return;
+    }
+    setRoundSavingId(round.id);
+    try {
+      const updated = await updateSponsorshipBudgetRound(round.id, {
+        year: Number(roundYear),
+        round_number: Number(draft.round_number),
+        start_date: draft.start_date || null,
+        end_date: draft.end_date || null,
+        slot_budget: Number(draft.slot_budget),
+      });
+      setBudgetRounds((prev) =>
+        prev
+          .map((entry) => (entry.id === updated.id ? updated : entry))
+          .sort((a, b) => a.round_number - b.round_number),
+      );
+      setRoundEdits((prev) => {
+        const next = { ...prev };
+        delete next[round.id];
+        return next;
+      });
+      toast.push("Round updated.");
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to update round.");
+    } finally {
+      setRoundSavingId(null);
+    }
+  };
+
+  const handleRoundCreate = async () => {
+    if (!canManage) return;
+    const errorMessage = validateRoundDraft(newRoundDraft, budgetRounds);
+    if (errorMessage) {
+      toast.push(errorMessage);
+      return;
+    }
+    setRoundSavingId("new");
+    try {
+      const created = await createSponsorshipBudgetRound({
+        year: Number(roundYear),
+        round_number: Number(newRoundDraft.round_number),
+        start_date: newRoundDraft.start_date || null,
+        end_date: newRoundDraft.end_date || null,
+        slot_budget: Number(newRoundDraft.slot_budget),
+      });
+      setBudgetRounds((prev) =>
+        [...prev, created].sort((a, b) => a.round_number - b.round_number),
+      );
+      setNewRoundDraft({
+        round_number: "",
+        start_date: "",
+        end_date: "",
+        slot_budget: "",
+      });
+      toast.push("Round added.");
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to add round.");
+    } finally {
+      setRoundSavingId(null);
+    }
+  };
+
+  const handleRoundDelete = async (round: SponsorshipBudgetRound) => {
+    if (!canManage) return;
+    const confirmed = window.confirm(`Remove Round ${round.round_number} for ${round.year}?`);
+    if (!confirmed) return;
+    setRoundDeletingId(round.id);
+    try {
+      await deleteSponsorshipBudgetRound(round.id);
+      setBudgetRounds((prev) => prev.filter((entry) => entry.id !== round.id));
+      setRoundEdits((prev) => {
+        const next = { ...prev };
+        delete next[round.id];
+        return next;
+      });
+      toast.push("Round removed.");
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to remove round.");
+    } finally {
+      setRoundDeletingId(null);
     }
   };
 
@@ -991,6 +1375,32 @@ export default function SponsorshipWorkspace() {
   };
 
   const sponsorBlocked = !sponsorContext || sponsorContext.member_status !== "Active";
+  const paymentHistory = useMemo(() => {
+    if (!sponsorContext?.payment_history) return [];
+    return [...sponsorContext.payment_history].sort(
+      (a, b) => b.paid_at.localeCompare(a.paid_at) || b.id - a.id,
+    );
+  }, [sponsorContext?.payment_history]);
+  const paymentHistoryAvailable = Boolean(
+    sponsorContext?.payment_history_start && sponsorContext?.payment_history_end,
+  );
+  const paymentHistoryRangeLabel = useMemo(() => {
+    if (!paymentHistoryAvailable) return null;
+    const startLabel = formatDate(sponsorContext?.payment_history_start);
+    const endLabel = formatDate(sponsorContext?.payment_history_end);
+    if (startLabel !== "—" && endLabel !== "—") {
+      return `${startLabel} – ${endLabel}`;
+    }
+    return "Last 36 months";
+  }, [paymentHistoryAvailable, sponsorContext?.payment_history_end, sponsorContext?.payment_history_start]);
+  const paymentContinuity = useMemo(() => {
+    if (!paymentHistoryAvailable) return null;
+    return buildPaymentContinuity(paymentHistory, {
+      startDate: sponsorContext?.payment_history_start,
+      endDate: sponsorContext?.payment_history_end,
+      months: 36,
+    });
+  }, [paymentHistory, paymentHistoryAvailable, sponsorContext?.payment_history_end, sponsorContext?.payment_history_start]);
 
   const isUnsupportedSubmittedError = (error: unknown) => {
     if (!(error instanceof ApiError) || error.status !== 422 || !error.body) return false;
@@ -1108,6 +1518,10 @@ export default function SponsorshipWorkspace() {
       setWizardError("Provide a pledge amount.");
       return;
     }
+    if (wizardForm.last_status === "Rejected" && !wizardForm.last_status_reason.trim()) {
+      setWizardError("Provide a reason when the last sponsorship was rejected.");
+      return;
+    }
     setWizardLoading(true);
     setWizardError(null);
     const submitPayload = (statusToSend: Sponsorship["status"]) => ({
@@ -1118,6 +1532,10 @@ export default function SponsorshipWorkspace() {
         monthly_amount: Number(wizardForm.monthly_amount),
         start_date: wizardForm.start_date || new Date().toISOString().slice(0, 10),
         end_date: wizardForm.end_date || undefined,
+        last_sponsored_date: wizardForm.last_sponsored_date || undefined,
+        payment_information: wizardForm.payment_information || undefined,
+        last_status: wizardForm.last_status || undefined,
+        last_status_reason: wizardForm.last_status === "Rejected" ? wizardForm.last_status_reason || undefined : undefined,
         frequency: wizardForm.frequency,
         program: wizardForm.program || undefined,
         pledge_channel: wizardForm.pledge_channel || undefined,
@@ -1127,6 +1545,7 @@ export default function SponsorshipWorkspace() {
         volunteer_service_other: wizardForm.volunteer_service_other || undefined,
         budget_month: wizardForm.budget_month ? Number(wizardForm.budget_month) : undefined,
         budget_year: wizardForm.budget_year ? Number(wizardForm.budget_year) : undefined,
+        budget_round_id: wizardForm.budget_round_id ? Number(wizardForm.budget_round_id) : null,
         budget_slots: wizardForm.budget_slots ? Number(wizardForm.budget_slots) : undefined,
         notes: wizardForm.notes || undefined,
         status: statusToSend,
@@ -1433,15 +1852,16 @@ export default function SponsorshipWorkspace() {
                 <th className="px-4 py-2 text-left">Beneficiary</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-left">Created</th>
-                <th className="px-4 py-2 text-left">Last update</th>
+                <th className="px-4 py-2 text-left">Last sponsored by</th>
                 <th className="px-4 py-2 text-left">Next action</th>
                 <th className="px-4 py-2 text-left">Actions</th>
+                <th className="px-4 py-2 text-left">Last update</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
                     <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
                     Loading cases...
                   </td>
@@ -1465,7 +1885,12 @@ export default function SponsorshipWorkspace() {
                       </Badge>
                     </td>
                     <td className="px-4 py-2">{formatDate(item.created_at)}</td>
-                    <td className="px-4 py-2">{formatDate(item.updated_at)}</td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium">
+                        {item.sponsor.first_name} {item.sponsor.last_name}
+                      </div>
+                      <div className="text-xs text-mute">{formatDate(item.last_sponsored_date)}</div>
+                    </td>
                     <td className="px-4 py-2 text-mute">{nextActionLabel(item.status)}</td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-2">
@@ -1486,7 +1911,7 @@ export default function SponsorshipWorkspace() {
                             <Button
                               size="sm"
                               disabled={!canApprove}
-                              onClick={() => openStatusModal(item, "Approved", "Approve case", false)}
+                              onClick={() => openStatusModal(item, "Approved", "Approve case", true)}
                             >
                               Approve
                             </Button>
@@ -1522,11 +1947,12 @@ export default function SponsorshipWorkspace() {
                         )}
                       </div>
                     </td>
+                    <td className="px-4 py-2">{formatDate(item.updated_at)}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
                     No cases found.
                   </td>
                 </tr>
@@ -1561,6 +1987,221 @@ export default function SponsorshipWorkspace() {
 
       {activeView === "budget" && (
         <div className="space-y-4">
+          <Card className="p-4 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase text-mute">Slot budget setup</p>
+                <p className="text-sm text-mute">
+                  Define how many sponsorship slots the church will allocate per round. Use 2–3 rounds for the year when needed.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Budget year</label>
+                  <Select value={roundYear} onChange={(event) => setRoundYear(event.target.value)}>
+                    {YEAR_OPTIONS.map((year) => (
+                      <option key={year} value={String(year)}>
+                        {year}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button variant="ghost" onClick={() => setRoundRefreshTick((prev) => prev + 1)}>
+                  Refresh rounds
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <Card className="p-3">
+                <p className="text-xs uppercase text-mute">Configured rounds</p>
+                <p className="text-xl font-semibold">{budgetRoundTotals.rounds}</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs uppercase text-mute">Slot budget</p>
+                <p className="text-xl font-semibold">{budgetRoundTotals.slots}</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs uppercase text-mute">Used slots</p>
+                <p className="text-xl font-semibold">{budgetRoundTotals.used}</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs uppercase text-mute">Utilization</p>
+                <p className="text-xl font-semibold">{budgetRoundTotals.utilization}%</p>
+              </Card>
+            </div>
+
+            <div className="overflow-x-auto border border-border rounded-xl">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-mute">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Round</th>
+                    <th className="px-4 py-2 text-left">Start date</th>
+                    <th className="px-4 py-2 text-left">End date</th>
+                    <th className="px-4 py-2 text-left">Slot budget</th>
+                    <th className="px-4 py-2 text-left">Allocated</th>
+                    <th className="px-4 py-2 text-left">Used</th>
+                    <th className="px-4 py-2 text-left">Utilization</th>
+                    <th className="px-4 py-2 text-left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roundsLoading ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                        <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                        Loading rounds...
+                      </td>
+                    </tr>
+                  ) : budgetRounds.length ? (
+                    budgetRounds.map((round) => {
+                      const draft = getRoundDraft(round);
+                      const saving = roundSavingId === round.id;
+                      const deleting = roundDeletingId === round.id;
+                      return (
+                        <tr key={round.id} className="border-t border-border/60">
+                          <td className="px-4 py-2">
+                            {canManage ? (
+                              <Select
+                                value={draft.round_number}
+                                onChange={(event) => handleRoundFieldChange(round, "round_number", event.target.value)}
+                              >
+                                {ROUND_OPTIONS.map((option) => (
+                                  <option key={option} value={option}>
+                                    Round {option}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : (
+                              <span>Round {round.round_number}</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {canManage ? (
+                              <Input
+                                type="date"
+                                value={draft.start_date}
+                                onChange={(event) => handleRoundFieldChange(round, "start_date", event.target.value)}
+                              />
+                            ) : (
+                              formatDate(round.start_date)
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {canManage ? (
+                              <Input
+                                type="date"
+                                value={draft.end_date}
+                                onChange={(event) => handleRoundFieldChange(round, "end_date", event.target.value)}
+                              />
+                            ) : (
+                              formatDate(round.end_date)
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {canManage ? (
+                              <Input
+                                type="number"
+                                min={1}
+                                value={draft.slot_budget}
+                                onChange={(event) => handleRoundFieldChange(round, "slot_budget", event.target.value)}
+                              />
+                            ) : (
+                              round.slot_budget
+                            )}
+                          </td>
+                          <td className="px-4 py-2">{round.allocated_slots}</td>
+                          <td className="px-4 py-2">{round.used_slots}</td>
+                          <td className="px-4 py-2">{round.utilization_percent}%</td>
+                          <td className="px-4 py-2">
+                            {canManage ? (
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => handleRoundSave(round)} disabled={saving}>
+                                  {saving ? "Saving..." : "Save"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleRoundDelete(round)}
+                                  disabled={deleting}
+                                >
+                                  {deleting ? "Removing..." : "Remove"}
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-mute">No edit access</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                        No rounds configured for {roundYear} yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {roundsError && <p className="text-xs text-rose-600">{roundsError}</p>}
+
+            {canManage && (
+              <div className="border-t border-border pt-4 space-y-3">
+                <p className="text-sm font-medium">Add a round</p>
+                <div className="grid gap-3 md:grid-cols-5">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Round</label>
+                    <Select
+                      value={newRoundDraft.round_number}
+                      onChange={(event) =>
+                        setNewRoundDraft((prev) => ({ ...prev, round_number: event.target.value }))
+                      }
+                    >
+                      <option value="">Select</option>
+                      {ROUND_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          Round {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Start date</label>
+                    <Input
+                      type="date"
+                      value={newRoundDraft.start_date}
+                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, start_date: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">End date</label>
+                    <Input
+                      type="date"
+                      value={newRoundDraft.end_date}
+                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, end_date: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Slot budget</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={newRoundDraft.slot_budget}
+                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, slot_budget: event.target.value }))}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button onClick={handleRoundCreate} disabled={roundSavingId === "new"}>
+                      {roundSavingId === "new" ? "Adding..." : "Add round"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+
           <Card className="p-4">
             <div className="flex flex-wrap items-end gap-3">
               <div>
@@ -1594,11 +2235,11 @@ export default function SponsorshipWorkspace() {
               </Button>
             </div>
             <p className="mt-3 text-xs text-mute">
-              Manage budget slots and amounts for cases in the selected period.
+              Manage case-level slot allocations for the selected period.
             </p>
           </Card>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-3">
             <Card className="p-4">
               <p className="text-xs uppercase text-mute">Total slots</p>
               <p className="text-2xl font-semibold">{budgetTotals.slots}</p>
@@ -1610,12 +2251,6 @@ export default function SponsorshipWorkspace() {
             <Card className="p-4">
               <p className="text-xs uppercase text-mute">Utilization</p>
               <p className="text-2xl font-semibold">{budgetTotals.utilization}%</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs uppercase text-mute">Total budget</p>
-              <p className="text-2xl font-semibold">
-                ${budgetTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </p>
             </Card>
           </div>
 
@@ -1632,9 +2267,9 @@ export default function SponsorshipWorkspace() {
                     <th className="px-4 py-2 text-left">Sponsor</th>
                     <th className="px-4 py-2 text-left">Beneficiary</th>
                     <th className="px-4 py-2 text-left">Status</th>
+                    <th className="px-4 py-2 text-left">Budget round</th>
                     <th className="px-4 py-2 text-left">Budget slots</th>
                     <th className="px-4 py-2 text-left">Used slots</th>
-                    <th className="px-4 py-2 text-left">Budget amount</th>
                     <th className="px-4 py-2 text-left">Actions</th>
                   </tr>
                 </thead>
@@ -1663,6 +2298,19 @@ export default function SponsorshipWorkspace() {
                             </Badge>
                           </td>
                           <td className="px-4 py-2">
+                            <Select
+                              value={draft.budget_round_id}
+                              onChange={(event) => handleBudgetFieldChange(item.id, "budget_round_id", event.target.value)}
+                            >
+                              <option value="">No round</option>
+                              {budgetRounds.map((round) => (
+                                <option key={round.id} value={String(round.id)}>
+                                  Round {round.round_number} ({round.year}) • {round.slot_budget} slots
+                                </option>
+                              ))}
+                            </Select>
+                          </td>
+                          <td className="px-4 py-2">
                             <Input
                               type="number"
                               min={1}
@@ -1676,15 +2324,6 @@ export default function SponsorshipWorkspace() {
                               min={0}
                               value={draft.used_slots}
                               onChange={(event) => handleBudgetFieldChange(item.id, "used_slots", event.target.value)}
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <Input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={draft.budget_amount}
-                              onChange={(event) => handleBudgetFieldChange(item.id, "budget_amount", event.target.value)}
                             />
                           </td>
                           <td className="px-4 py-2">
@@ -1796,6 +2435,105 @@ export default function SponsorshipWorkspace() {
                           <div className="text-sm text-mute">
                             Budget usage: {sponsorContext.budget_usage.used_slots}/{sponsorContext.budget_usage.total_slots}
                           </div>
+                        )}
+                        {paymentHistoryAvailable ? (
+                          <div className="pt-2 border-t border-border/60 space-y-3">
+                            <div className="text-xs uppercase text-mute">
+                              Payment continuity ({paymentHistoryRangeLabel ?? "Last 36 months"})
+                            </div>
+                            {paymentHistory.length ? (
+                              <>
+                                <div className="flex flex-wrap gap-4 text-sm text-mute">
+                                  <div>
+                                    <span className="font-medium text-ink">
+                                      {paymentContinuity?.paidMonths ?? 0}/{paymentContinuity?.totalMonths ?? 0}
+                                    </span>{" "}
+                                    months paid
+                                  </div>
+                                  <div>Continuity: {paymentContinuity?.continuityPercent ?? 0}%</div>
+                                  <div>Missed: {paymentContinuity?.missedMonths ?? 0}</div>
+                                  <div>Last payment: {formatDate(paymentContinuity?.lastPaymentAt)}</div>
+                                </div>
+                                <div className="space-y-2">
+                                  {paymentContinuity?.segments.map((segment) => (
+                                    <div key={segment.label} className="flex items-center gap-2">
+                                      <div className="w-36 text-[11px] text-mute">{segment.label}</div>
+                                      <div className="grid grid-cols-12 gap-1 flex-1 min-w-[160px]">
+                                        {segment.months.map((month) => (
+                                          <div
+                                            key={month.key}
+                                            className={`h-2.5 rounded-sm ${
+                                              month.paid ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-800"
+                                            }`}
+                                            title={`${month.label} ${month.year}: ${
+                                              month.paid
+                                                ? `${month.paymentCount} payment${month.paymentCount > 1 ? "s" : ""}`
+                                                : "No payment"
+                                            }`}
+                                          />
+                                        ))}
+                                      </div>
+                                      <div className="text-[11px] text-mute w-12 text-right">
+                                        {segment.paidMonths}/12
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-xs text-mute">
+                                  Darker squares indicate months with at least one membership contribution.
+                                </div>
+                                <div className="pt-2">
+                                  <div className="text-xs uppercase text-mute">
+                                    Payment history ({paymentHistoryRangeLabel ?? "Last 36 months"})
+                                  </div>
+                                  <div className="mt-2 border border-border rounded-lg max-h-48 overflow-y-auto">
+                                    <table className="w-full text-sm">
+                                      <thead className="text-xs uppercase text-mute bg-muted/40">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left">Date</th>
+                                          <th className="px-3 py-2 text-left">Amount</th>
+                                          <th className="px-3 py-2 text-left">Method</th>
+                                          <th className="px-3 py-2 text-left">Note</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {paymentHistory.map((payment) => (
+                                          <tr key={payment.id} className="border-t border-border/60">
+                                            <td className="px-3 py-2">{formatDate(payment.paid_at)}</td>
+                                            <td className="px-3 py-2">
+                                              {payment.currency}{" "}
+                                              {payment.amount.toLocaleString(undefined, {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2,
+                                              })}
+                                            </td>
+                                            <td className="px-3 py-2">{payment.method || "—"}</td>
+                                            <td className="px-3 py-2">{payment.note || "—"}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  {permissions.viewPayments && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="mt-2"
+                                      onClick={() => navigate(`/payments/members/${sponsorContext.member_id}`)}
+                                    >
+                                      View full payment timeline
+                                    </Button>
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <p className="text-sm text-mute">
+                                No membership contribution payments recorded in the last 36 months.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-mute">Payment continuity unavailable.</div>
                         )}
                         <Button variant="ghost" size="sm" onClick={() => navigate(`/members/${sponsorContext.member_id}/edit`)}>
                           View member profile
@@ -2124,6 +2862,63 @@ export default function SponsorshipWorkspace() {
                       />
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Last sponsored date</label>
+                        <Input
+                          type="date"
+                          value={wizardForm.last_sponsored_date}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, last_sponsored_date: event.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Payment information</label>
+                        <Input
+                          placeholder="Membership monthly payment"
+                          value={wizardForm.payment_information}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, payment_information: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Last sponsored status</label>
+                      <div className="flex flex-wrap gap-4 text-sm text-mute">
+                        {["Approved", "Rejected"].map((status) => (
+                          <label key={status} className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="last-sponsored-status"
+                              checked={wizardForm.last_status === status}
+                              onChange={() =>
+                                setWizardForm((prev) => ({
+                                  ...prev,
+                                  last_status: status as Sponsorship["last_status"],
+                                  last_status_reason: status === "Rejected" ? prev.last_status_reason : "",
+                                }))
+                              }
+                            />
+                            {status}
+                          </label>
+                        ))}
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="last-sponsored-status"
+                            checked={!wizardForm.last_status}
+                            onChange={() => setWizardForm((prev) => ({ ...prev, last_status: "", last_status_reason: "" }))}
+                          />
+                          Not set
+                        </label>
+                      </div>
+                      {wizardForm.last_status === "Rejected" && (
+                        <Textarea
+                          className="mt-2"
+                          placeholder="Rejection reason (required)"
+                          value={wizardForm.last_status_reason}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, last_status_reason: event.target.value }))}
+                        />
+                      )}
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
                       <Select
                         value={wizardForm.program}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, program: event.target.value as Sponsorship["program"] | "" }))}
@@ -2226,6 +3021,50 @@ export default function SponsorshipWorkspace() {
                         }
                       />
                     </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Budget round year</label>
+                        <Select
+                          value={roundYear}
+                          onChange={(event) => setRoundYear(event.target.value)}
+                        >
+                          {YEAR_OPTIONS.map((year) => (
+                            <option key={year} value={String(year)}>
+                              {year}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase text-mute block mb-1">Budget round</label>
+                        <Select
+                          value={wizardForm.budget_round_id}
+                          onChange={(event) =>
+                            setWizardForm((prev) => ({ ...prev, budget_round_id: event.target.value }))
+                          }
+                        >
+                          <option value="">No round</option>
+                          {budgetRounds.map((round) => (
+                            <option key={round.id} value={String(round.id)}>
+                              Round {round.round_number} ({round.year}) • {round.used_slots}/{round.slot_budget} used
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
+                    {roundsLoading && <p className="text-xs text-mute">Loading budget rounds...</p>}
+                    {!roundsLoading && roundsError && (
+                      <p className="text-xs text-rose-600">{roundsError}</p>
+                    )}
+                    {!roundsLoading && !roundsError && !budgetRounds.length && (
+                      <p className="text-xs text-mute">No budget rounds configured for {roundYear} yet.</p>
+                    )}
+                    {selectedWizardRound && (
+                      <p className="text-xs text-mute">
+                        Round capacity: {selectedWizardRound.used_slots}/{selectedWizardRound.slot_budget} used •{" "}
+                        {selectedWizardRound.utilization_percent}% utilized
+                      </p>
+                    )}
                     <div className="grid gap-3 md:grid-cols-3">
                       <Select
                         value={wizardForm.budget_month}
@@ -2279,6 +3118,18 @@ export default function SponsorshipWorkspace() {
                       <p className="font-medium">{wizardForm.sponsor_name || "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Beneficiary</p>
                       <p className="font-medium">{wizardForm.beneficiary_name || "—"}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Last sponsored date</p>
+                      <p className="font-medium">{formatDate(wizardForm.last_sponsored_date)}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Payment information</p>
+                      <p className="font-medium">{wizardForm.payment_information || "—"}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Last sponsored status</p>
+                      <p className="font-medium">{wizardForm.last_status || "—"}</p>
+                      {wizardForm.last_status === "Rejected" && (
+                        <>
+                          <p className="text-xs uppercase text-mute mt-3">Rejection reason</p>
+                          <p className="font-medium">{wizardForm.last_status_reason || "—"}</p>
+                        </>
+                      )}
                       <p className="text-xs uppercase text-mute mt-3">Program</p>
                       <p className="font-medium">
                         {resolveOptionLabel(SPONSORSHIP_PROGRAM_OPTIONS, wizardForm.program)}
@@ -2315,6 +3166,20 @@ export default function SponsorshipWorkspace() {
                       <p className="font-medium">{formatDate(wizardForm.start_date)}</p>
                       <p className="text-xs uppercase text-mute mt-3">Expected end</p>
                       <p className="font-medium">{formatDate(wizardForm.end_date)}</p>
+                      <p className="text-xs uppercase text-mute mt-3">Budget round</p>
+                      <p className="font-medium">
+                        {selectedWizardRound
+                          ? `Round ${selectedWizardRound.round_number} (${selectedWizardRound.year})`
+                          : "—"}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Budget period</p>
+                      <p className="font-medium">
+                        {wizardForm.budget_month && wizardForm.budget_year
+                          ? `${wizardForm.budget_month}/${wizardForm.budget_year}`
+                          : "—"}
+                      </p>
+                      <p className="text-xs uppercase text-mute mt-3">Budget slots</p>
+                      <p className="font-medium">{wizardForm.budget_slots || "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Notes</p>
                       <p className="text-sm text-mute whitespace-pre-line">{wizardForm.notes || "—"}</p>
                     </Card>

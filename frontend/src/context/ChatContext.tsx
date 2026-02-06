@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getChatUsers, getMessages, sendMessage as apiSendMessage, markMessageRead, listAdminUsers, ApiError, uploadChatAttachment, deleteChatMessage, sendHeartbeat } from '@/lib/api';
+import { subscribeSessionExpired, subscribeSessionRestored } from '@/lib/session';
 
 export interface User {
     id: string;
@@ -60,9 +61,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const [messages, setMessages] = useState<Record<string, Message[]>>({});
     const [usersMap, setUsersMap] = useState<Record<string, User>>({});
     const [chatAvailable, setChatAvailable] = useState(true);
+    const [isActive, setIsActive] = useState(() => {
+        if (typeof document === "undefined") return true;
+        return document.visibilityState === "visible" && (typeof navigator === "undefined" || navigator.onLine);
+    });
+    const [sessionPaused, setSessionPaused] = useState(false);
     const defaultAvatar = (name: string) => `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
     const currentUserId = user ? String(user.id) : null;
     const availabilityProbeRef = useRef<number>(0);
+    const usersInFlightRef = useRef(false);
+    const messagesInFlightRef = useRef(false);
+    const heartbeatInFlightRef = useRef(false);
 
     const currentUser: User | null = user ? {
         id: String(user.id),
@@ -162,52 +171,66 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }, [currentUserId]);
 
     const fetchUsers = useCallback(async () => {
-        if (!currentUser || !chatAvailable) return;
+        if (!currentUser || !chatAvailable || !isActive || sessionPaused) return;
+        if (usersInFlightRef.current) return;
+        usersInFlightRef.current = true;
         try {
-            const users = await getChatUsers();
-            const map: Record<string, User> = {};
-            users.forEach(u => {
-                const name = u.name || `User ${u.id}`;
-                map[String(u.id)] = {
-                    id: String(u.id),
-                    name,
-                    status: (u.status as User["status"]) || "offline",
-                    avatar: u.avatar_url || defaultAvatar(name)
-                };
-            });
-            if (Object.keys(map).length > 0) {
-                setUsersMap(map);
-                return;
-            }
-        } catch (error) {
-            if (error instanceof ApiError && error.status === 401) {
-                // Session expired
-                return;
-            }
-            console.error("Failed to fetch chat users, falling back to admin users", error);
-        }
-
-        // Fallback to admin users list if chat-specific endpoint is unavailable
-        try {
-            const adminUsers = await listAdminUsers({ limit: 200, is_active: true });
-            const map: Record<string, User> = {};
-            adminUsers.items
-                .filter(u => String(u.id) !== currentUserId) // exclude self
-                .forEach(u => {
-                    const name = u.full_name || u.username || `User ${u.id}`;
+            try {
+                const users = await getChatUsers();
+                const map: Record<string, User> = {};
+                users.forEach(u => {
+                    const name = u.name || `User ${u.id}`;
                     map[String(u.id)] = {
                         id: String(u.id),
                         name,
-                        status: 'offline',
-                        avatar: defaultAvatar(name)
+                        status: (u.status as User["status"]) || "offline",
+                        avatar: u.avatar_url || defaultAvatar(name)
                     };
                 });
-            setUsersMap(map);
-        } catch (error) {
-            if (error instanceof ApiError && error.status === 401) return;
-            console.error("Failed to fetch admin users for chat", error);
+                if (Object.keys(map).length > 0) {
+                    setUsersMap(map);
+                    return;
+                }
+            } catch (error) {
+                if (error instanceof ApiError) {
+                    if (error.status === 401) {
+                        // Session expired
+                        return;
+                    }
+                    if (error.status !== 404) {
+                        console.error("Failed to fetch chat users", error);
+                        return;
+                    }
+                } else {
+                    console.error("Failed to fetch chat users", error);
+                    return;
+                }
+            }
+
+            // Fallback to admin users list if chat-specific endpoint is unavailable
+            try {
+                const adminUsers = await listAdminUsers({ limit: 200, is_active: true });
+                const map: Record<string, User> = {};
+                adminUsers.items
+                    .filter(u => String(u.id) !== currentUserId) // exclude self
+                    .forEach(u => {
+                        const name = u.full_name || u.username || `User ${u.id}`;
+                        map[String(u.id)] = {
+                            id: String(u.id),
+                            name,
+                            status: 'offline',
+                            avatar: defaultAvatar(name)
+                        };
+                    });
+                setUsersMap(map);
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 401) return;
+                console.error("Failed to fetch admin users for chat", error);
+            }
+        } finally {
+            usersInFlightRef.current = false;
         }
-    }, [chatAvailable, currentUser, currentUserId]);
+    }, [chatAvailable, currentUser, currentUserId, isActive, sessionPaused]);
 
     // Fetch users and map them (poll every 30s to update status)
     useEffect(() => {
@@ -215,6 +238,32 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const interval = setInterval(fetchUsers, 30000);
         return () => clearInterval(interval);
     }, [fetchUsers]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const update = () => {
+            const online = typeof navigator === "undefined" ? true : navigator.onLine;
+            setIsActive(document.visibilityState === "visible" && online);
+        };
+        update();
+        document.addEventListener("visibilitychange", update);
+        window.addEventListener("online", update);
+        window.addEventListener("offline", update);
+        return () => {
+            document.removeEventListener("visibilitychange", update);
+            window.removeEventListener("online", update);
+            window.removeEventListener("offline", update);
+        };
+    }, []);
+
+    useEffect(() => {
+        const unsubscribeExpired = subscribeSessionExpired(() => setSessionPaused(true));
+        const unsubscribeRestored = subscribeSessionRestored(() => setSessionPaused(false));
+        return () => {
+            unsubscribeExpired();
+            unsubscribeRestored();
+        };
+    }, []);
 
     // Reset chat availability when the signed-in user changes and probe if it was disabled
     useEffect(() => {
@@ -224,7 +273,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     // Self-heal: if chat was disabled (404) in another session, periodically probe and re-enable when available
     useEffect(() => {
-        if (!currentUserId || chatAvailable) return;
+        if (!currentUserId || chatAvailable || !isActive || sessionPaused) return;
         const now = Date.now();
         if (now - availabilityProbeRef.current < 10000) return; // at most once per 10s
         availabilityProbeRef.current = now;
@@ -235,9 +284,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     // Poll for messages
     useEffect(() => {
-        if (!currentUserId) return;
+        if (!currentUserId || !chatAvailable || !isActive || sessionPaused) return;
 
         const fetchMessages = async () => {
+            if (messagesInFlightRef.current) return;
+            messagesInFlightRef.current = true;
             try {
                 const apiMessages = await getMessages();
 
@@ -287,22 +338,35 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     }
                 }
                 console.error("Failed to fetch messages", error);
+            } finally {
+                messagesInFlightRef.current = false;
             }
         };
 
         fetchMessages();
-        const interval = setInterval(fetchMessages, 3000); // Poll every 3 seconds
+        const intervalMs = isOpen ? 3000 : 15000;
+        const interval = setInterval(fetchMessages, intervalMs);
         return () => clearInterval(interval);
-    }, [currentUserId, usersMap, chatAvailable, setIsOpen, mergeMessages, buildConversations]);
+    }, [currentUserId, usersMap, chatAvailable, setIsOpen, mergeMessages, buildConversations, isOpen, isActive, sessionPaused]);
 
     // Heartbeat loop
     useEffect(() => {
-        if (!currentUserId || !chatAvailable) return;
-        const beat = () => sendHeartbeat().catch(console.error);
+        if (!currentUserId || !chatAvailable || !isActive || sessionPaused) return;
+        const beat = async () => {
+            if (heartbeatInFlightRef.current) return;
+            heartbeatInFlightRef.current = true;
+            try {
+                await sendHeartbeat();
+            } catch (error) {
+                console.error(error);
+            } finally {
+                heartbeatInFlightRef.current = false;
+            }
+        };
         beat(); // initial
         const interval = setInterval(beat, 30000); // every 30s
         return () => clearInterval(interval);
-    }, [currentUserId, chatAvailable]);
+    }, [currentUserId, chatAvailable, isActive, sessionPaused]);
 
     const toggleChat = useCallback(() => {
         setIsOpen(prev => !prev);

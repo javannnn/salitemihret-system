@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.orm import selectinload
 
 
 from app.config import UPLOAD_DIR
@@ -36,10 +37,13 @@ from app.routers import staff as staff_router
 from app.routers import schools as schools_router
 from app.routers import newcomers as newcomers_router
 from app.routers import chat as chat_router
+from app.routers import volunteers as volunteers_router
 from app.services.child_promotion import get_children_ready_for_promotion
-from app.services.notifications import send_child_promotion_digest
+from app.services.notifications import send_child_promotion_digest, notify_membership_status_change
 from app.services import payments as payments_service
 from app.services.members_utils import cleanup_archived_members
+from app.services.membership import MembershipHealthData, refresh_membership_state
+from app.models.member import Member
 
 app = FastAPI(title="SaliteMihret API", version="0.1.0")
 
@@ -91,6 +95,7 @@ app.include_router(sunday_school_router.router)
 app.include_router(sunday_school_router.public_router)
 app.include_router(reports_router.router)
 app.include_router(schools_router.router)
+app.include_router(volunteers_router.router)
 app.include_router(chat_router.router)
 app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")
@@ -418,6 +423,35 @@ def _run_overdue_payment_check() -> None:
             logger.info("payment_overdue_job", extra={"updated": updated})
 
 
+def _run_membership_status_refresh() -> None:
+    with SessionLocal() as session:
+        members = (
+            session.query(Member)
+            .options(selectinload(Member.contribution_payments), selectinload(Member.household))
+            .filter(Member.deleted_at.is_(None))
+            .all()
+        )
+        changes: list[tuple[Member, str | None, MembershipHealthData]] = []
+        for member in members:
+            previous_auto_status = member.status_auto
+            health = refresh_membership_state(member)
+            if previous_auto_status != health.auto_status:
+                changes.append((member, previous_auto_status, health))
+        session.commit()
+        if changes:
+            for member, previous_status, health in changes:
+                notify_membership_status_change(
+                    session,
+                    member,
+                    previous_status=previous_status,
+                    current_status=health.auto_status,
+                    consecutive_months=health.consecutive_months,
+                    required_months=health.required_consecutive_months,
+                    next_due_at=health.next_due_at,
+                    overdue_days=health.overdue_days,
+                )
+            logger.info("membership_status_refresh", extra={"changed": len(changes)})
+
 def _run_daily_close_job() -> None:
     with SessionLocal() as session:
         lock = payments_service.auto_close_previous_day(session)
@@ -466,6 +500,14 @@ def start_scheduled_jobs() -> None:
         hour=4,
         minute=0,
         id="archived_members_cleanup",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_membership_status_refresh,
+        trigger="cron",
+        hour=2,
+        minute=30,
+        id="membership_status_refresh",
         replace_existing=True,
     )
 

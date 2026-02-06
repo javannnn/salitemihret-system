@@ -49,7 +49,11 @@ from app.services.membership import (
     refresh_membership_state,
     set_status_override,
 )
-from app.services.notifications import notify_contribution_change
+from app.services.notifications import (
+    notify_contribution_change,
+    notify_member_created,
+    notify_membership_status_change,
+)
 from app.services.sunday_school import SUNDAY_SCHOOL_SERVICE_CODE
 from pydantic import ValidationError
 
@@ -461,6 +465,13 @@ def create_member(
         notify_contribution_change(detail_member, "is_tither", False, True)
     if detail_member.pays_contribution:
         notify_contribution_change(detail_member, "pays_contribution", False, True)
+
+    notify_member_created(
+        db,
+        detail_member,
+        created_by=current_user,
+        send_welcome_email=payload.send_welcome_email,
+    )
 
     _attach_membership_metadata(detail_member)
     return MemberDetailOut.from_orm(detail_member)
@@ -878,6 +889,7 @@ def create_member_contribution(
     if amount <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contribution amount must be greater than zero")
 
+    previous_auto_status = member.status_auto
     payment = MemberContributionPayment(
         member_id=member.id,
         amount=amount,
@@ -889,11 +901,21 @@ def create_member_contribution(
     )
     db.add(payment)
     posted_at = datetime.combine(payload.paid_at, datetime.min.time(), tzinfo=timezone.utc)
-    apply_contribution_payment(member, amount=amount, posted_at=posted_at)
-    refresh_membership_state(member)
+    health = apply_contribution_payment(member, amount=amount, posted_at=posted_at)
     member.updated_by_id = current_user.id
     db.commit()
     db.refresh(payment)
+    notify_membership_status_change(
+        db,
+        member,
+        previous_status=previous_auto_status,
+        current_status=health.auto_status,
+        consecutive_months=health.consecutive_months,
+        required_months=health.required_consecutive_months,
+        next_due_at=health.next_due_at,
+        overdue_days=health.overdue_days,
+        actor=current_user,
+    )
     return ContributionPaymentOut.from_orm(payment)
 
 

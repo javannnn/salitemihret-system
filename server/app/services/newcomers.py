@@ -772,7 +772,7 @@ def _create_member_from_newcomer(
     payload: NewcomerConvertRequest,
     actor_id: Optional[int],
 ) -> Member:
-    phone = (payload.phone or newcomer.contact_phone or "").strip()
+    phone = (payload.phone or newcomer.contact_phone or newcomer.contact_whatsapp or "").strip()
     email = payload.email or newcomer.contact_email
     if not phone:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone is required to create a member")
@@ -795,6 +795,7 @@ def _create_member_from_newcomer(
         join_date=date.today(),
         district=payload.district,
         address=newcomer.temporary_address,
+        address_postal_code=newcomer.temporary_address_postal_code or newcomer.current_address_postal_code,
         address_country=newcomer.country,
         notes="\n".join(filter(None, [newcomer.notes, payload.notes])),
         pays_contribution=False,

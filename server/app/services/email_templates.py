@@ -263,6 +263,214 @@ def render_child_promoted_email(
     return html, text
 
 
+def render_member_created_creator_email(
+    *,
+    member_name: str,
+    member_id: int,
+    status: str,
+    join_date: str,
+    household: str,
+    email: str,
+    phone: str,
+    created_by: str,
+    created_by_email: str | None,
+    welcome_requested: bool,
+    member_url: str,
+) -> tuple[str, str]:
+    created_by_line = f"{created_by} ({created_by_email})" if created_by_email else created_by
+    welcome_label = "Requested" if welcome_requested else "Not requested"
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">You created a new member record in the {BRAND_NAME} console.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Member details</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Member ID:</strong> #{member_id}<br>
+          <strong>Name:</strong> {member_name}<br>
+          <strong>Status:</strong> {status}<br>
+          <strong>Join date:</strong> {join_date}<br>
+          <strong>Household:</strong> {household}
+        </div>
+      </div>
+      <div style="margin-top:16px; padding:14px 16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Contact</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Email:</strong> {email}<br>
+          <strong>Phone:</strong> {phone}<br>
+          <strong>Welcome email:</strong> {welcome_label}
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">Created by {created_by_line}.</p>
+    """
+    html = _wrap_brand_email(
+        headline="Member created",
+        body_html=body_html,
+        preview_text=f"Member created: {member_name}",
+        cta_label="Open member record",
+        cta_url=member_url,
+        footer_lines=["This notification was generated automatically."],
+    )
+    text = (
+        "Member created.\n\n"
+        f"Member ID: #{member_id}\n"
+        f"Name: {member_name}\n"
+        f"Status: {status}\n"
+        f"Join date: {join_date}\n"
+        f"Household: {household}\n"
+        f"Email: {email}\n"
+        f"Phone: {phone}\n"
+        f"Welcome email: {welcome_label}\n"
+        f"Created by: {created_by_line}\n\n"
+        f"Open member: {member_url}\n"
+    )
+    return html, text
+
+
+def render_member_welcome_email(
+    *,
+    member_name: str,
+    member_id: int,
+    join_date: str,
+    household: str,
+) -> tuple[str, str]:
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">Hi {member_name},</p>
+      <p style="margin:0 0 16px 0;">Welcome to {BRAND_NAME}! We're glad you're here.</p>
+      <p style="margin:0 0 16px 0;">We've created your membership record with the details below.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Membership details</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Member ID:</strong> #{member_id}<br>
+          <strong>Join date:</strong> {join_date}<br>
+          <strong>Household:</strong> {household}
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">If any of this information is incorrect, please reply to this email so we can update it.</p>
+    """
+    html = _wrap_brand_email(
+        headline=f"Welcome to {BRAND_NAME}",
+        body_html=body_html,
+        preview_text=f"Welcome to {BRAND_NAME}",
+        footer_lines=["Sent automatically by the membership system."],
+    )
+    text = (
+        f"Hi {member_name},\n\n"
+        f"Welcome to {BRAND_NAME}! We're glad you're here.\n"
+        "We've created your membership record with the details below.\n\n"
+        f"Member ID: #{member_id}\n"
+        f"Join date: {join_date}\n"
+        f"Household: {household}\n\n"
+        "If any of this information is incorrect, please reply to this email so we can update it.\n"
+    )
+    return html, text
+
+
+def render_membership_status_member_email(
+    *,
+    member_name: str,
+    status: str,
+    reason: str,
+    consecutive_months: int,
+    required_months: int,
+    next_due_at: str,
+    overdue_days: int | None,
+) -> tuple[str, str]:
+    status_line = "Active" if status == "Active" else "Inactive"
+    if status == "Inactive":
+        overdue_line = f"Overdue by {overdue_days} days" if overdue_days and overdue_days > 0 else "Overdue"
+    else:
+        overdue_line = "No payment overdue"
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">Hi {member_name},</p>
+      <p style="margin:0 0 16px 0;">Your membership status is now <strong>{status_line}</strong>.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Status details</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Reason:</strong> {reason}<br>
+          <strong>Consecutive months:</strong> {consecutive_months} / {required_months}<br>
+          <strong>Next due:</strong> {next_due_at}<br>
+          <strong>Overdue:</strong> {overdue_line}
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">If you have questions or need help, reply to this email.</p>
+    """
+    html = _wrap_brand_email(
+        headline=f"Membership status: {status_line}",
+        body_html=body_html,
+        preview_text=f"Your membership status is now {status_line}",
+        footer_lines=["Sent automatically by the membership system."],
+    )
+    text = (
+        f"Hi {member_name},\n\n"
+        f"Your membership status is now {status_line}.\n\n"
+        f"Reason: {reason}\n"
+        f"Consecutive months: {consecutive_months} / {required_months}\n"
+        f"Next due: {next_due_at}\n"
+        f"Overdue: {overdue_line}\n\n"
+        "If you have questions or need help, reply to this email.\n"
+    )
+    return html, text
+
+
+def render_membership_status_admin_email(
+    *,
+    member_name: str,
+    member_id: int,
+    status: str,
+    reason: str,
+    consecutive_months: int,
+    required_months: int,
+    next_due_at: str,
+    overdue_days: int | None,
+    member_url: str,
+) -> tuple[str, str]:
+    status_line = "Active" if status == "Active" else "Inactive"
+    if status == "Inactive":
+        overdue_line = f"Overdue by {overdue_days} days" if overdue_days and overdue_days > 0 else "Overdue"
+    else:
+        overdue_line = "No payment overdue"
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">A membership status update was recorded.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Member</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Member ID:</strong> #{member_id}<br>
+          <strong>Name:</strong> {member_name}<br>
+          <strong>Status:</strong> {status_line}
+        </div>
+      </div>
+      <div style="margin-top:16px; padding:14px 16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Status details</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Reason:</strong> {reason}<br>
+          <strong>Consecutive months:</strong> {consecutive_months} / {required_months}<br>
+          <strong>Next due:</strong> {next_due_at}<br>
+          <strong>Overdue:</strong> {overdue_line}
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">Open the member record to review contribution history.</p>
+    """
+    html = _wrap_brand_email(
+        headline=f"Membership {status_line.lower()}",
+        body_html=body_html,
+        preview_text=f"Membership {status_line.lower()} for {member_name}",
+        cta_label="Open member",
+        cta_url=member_url,
+        footer_lines=["This notification was generated automatically."],
+    )
+    text = (
+        f"Membership status update.\n\n"
+        f"Member ID: #{member_id}\n"
+        f"Name: {member_name}\n"
+        f"Status: {status_line}\n"
+        f"Reason: {reason}\n"
+        f"Consecutive months: {consecutive_months} / {required_months}\n"
+        f"Next due: {next_due_at}\n"
+        f"Overdue: {overdue_line}\n\n"
+        f"Open member: {member_url}\n"
+    )
+    return html, text
+
+
 def render_payment_reminder_email(
     *,
     member_name: str,

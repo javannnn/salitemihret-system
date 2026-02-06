@@ -21,7 +21,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 async def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    if settings.RECAPTCHA_SECRET:
+    client_host = request.client.host if request.client else ""
+    base_url = settings.FRONTEND_BASE_URL.lower()
+    is_local = client_host in {"127.0.0.1", "localhost"} or base_url.startswith(
+        ("http://localhost", "http://127.0.0.1")
+    )
+    if settings.RECAPTCHA_SECRET and not is_local:
         if not payload.recaptcha_token:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing reCAPTCHA token")
         client_ip = request.client.host if request.client else None

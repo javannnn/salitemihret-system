@@ -131,6 +131,18 @@ export default function NewcomerProfile() {
     household_name: "",
   });
 
+  useEffect(() => {
+    if (!newcomer) return;
+    setConvertForm({
+      phone: newcomer.contact_phone || newcomer.contact_whatsapp || "",
+      email: newcomer.contact_email || "",
+      status: "",
+      district: "",
+      notes: "",
+      household_name: "",
+    });
+  }, [newcomer?.id]);
+
   const openStatusModal = (mode: StatusModalState["mode"]) => {
     setStatusModal({ open: true, mode });
     setStatusChoice("");
@@ -338,15 +350,21 @@ export default function NewcomerProfile() {
 
   const handleConvert = async () => {
     if (!newcomer) return;
-    if (!convertForm.phone.trim() && !convertForm.email.trim()) {
-      toast.push("Provide a phone or email to promote this newcomer.");
+    const resolvedPhone =
+      convertForm.phone.trim() ||
+      newcomer.contact_phone?.trim() ||
+      newcomer.contact_whatsapp?.trim() ||
+      "";
+    const resolvedEmail = convertForm.email.trim() || newcomer.contact_email?.trim() || "";
+    if (!resolvedPhone) {
+      toast.push("Phone is required to promote this newcomer.");
       return;
     }
     setConvertSubmitting(true);
     try {
       const updated = await convertNewcomer(newcomer.id, {
-        phone: convertForm.phone || undefined,
-        email: convertForm.email || undefined,
+        phone: resolvedPhone || undefined,
+        email: resolvedEmail || undefined,
         status: convertForm.status || undefined,
         district: convertForm.district || undefined,
         notes: convertForm.notes || undefined,
@@ -362,6 +380,12 @@ export default function NewcomerProfile() {
         notes: "",
         household_name: "",
       });
+      const memberId = updated.converted_member_id;
+      if (memberId) {
+        toast.push("Member created. Redirecting to the profile...");
+        navigate(`/members/${memberId}/edit`);
+        return;
+      }
       toast.push("Member created.");
     } catch (error) {
       console.error(error);

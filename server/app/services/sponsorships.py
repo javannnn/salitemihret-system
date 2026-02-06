@@ -10,16 +10,23 @@ from sqlalchemy import String, cast, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.member import Member
+from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerStatusAudit
 from app.models.priest import Priest
 from app.models.sponsorship import Sponsorship
 from app.models.sponsorship_audit import SponsorshipStatusAudit
+from app.models.sponsorship_budget_round import SponsorshipBudgetRound
 from app.models.sponsorship_note import SponsorshipNote
 from app.models.user import User
+from app.schemas.member import ContributionPaymentOut
 from app.schemas.sponsorship import (
     MemberSummary,
     NewcomerSummary,
+    SponsorshipBudgetRoundCreate,
+    SponsorshipBudgetRoundOut,
+    SponsorshipBudgetRoundUpdate,
+    SponsorshipBudgetRoundSummary,
     SponsorshipDecision,
     SponsorshipMetrics,
     SponsorshipMotivation,
@@ -147,6 +154,13 @@ def _load_priest(db: Session, priest_id: int) -> Priest:
     return priest
 
 
+def _load_budget_round(db: Session, round_id: int) -> SponsorshipBudgetRound:
+    budget_round = db.query(SponsorshipBudgetRound).filter(SponsorshipBudgetRound.id == round_id).first()
+    if not budget_round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget round not found")
+    return budget_round
+
+
 def _normalize_beneficiary_name(
     *,
     beneficiary_name: str | None,
@@ -266,8 +280,11 @@ def _serialize(db: Session, sponsorship: Sponsorship) -> SponsorshipOut:
         last_status_reason=sponsorship.last_status_reason,
         budget_month=sponsorship.budget_month,
         budget_year=sponsorship.budget_year,
-        budget_amount=Decimal(sponsorship.budget_amount or 0).quantize(Decimal("0.01")) if sponsorship.budget_amount else None,
+        budget_round_id=sponsorship.budget_round_id,
         budget_slots=sponsorship.budget_slots,
+        budget_round=SponsorshipBudgetRoundSummary.from_orm(sponsorship.budget_round)
+        if sponsorship.budget_round
+        else None,
         used_slots=sponsorship.used_slots or 0,
         budget_utilization_percent=budget_utilization_percent,
         budget_over_capacity=budget_over_capacity,
@@ -305,6 +322,7 @@ def list_sponsorships(
     assigned_staff_id: int | None = None,
     budget_month: int | None = None,
     budget_year: int | None = None,
+    budget_round_id: int | None = None,
     search: str | None = None,
     has_newcomer: bool | None = None,
     start_date: date | None = None,
@@ -319,6 +337,7 @@ def list_sponsorships(
             joinedload(Sponsorship.beneficiary_member),
             joinedload(Sponsorship.newcomer),
             joinedload(Sponsorship.father_of_repentance),
+            joinedload(Sponsorship.budget_round),
         )
         .order_by(Sponsorship.updated_at.desc())
     )
@@ -350,6 +369,8 @@ def list_sponsorships(
         query = query.filter(Sponsorship.budget_month == budget_month)
     if budget_year is not None:
         query = query.filter(Sponsorship.budget_year == budget_year)
+    if budget_round_id is not None:
+        query = query.filter(Sponsorship.budget_round_id == budget_round_id)
     if has_newcomer is not None:
         if has_newcomer:
             query = query.filter(Sponsorship.newcomer_id.isnot(None))
@@ -430,6 +451,13 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
     if payload.father_of_repentance_id:
         _load_priest(db, payload.father_of_repentance_id)
 
+    budget_round_id = None
+    if payload.budget_round_id is not None:
+        if payload.budget_round_id > 0:
+            budget_round_id = _load_budget_round(db, payload.budget_round_id).id
+        else:
+            budget_round_id = None
+
     beneficiary_name = _normalize_beneficiary_name(
         beneficiary_name=payload.beneficiary_name,
         beneficiary_member=beneficiary_member,
@@ -492,7 +520,7 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         motivation=payload.motivation,
         budget_month=payload.budget_month,
         budget_year=payload.budget_year,
-        budget_amount=Decimal(payload.budget_amount).quantize(Decimal("0.01")) if payload.budget_amount else None,
+        budget_round_id=budget_round_id,
         budget_slots=payload.budget_slots,
         used_slots=0,
         notes=payload.notes,
@@ -535,6 +563,7 @@ def _load_sponsorship(db: Session, sponsorship_id: int) -> Sponsorship:
             joinedload(Sponsorship.sponsor),
             joinedload(Sponsorship.beneficiary_member),
             joinedload(Sponsorship.newcomer),
+            joinedload(Sponsorship.budget_round),
         )
         .filter(Sponsorship.id == sponsorship_id)
         .first()
@@ -551,6 +580,7 @@ def get_sponsorship(db: Session, sponsorship_id: int) -> SponsorshipOut:
 
 def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpdate, actor_id: int | None) -> SponsorshipOut:
     sponsorship = _load_sponsorship(db, sponsorship_id)
+    fields_set = payload.__fields_set__
 
     if payload.status is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update sponsorship status via the status endpoint")
@@ -622,8 +652,11 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         sponsorship.budget_month = payload.budget_month
     if payload.budget_year is not None:
         sponsorship.budget_year = payload.budget_year
-    if payload.budget_amount is not None:
-        sponsorship.budget_amount = Decimal(payload.budget_amount).quantize(Decimal("0.01"))
+    if "budget_round_id" in fields_set:
+        if payload.budget_round_id and payload.budget_round_id > 0:
+            sponsorship.budget_round_id = _load_budget_round(db, payload.budget_round_id).id
+        else:
+            sponsorship.budget_round_id = None
     if payload.budget_slots is not None:
         sponsorship.budget_slots = payload.budget_slots
     if payload.notes is not None:
@@ -873,11 +906,163 @@ def get_sponsorship_metrics(db: Session) -> SponsorshipMetrics:
     }
 
 
+def list_budget_rounds(db: Session, year: int | None = None) -> list[SponsorshipBudgetRoundOut]:
+    query = db.query(SponsorshipBudgetRound)
+    if year is not None:
+        query = query.filter(SponsorshipBudgetRound.year == year)
+    rounds = query.order_by(SponsorshipBudgetRound.year.desc(), SponsorshipBudgetRound.round_number.asc()).all()
+    round_ids = [item.id for item in rounds]
+    usage_rows: dict[int, dict[str, int]] = {}
+    if round_ids:
+        rows = (
+            db.query(
+                Sponsorship.budget_round_id,
+                func.coalesce(func.sum(Sponsorship.budget_slots), 0).label("allocated_slots"),
+                func.coalesce(func.sum(Sponsorship.used_slots), 0).label("used_slots"),
+            )
+            .filter(Sponsorship.budget_round_id.in_(round_ids))
+            .group_by(Sponsorship.budget_round_id)
+            .all()
+        )
+        usage_rows = {
+            row.budget_round_id: {
+                "allocated_slots": int(row.allocated_slots or 0),
+                "used_slots": int(row.used_slots or 0),
+            }
+            for row in rows
+        }
+
+    items: list[SponsorshipBudgetRoundOut] = []
+    for item in rounds:
+        usage = usage_rows.get(item.id, {"allocated_slots": 0, "used_slots": 0})
+        utilization = round((usage["used_slots"] / item.slot_budget) * 100, 2) if item.slot_budget else 0.0
+        items.append(
+            SponsorshipBudgetRoundOut(
+                id=item.id,
+                year=item.year,
+                round_number=item.round_number,
+                start_date=item.start_date,
+                end_date=item.end_date,
+                slot_budget=item.slot_budget,
+                allocated_slots=usage["allocated_slots"],
+                used_slots=usage["used_slots"],
+                utilization_percent=utilization,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
+        )
+    return items
+
+
+def create_budget_round(db: Session, payload: SponsorshipBudgetRoundCreate) -> SponsorshipBudgetRoundOut:
+    existing = (
+        db.query(SponsorshipBudgetRound)
+        .filter(SponsorshipBudgetRound.year == payload.year)
+        .filter(SponsorshipBudgetRound.round_number == payload.round_number)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Budget round already exists for this year")
+    record = SponsorshipBudgetRound(
+        year=payload.year,
+        round_number=payload.round_number,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        slot_budget=payload.slot_budget,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return SponsorshipBudgetRoundOut(
+        id=record.id,
+        year=record.year,
+        round_number=record.round_number,
+        start_date=record.start_date,
+        end_date=record.end_date,
+        slot_budget=record.slot_budget,
+        allocated_slots=0,
+        used_slots=0,
+        utilization_percent=0.0,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def update_budget_round(db: Session, round_id: int, payload: SponsorshipBudgetRoundUpdate) -> SponsorshipBudgetRoundOut:
+    record = db.query(SponsorshipBudgetRound).filter(SponsorshipBudgetRound.id == round_id).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget round not found")
+
+    fields_set = payload.__fields_set__
+    next_year = payload.year if "year" in fields_set else record.year
+    next_round = payload.round_number if "round_number" in fields_set else record.round_number
+    if next_year != record.year or next_round != record.round_number:
+        existing = (
+            db.query(SponsorshipBudgetRound)
+            .filter(SponsorshipBudgetRound.year == next_year)
+            .filter(SponsorshipBudgetRound.round_number == next_round)
+            .filter(SponsorshipBudgetRound.id != record.id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Budget round already exists for this year")
+
+    if "year" in fields_set and payload.year is not None:
+        record.year = payload.year
+    if "round_number" in fields_set and payload.round_number is not None:
+        record.round_number = payload.round_number
+    if "start_date" in fields_set:
+        record.start_date = payload.start_date
+    if "end_date" in fields_set:
+        record.end_date = payload.end_date
+    if "slot_budget" in fields_set and payload.slot_budget is not None:
+        record.slot_budget = payload.slot_budget
+
+    if record.start_date and record.end_date and record.end_date < record.start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after the start date")
+
+    db.commit()
+    db.refresh(record)
+    usage = (
+        db.query(
+            func.coalesce(func.sum(Sponsorship.budget_slots), 0).label("allocated_slots"),
+            func.coalesce(func.sum(Sponsorship.used_slots), 0).label("used_slots"),
+        )
+        .filter(Sponsorship.budget_round_id == record.id)
+        .first()
+    )
+    allocated_slots = int(getattr(usage, "allocated_slots", 0) or 0)
+    used_slots = int(getattr(usage, "used_slots", 0) or 0)
+    utilization = round((used_slots / record.slot_budget) * 100, 2) if record.slot_budget else 0.0
+    return SponsorshipBudgetRoundOut(
+        id=record.id,
+        year=record.year,
+        round_number=record.round_number,
+        start_date=record.start_date,
+        end_date=record.end_date,
+        slot_budget=record.slot_budget,
+        allocated_slots=allocated_slots,
+        used_slots=used_slots,
+        utilization_percent=utilization,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def delete_budget_round(db: Session, round_id: int) -> None:
+    record = db.query(SponsorshipBudgetRound).filter(SponsorshipBudgetRound.id == round_id).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget round not found")
+    db.delete(record)
+    db.commit()
+
+
 def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContext:
     sponsor = db.query(Member).filter(Member.id == member_id).first()
     if not sponsor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
+    today = date.today()
     last_case = (
         db.query(Sponsorship)
         .filter(Sponsorship.sponsor_member_id == member_id)
@@ -907,7 +1092,22 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         services.extend(_parse_volunteer_services(raw, fallback))
     services = sorted(set([item for item in services if item]))
 
-    today = date.today()
+    start_month = today.month - 35
+    start_year = today.year
+    while start_month <= 0:
+        start_month += 12
+        start_year -= 1
+    payment_history_start = date(start_year, start_month, 1)
+    payment_history_end = today
+    payments = (
+        db.query(MemberContributionPayment)
+        .filter(MemberContributionPayment.member_id == member_id)
+        .filter(MemberContributionPayment.paid_at >= payment_history_start)
+        .order_by(MemberContributionPayment.paid_at.desc(), MemberContributionPayment.id.desc())
+        .all()
+    )
+    payment_history = [ContributionPaymentOut.from_orm(payment) for payment in payments]
+
     usage_row = (
         db.query(
             func.coalesce(func.sum(Sponsorship.budget_slots), 0).label("total_slots"),
@@ -943,6 +1143,9 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         father_of_repentance_id=getattr(sponsor, "father_confessor_id", None),
         father_of_repentance_name=getattr(getattr(sponsor, "father_confessor", None), "full_name", None),
         budget_usage=budget_usage,
+        payment_history_start=payment_history_start,
+        payment_history_end=payment_history_end,
+        payment_history=payment_history,
     )
 
 

@@ -30,7 +30,39 @@ export async function whoami(): Promise<WhoAmI> {
   if (!getToken()) {
     throw new Error("Missing token");
   }
-  return api<WhoAmI>("/auth/whoami");
+  return api<WhoAmI>("/auth/whoami", { skipSessionRestore: true });
+}
+
+type JwtPayload = {
+  exp?: number;
+};
+
+function decodeJwtPayload(token: string): JwtPayload | null {
+  if (typeof window === "undefined") return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=");
+    const decoded = window.atob(padded);
+    return JSON.parse(decoded) as JwtPayload;
+  } catch (error) {
+    console.error("Failed to decode session token", error);
+    return null;
+  }
+}
+
+export function getTokenExpiry(token?: string | null): number | null {
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  if (!payload?.exp) return null;
+  return payload.exp * 1000;
+}
+
+export function isTokenExpired(token?: string | null, skewMs = 30_000): boolean {
+  const expiry = getTokenExpiry(token);
+  if (!expiry) return false;
+  return Date.now() + skewMs >= expiry;
 }
 
 export function logout() {

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
+from app.core.config import settings
 from app.models.member import Member, MemberStatus
 
 DEFAULT_CONTRIBUTION_AMOUNT = Decimal("75.00")
@@ -23,6 +24,8 @@ class MembershipHealthData:
     next_due_at: Optional[datetime]
     days_until_due: Optional[int]
     overdue_days: Optional[int]
+    consecutive_months: int
+    required_consecutive_months: int
 
 
 @dataclass
@@ -79,6 +82,41 @@ def months_covered(payment_amount: Decimal, member: Member) -> int:
     return max(months, MIN_MONTHS_COVERED)
 
 
+def _required_consecutive_months() -> int:
+    try:
+        return max(1, int(settings.MEMBERSHIP_CONSECUTIVE_MONTHS_REQUIRED))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _calculate_consecutive_months(member: Member, now: datetime) -> int:
+    payments = list(getattr(member, "contribution_payments", []) or [])
+    if not payments:
+        return 0
+    payments.sort(key=lambda item: (item.paid_at, item.id))
+    grace = timedelta(days=GRACE_PERIOD_DAYS)
+    consecutive_months = 0
+    coverage_end: datetime | None = None
+    for payment in payments:
+        paid_at = _combine_date(payment.paid_at)
+        payment_amount = Decimal(str(payment.amount))
+        covered_months = months_covered(payment_amount, member)
+        if coverage_end is None:
+            start = paid_at
+            consecutive_months = covered_months
+        else:
+            if paid_at > coverage_end + grace:
+                start = paid_at
+                consecutive_months = covered_months
+            else:
+                start = paid_at if paid_at > coverage_end else coverage_end
+                consecutive_months += covered_months
+        coverage_end = _add_months(start, covered_months)
+    if coverage_end and now <= coverage_end + grace:
+        return consecutive_months
+    return 0
+
+
 def apply_contribution_payment(member: Member, *, amount: Decimal, posted_at: datetime) -> MembershipHealthData:
     posted = _ensure_datetime(posted_at) or _now()
     member.contribution_last_paid_at = posted
@@ -99,6 +137,7 @@ def refresh_membership_state(
     now = _ensure_datetime(now) or _now()
     last_paid = _ensure_datetime(member.contribution_last_paid_at)
     next_due = _ensure_datetime(member.contribution_next_due_at)
+    required_consecutive = _required_consecutive_months()
 
     if next_due is None:
         anchor = last_paid or _derive_anchor(member, now)
@@ -106,14 +145,19 @@ def refresh_membership_state(
         if persist:
             member.contribution_next_due_at = next_due
 
+    consecutive_months = _calculate_consecutive_months(member, now)
+
     if last_paid is None:
         auto_status = "Pending"
     else:
         delta_days = int((next_due - now).total_seconds() // 86400)
-        if delta_days >= -GRACE_PERIOD_DAYS:
+        overdue = delta_days < -GRACE_PERIOD_DAYS
+        if overdue:
+            auto_status = "Inactive"
+        elif consecutive_months >= required_consecutive:
             auto_status = "Active"
         else:
-            auto_status = "Inactive"
+            auto_status = "Pending"
 
     effective_status = auto_status
     override_reason = member.status_override_reason
@@ -141,6 +185,8 @@ def refresh_membership_state(
         next_due_at=next_due,
         days_until_due=days_until_due,
         overdue_days=overdue_days,
+        consecutive_months=consecutive_months,
+        required_consecutive_months=required_consecutive,
     )
 
 

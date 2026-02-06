@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     RECAPTCHA_MIN_SCORE: float = 0.5
     FRONTEND_BASE_URL: str = "http://localhost:5173"
 
+    LICENSE_REMOTE_STATUS_URL: str | None = None
+    LICENSE_REMOTE_CHECK_INTERVAL_HOURS: int = 24
+    LICENSE_REMOTE_GRACE_DAYS: int = 7
+    LICENSE_REMOTE_TIMEOUT_SECONDS: float = 5.0
+
     EMAIL_FROM_ADDRESS: str | None = None
     EMAIL_FROM_NAME: str = "St. Mary EOTC Edmonton"
     EMAIL_REPLY_TO: str | None = None
@@ -44,6 +49,8 @@ class Settings(BaseSettings):
     CHILD_PROMOTION_DIGEST_LOOKAHEAD_DAYS: int = 60
     CHILD_PROMOTION_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
     SPONSORSHIP_REMINDER_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
+    MEMBERSHIP_CONSECUTIVE_MONTHS_REQUIRED: int = 6
+    MEMBERSHIP_STATUS_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -61,6 +68,10 @@ class Settings(BaseSettings):
     @property
     def SPONSORSHIP_REMINDER_NOTIFY_ROLES_LIST(self) -> list[str]:
         return _split_csv(self.SPONSORSHIP_REMINDER_NOTIFY_ROLES)
+
+    @property
+    def MEMBERSHIP_STATUS_NOTIFY_ROLES_LIST(self) -> list[str]:
+        return _split_csv(self.MEMBERSHIP_STATUS_NOTIFY_ROLES)
 
 
 def _split_csv(value: str | None) -> list[str]:

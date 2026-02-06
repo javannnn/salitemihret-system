@@ -23,13 +23,30 @@ import {
   listPayments,
 } from "@/lib/api";
 
-const PAYMENT_METHODS = ["Cash", "Debit", "Credit", "E-Transfer", "Cheque"];
+const PAYMENT_METHODS = ["Cash", "Debit Card", "Credit Card", "E-Transfer", "Check", "Other"];
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: "Cash",
+  "debit card": "Debit Card",
+  debit: "Debit Card",
+  "credit card": "Credit Card",
+  credit: "Credit Card",
+  "e-transfer": "E-Transfer",
+  cheque: "Check",
+  check: "Check",
+  other: "Other",
+};
 const PAYMENT_STATUSES = ["Pending", "Completed", "Overdue"] as const;
 const PAGE_SIZE = 25;
 const STATUS_BADGE_STYLES: Record<(typeof PAYMENT_STATUSES)[number], string> = {
   Pending: "bg-amber-100 text-amber-900 border-amber-200",
   Completed: "bg-emerald-100 text-emerald-900 border-emerald-200",
   Overdue: "bg-rose-100 text-rose-900 border-rose-200",
+};
+
+const formatPaymentMethod = (method?: string | null) => {
+  if (!method) return "—";
+  const normalized = method.trim().toLowerCase();
+  return PAYMENT_METHOD_LABELS[normalized] || method;
 };
 
 type Filters = {
@@ -530,7 +547,7 @@ export default function PaymentsLedger() {
                       <div className="text-xs text-mute">{payment.service_type.description}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3">{payment.method || "—"}</td>
+                  <td className="px-4 py-3">{formatPaymentMethod(payment.method)}</td>
                   <td className="px-4 py-3 font-medium">
                     {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
@@ -647,6 +664,7 @@ function RecordPaymentDialog({
     due_date: "",
     status: "",
   });
+  const [customMethod, setCustomMethod] = useState("");
   const [memberLookupQuery, setMemberLookupQuery] = useState("");
   const [memberOptions, setMemberOptions] = useState<Member[]>([]);
   const [memberLookupLoading, setMemberLookupLoading] = useState(false);
@@ -664,6 +682,7 @@ function RecordPaymentDialog({
         due_date: "",
         status: "",
       });
+      setCustomMethod("");
       setMemberLookupQuery("");
       setMemberOptions([]);
       setSelectedMember(null);
@@ -716,6 +735,10 @@ function RecordPaymentDialog({
       toast.push("Amount must be greater than zero");
       return;
     }
+    if (form.method === "Other" && !customMethod.trim()) {
+      toast.push("Enter the payment method");
+      return;
+    }
     if (!form.service_type_code) {
       toast.push("Select a service type");
       return;
@@ -725,11 +748,12 @@ function RecordPaymentDialog({
       return;
     }
     setSaving(true);
+    const resolvedMethod = form.method === "Other" ? customMethod.trim() : form.method.trim();
     try {
       await createPaymentEntry({
         amount: Number(form.amount),
         currency: form.currency || "CAD",
-        method: form.method || undefined,
+        method: resolvedMethod || undefined,
         memo: form.memo || undefined,
         service_type_code: form.service_type_code,
         member_id: form.member_id ? Number(form.member_id) : undefined,
@@ -866,11 +890,32 @@ function RecordPaymentDialog({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Method</label>
-            <Input
+            <Select
               value={form.method}
-              onChange={(event) => setForm((prev) => ({ ...prev, method: event.target.value }))}
-              placeholder="Cash, E-transfer, etc."
-            />
+              onChange={(event) => {
+                const value = event.target.value;
+                setForm((prev) => ({ ...prev, method: value }));
+                if (value !== "Other") {
+                  setCustomMethod("");
+                }
+              }}
+            >
+              <option value="">Select method</option>
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </Select>
+            {form.method === "Other" && (
+              <Input
+                className="mt-2"
+                value={customMethod}
+                onChange={(event) => setCustomMethod(event.target.value)}
+                placeholder="Enter payment method"
+                required
+              />
+            )}
           </div>
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Memo</label>

@@ -21,6 +21,8 @@ export type PermissionMap = {
   manageSponsorships: boolean;
   viewNewcomers: boolean;
   manageNewcomers: boolean;
+  viewVolunteers: boolean;
+  manageVolunteers: boolean;
   viewSchools: boolean;
   manageSchools: boolean;
 };
@@ -44,6 +46,8 @@ const BASE_PERMISSIONS: PermissionMap = {
   manageSponsorships: false,
   viewNewcomers: false,
   manageNewcomers: false,
+  viewVolunteers: false,
+  manageVolunteers: false,
   viewSchools: false,
   manageSchools: false,
 };
@@ -68,6 +72,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewVolunteers: true,
+    manageVolunteers: true,
     viewSchools: true,
     manageSchools: true,
   },
@@ -87,6 +93,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewVolunteers: true,
+    manageVolunteers: true,
     viewSchools: true,
     manageSchools: true,
   },
@@ -99,12 +107,14 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     exportMembers: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewVolunteers: true,
     viewSchools: true,
   },
   Clerk: {
     viewMembers: true,
     createMembers: true,
     editCore: true,
+    viewVolunteers: true,
   },
   OfficeAdmin: {
     viewMembers: true,
@@ -113,6 +123,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewPayments: true,
     viewSponsorships: true,
     viewNewcomers: true,
+    viewVolunteers: true,
     viewSchools: true,
   },
   FinanceAdmin: {
@@ -122,6 +133,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewPayments: true,
     managePayments: true,
     viewSponsorships: true,
+    viewVolunteers: true,
     viewSchools: true,
   },
   SponsorshipCommittee: {
@@ -130,6 +142,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageSponsorships: true,
     viewNewcomers: true,
     manageNewcomers: true,
+    viewVolunteers: true,
     viewSchools: true,
   },
   SchoolAdmin: {

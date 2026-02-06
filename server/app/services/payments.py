@@ -23,7 +23,8 @@ from app.schemas.payment import (
     PaymentStatusUpdate,
     PaymentStatus,
 )
-from app.services.membership import apply_contribution_payment
+from app.services.membership import MembershipHealthData, apply_contribution_payment
+from app.services.notifications import notify_membership_status_change
 
 DEFAULT_PAYMENT_SERVICE_TYPES: tuple[dict[str, str], ...] = (
     {
@@ -57,6 +58,13 @@ DEFAULT_PAYMENT_SERVICE_TYPES: tuple[dict[str, str], ...] = (
         "description": "Tuition payments for the Abenet literacy and deacons track.",
     },
 )
+
+PAYMENT_METHOD_ALIASES: dict[str, list[str]] = {
+    "debit card": ["debit card", "debit"],
+    "credit card": ["credit card", "credit"],
+    "check": ["check", "cheque"],
+    "cheque": ["cheque", "check"],
+}
 
 
 def ensure_default_service_types(db: Session) -> None:
@@ -143,7 +151,9 @@ def _apply_payment_filters(
             <= datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
         )
     if method:
-        query = query.filter(func.lower(Payment.method) == method.lower())
+        normalized = method.strip().lower()
+        variants = PAYMENT_METHOD_ALIASES.get(normalized, [normalized])
+        query = query.filter(func.lower(Payment.method).in_(variants))
     if status_filter:
         query = query.filter(Payment.status == status_filter)
     if member_name:
@@ -188,10 +198,26 @@ def record_payment(db: Session, payload: PaymentCreate, actor: User | None, *, a
     )
     db.add(payment)
     db.flush()
+    membership_status_payload: tuple[Member, str | None, MembershipHealthData] | None = None
     if member and service_type.code == "CONTRIBUTION":
-        apply_contribution_payment(member, amount=Decimal(str(payment.amount)), posted_at=posted_at)
+        previous_auto_status = member.status_auto
+        health = apply_contribution_payment(member, amount=Decimal(str(payment.amount)), posted_at=posted_at)
+        membership_status_payload = (member, previous_auto_status, health)
     if auto_commit:
         db.commit()
+        if membership_status_payload:
+            member_ref, previous_status, health = membership_status_payload
+            notify_membership_status_change(
+                db,
+                member_ref,
+                previous_status=previous_status,
+                current_status=health.auto_status,
+                consecutive_months=health.consecutive_months,
+                required_months=health.required_consecutive_months,
+                next_due_at=health.next_due_at,
+                overdue_days=health.overdue_days,
+                actor=actor,
+            )
     db.refresh(payment)
     return payment
 

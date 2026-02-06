@@ -82,6 +82,30 @@ def _get_sponsorship_notification_recipients(db: Session) -> list[str]:
     return list(dict.fromkeys([email for email in recipients if email]))
 
 
+def _get_membership_status_notification_recipients(db: Session, actor: User | None = None) -> list[str]:
+    recipients: list[str] = []
+    role_filter = getattr(settings, "MEMBERSHIP_STATUS_NOTIFY_ROLES_LIST", []) or []
+    if role_filter:
+        rows = (
+            db.query(User.email)
+            .join(User.roles)
+            .filter(User.is_active.is_(True), Role.name.in_(role_filter))
+            .distinct()
+            .all()
+        )
+        recipients.extend(email for (email,) in rows if email)
+    super_admin_rows = (
+        db.query(User.email)
+        .filter(User.is_active.is_(True), User.is_super_admin.is_(True))
+        .all()
+    )
+    recipients.extend(email for (email,) in super_admin_rows if email)
+    if actor and actor.email:
+        recipients.append(actor.email)
+    recipients.extend(getattr(settings, "EMAIL_FALLBACK_RECIPIENTS_LIST", []) or [])
+    return list(dict.fromkeys([email for email in recipients if email]))
+
+
 def _format_amount(value: Decimal | float | int | None) -> str:
     if value is None:
         return "—"
@@ -320,6 +344,166 @@ def send_sponsorship_reminder(db: Session, sponsorship: Sponsorship) -> None:
             "reminder_channel": channel_text,
             "admin_recipients": admin_recipients,
             "sponsor_email": sponsor_email,
+        },
+    )
+
+
+def notify_member_created(
+    db: Session,
+    member: Member,
+    *,
+    created_by: User | None,
+    send_welcome_email: bool,
+) -> None:
+    member_name = f"{member.first_name} {member.last_name}".strip() or "Member"
+    member_url = _app_url(f"/members/{member.id}/edit")
+    join_date = _format_date(member.join_date)
+    household = member.household.name if member.household else "Not set"
+    email_label = member.email or "Not on file"
+    phone_label = member.phone or "Not on file"
+    if created_by:
+        created_by_name = created_by.full_name or created_by.email or "System"
+        created_by_email = created_by.email
+    else:
+        created_by_name = "System"
+        created_by_email = None
+
+    creator_email = created_by.email if created_by else None
+    sender = get_email_sender()
+    admin_sent = False
+    welcome_sent = False
+
+    if creator_email:
+        admin_html, admin_text = email_templates.render_member_created_creator_email(
+            member_name=member_name,
+            member_id=member.id,
+            status=member.status,
+            join_date=join_date,
+            household=household,
+            email=email_label,
+            phone=phone_label,
+            created_by=created_by_name,
+            created_by_email=created_by_email,
+            welcome_requested=send_welcome_email,
+            member_url=member_url,
+        )
+        admin_sent, _ = sender.send(
+            subject=f"Member created: {member_name}",
+            html_body=admin_html,
+            text_body=admin_text,
+            to=[creator_email],
+        )
+
+    if send_welcome_email and member.email:
+        welcome_html, welcome_text = email_templates.render_member_welcome_email(
+            member_name=member_name,
+            member_id=member.id,
+            join_date=join_date,
+            household=household,
+        )
+        welcome_sent, _ = sender.send(
+            subject=f"Welcome to {BRAND_NAME}",
+            html_body=welcome_html,
+            text_body=welcome_text,
+            to=[member.email],
+        )
+
+    logger.info(
+        "member_created_notification",
+        extra={
+            "member_id": member.id,
+            "member_name": member_name,
+            "admin_sent": admin_sent,
+            "welcome_requested": send_welcome_email,
+            "welcome_sent": welcome_sent,
+            "creator_email": creator_email,
+            "member_email": member.email,
+        },
+    )
+
+
+def notify_membership_status_change(
+    db: Session,
+    member: Member,
+    *,
+    previous_status: str | None,
+    current_status: str,
+    consecutive_months: int,
+    required_months: int,
+    next_due_at: datetime | None,
+    overdue_days: int | None,
+    actor: User | None = None,
+) -> None:
+    if previous_status == current_status:
+        return
+    if current_status not in {"Active", "Inactive"}:
+        return
+    if member.status_override:
+        return
+
+    member_name = f"{member.first_name} {member.last_name}".strip() or "Member"
+    member_url = _app_url(f"/members/{member.id}/edit")
+    next_due_label = _format_date(next_due_at)
+    if current_status == "Active":
+        reason = f"Qualified after {consecutive_months} consecutive months"
+    else:
+        if overdue_days and overdue_days > 0:
+            reason = f"Payment overdue by {overdue_days} days"
+        else:
+            reason = "Payment overdue"
+
+    admin_recipients = _get_membership_status_notification_recipients(db, actor)
+    sender = get_email_sender()
+    admin_sent = False
+    member_sent = False
+
+    if admin_recipients:
+        admin_html, admin_text = email_templates.render_membership_status_admin_email(
+            member_name=member_name,
+            member_id=member.id,
+            status=current_status,
+            reason=reason,
+            consecutive_months=consecutive_months,
+            required_months=required_months,
+            next_due_at=next_due_label,
+            overdue_days=overdue_days,
+            member_url=member_url,
+        )
+        admin_sent, _ = sender.send(
+            subject=f"Membership {current_status.lower()}: {member_name}",
+            html_body=admin_html,
+            text_body=admin_text,
+            to=admin_recipients,
+        )
+
+    if member.email:
+        member_html, member_text = email_templates.render_membership_status_member_email(
+            member_name=member_name,
+            status=current_status,
+            reason=reason,
+            consecutive_months=consecutive_months,
+            required_months=required_months,
+            next_due_at=next_due_label,
+            overdue_days=overdue_days,
+        )
+        member_sent, _ = sender.send(
+            subject=f"Your membership is now {current_status.lower()}",
+            html_body=member_html,
+            text_body=member_text,
+            to=[member.email],
+        )
+
+    logger.info(
+        "membership_status_notified",
+        extra={
+            "member_id": member.id,
+            "member_name": member_name,
+            "previous_status": previous_status,
+            "current_status": current_status,
+            "admin_sent": admin_sent,
+            "member_sent": member_sent,
+            "admin_recipients": admin_recipients,
+            "member_email": member.email,
         },
     )
 

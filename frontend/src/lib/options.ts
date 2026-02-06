@@ -104,6 +104,11 @@ export const VOLUNTEER_SERVICE_OPTIONS = [
   { value: "YouthMentoring", label: "Youth mentoring" },
 ];
 
+export const VOLUNTEER_TYPE_OPTIONS = [
+  { value: "Holiday", label: "Holiday" },
+  { value: "GeneralService", label: "General service" },
+];
+
 export const MEMBER_STATUS_OPTIONS = [
   { value: "Active", label: "Active" },
   { value: "Pending", label: "Pending" },

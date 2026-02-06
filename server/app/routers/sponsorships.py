@@ -8,6 +8,9 @@ from app.core.db import get_db
 from app.models.user import User
 from app.schemas.sponsorship import (
     SponsorshipCreate,
+    SponsorshipBudgetRoundCreate,
+    SponsorshipBudgetRoundOut,
+    SponsorshipBudgetRoundUpdate,
     SponsorshipListResponse,
     SponsorshipMetrics,
     SponsorshipNoteCreate,
@@ -42,6 +45,7 @@ def list_sponsorships(
     assigned_staff_id: int | None = Query(None),
     budget_month: int | None = Query(None, ge=1, le=12),
     budget_year: int | None = Query(None, ge=2000, le=2100),
+    budget_round_id: int | None = Query(None),
     q: str | None = Query(None),
     has_newcomer: bool | None = Query(None, alias="has_newcomer"),
     start_date: date | None = Query(None),
@@ -65,6 +69,7 @@ def list_sponsorships(
         assigned_staff_id=assigned_staff_id,
         budget_month=budget_month,
         budget_year=budget_year,
+        budget_round_id=budget_round_id,
         search=q,
         has_newcomer=has_newcomer,
         start_date=start_date,
@@ -80,6 +85,43 @@ def get_sponsorship_metrics(
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipMetrics:
     return sponsorships_service.get_sponsorship_metrics(db)
+
+
+@router.get("/budget-rounds", response_model=list[SponsorshipBudgetRoundOut], status_code=status.HTTP_200_OK)
+def list_budget_rounds(
+    year: int | None = Query(None, ge=2000, le=2100),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> list[SponsorshipBudgetRoundOut]:
+    return sponsorships_service.list_budget_rounds(db, year=year)
+
+
+@router.post("/budget-rounds", response_model=SponsorshipBudgetRoundOut, status_code=status.HTTP_201_CREATED)
+def create_budget_round(
+    payload: SponsorshipBudgetRoundCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*MANAGE_ROLES)),
+) -> SponsorshipBudgetRoundOut:
+    return sponsorships_service.create_budget_round(db, payload)
+
+
+@router.patch("/budget-rounds/{round_id:int}", response_model=SponsorshipBudgetRoundOut, status_code=status.HTTP_200_OK)
+def update_budget_round(
+    round_id: int,
+    payload: SponsorshipBudgetRoundUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*MANAGE_ROLES)),
+) -> SponsorshipBudgetRoundOut:
+    return sponsorships_service.update_budget_round(db, round_id, payload)
+
+
+@router.delete("/budget-rounds/{round_id:int}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_budget_round(
+    round_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*MANAGE_ROLES)),
+) -> None:
+    sponsorships_service.delete_budget_round(db, round_id)
 
 
 @router.get("/sponsors/{member_id:int}/context", response_model=SponsorshipSponsorContext, status_code=status.HTTP_200_OK)

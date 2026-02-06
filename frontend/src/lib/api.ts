@@ -1,4 +1,4 @@
-import { notifySessionExpired } from "@/lib/session";
+import { notifySessionExpired, waitForSessionRestored } from "@/lib/session";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -173,6 +173,8 @@ export type MembershipHealth = {
   next_due_at?: string | null;
   days_until_due?: number | null;
   overdue_days?: number | null;
+  consecutive_months: number;
+  required_consecutive_months: number;
 };
 
 export type MembershipEvent = {
@@ -400,6 +402,15 @@ export type SponsorshipMotivation =
   | "Other";
 export type SponsorshipNotesTemplate = "FollowUp" | "PaymentIssue" | "Gratitude" | "Escalation";
 
+export type SponsorshipBudgetRoundSummary = {
+  id: number;
+  year: number;
+  round_number: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  slot_budget: number;
+};
+
 export type Sponsorship = {
   id: number;
   sponsor: MemberSummary;
@@ -427,8 +438,9 @@ export type Sponsorship = {
   last_status_reason?: string | null;
   budget_month?: number | null;
   budget_year?: number | null;
-  budget_amount?: number | null;
+  budget_round_id?: number | null;
   budget_slots?: number | null;
+  budget_round?: SponsorshipBudgetRoundSummary | null;
   used_slots: number;
   budget_utilization_percent?: number | null;
   budget_over_capacity: boolean;
@@ -460,6 +472,7 @@ export type SponsorshipFilters = {
   assigned_staff_id?: number;
   budget_month?: number;
   budget_year?: number;
+  budget_round_id?: number;
   page?: number;
   page_size?: number;
   q?: string;
@@ -493,7 +506,7 @@ export type SponsorshipPayload = {
   last_status_reason?: string;
   budget_month?: number;
   budget_year?: number;
-  budget_amount?: number;
+  budget_round_id?: number | null;
   budget_slots?: number;
   used_slots?: number;
   notes?: string;
@@ -512,6 +525,30 @@ export type BudgetSummary = {
   used_slots: number;
   utilization_percent: number;
 };
+
+export type SponsorshipBudgetRound = {
+  id: number;
+  year: number;
+  round_number: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  slot_budget: number;
+  allocated_slots: number;
+  used_slots: number;
+  utilization_percent: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SponsorshipBudgetRoundPayload = {
+  year: number;
+  round_number: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  slot_budget: number;
+};
+
+export type SponsorshipBudgetRoundUpdatePayload = Partial<SponsorshipBudgetRoundPayload>;
 
 export type SponsorshipMetrics = {
   active_cases: number;
@@ -537,7 +574,62 @@ export type SponsorshipSponsorContext = {
   father_of_repentance_id?: number | null;
   father_of_repentance_name?: string | null;
   budget_usage?: BudgetSummary | null;
+  payment_history_start?: string | null;
+  payment_history_end?: string | null;
+  payment_history?: ContributionPayment[];
 };
+
+export type VolunteerServiceType = "Holiday" | "GeneralService";
+
+export type VolunteerGroup = {
+  id: number;
+  name: string;
+  team_lead_first_name?: string | null;
+  team_lead_last_name?: string | null;
+  team_lead_phone?: string | null;
+  team_lead_email?: string | null;
+  volunteer_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VolunteerGroupPayload = {
+  name: string;
+  team_lead_first_name?: string | null;
+  team_lead_last_name?: string | null;
+  team_lead_phone?: string | null;
+  team_lead_email?: string | null;
+};
+
+export type VolunteerGroupUpdatePayload = Partial<VolunteerGroupPayload>;
+
+export type VolunteerWorker = {
+  id: number;
+  group: { id: number; name: string };
+  group_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  service_type: VolunteerServiceType;
+  service_date: string;
+  reason?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VolunteerWorkerPayload = {
+  group_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  service_type: VolunteerServiceType;
+  service_date: string;
+  reason?: string | null;
+};
+
+export type VolunteerWorkerUpdatePayload = Partial<VolunteerWorkerPayload>;
+
+export type VolunteerWorkerListResponse = Page<VolunteerWorker>;
 
 export type SponsorshipTimelineEvent = {
   id: number;
@@ -846,6 +938,10 @@ export type Page<T> = {
   page_size: number;
 };
 
+type ApiRequestInit = RequestInit & {
+  skipSessionRestore?: boolean;
+};
+
 let accessToken: string | null =
   typeof window === "undefined" ? null : window.localStorage.getItem("access_token");
 
@@ -885,9 +981,28 @@ function buildHeaders(initHeaders?: HeadersInit, body?: BodyInit | null): Header
   return headers;
 }
 
-async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  const headers = buildHeaders(init.headers, init.body ?? null);
-  return fetch(input, { ...init, headers });
+async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, allowRetry = true) {
+  const { skipSessionRestore, ...requestInit } = init;
+  const headers = buildHeaders(requestInit.headers, requestInit.body ?? null);
+  const res = await fetch(input, { ...requestInit, headers });
+
+  if (res.status !== 401 || skipSessionRestore) {
+    return res;
+  }
+
+  notifySessionExpired();
+  setToken(null);
+
+  if (!allowRetry) {
+    return res;
+  }
+
+  await waitForSessionRestored();
+  if (!accessToken || requestInit.signal?.aborted) {
+    return res;
+  }
+
+  return authFetch(input, init, false);
 }
 
 function handleUnauthorized(message?: string): never {
@@ -908,7 +1023,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function api<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
   const res = await authFetch(`${API_BASE}${path}`, init);
 
   const text = await res.text();
@@ -1010,6 +1125,92 @@ export async function getSponsorshipMetrics(): Promise<SponsorshipMetrics> {
 
 export async function getSponsorContext(memberId: number): Promise<SponsorshipSponsorContext> {
   return api<SponsorshipSponsorContext>(`/sponsorships/sponsors/${memberId}/context`);
+}
+
+export async function listVolunteerGroups(): Promise<VolunteerGroup[]> {
+  return api<VolunteerGroup[]>("/volunteers/groups");
+}
+
+export async function createVolunteerGroup(payload: VolunteerGroupPayload): Promise<VolunteerGroup> {
+  return api<VolunteerGroup>("/volunteers/groups", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateVolunteerGroup(groupId: number, payload: VolunteerGroupUpdatePayload): Promise<VolunteerGroup> {
+  return api<VolunteerGroup>(`/volunteers/groups/${groupId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listVolunteerWorkers(params: {
+  page?: number;
+  page_size?: number;
+  group_id?: number;
+  service_type?: VolunteerServiceType;
+  service_month?: number;
+  service_year?: number;
+  q?: string;
+} = {}): Promise<VolunteerWorkerListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<VolunteerWorkerListResponse>(`/volunteers/workers${query ? `?${query}` : ""}`);
+}
+
+export async function createVolunteerWorker(payload: VolunteerWorkerPayload): Promise<VolunteerWorker> {
+  return api<VolunteerWorker>("/volunteers/workers", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateVolunteerWorker(workerId: number, payload: VolunteerWorkerUpdatePayload): Promise<VolunteerWorker> {
+  return api<VolunteerWorker>(`/volunteers/workers/${workerId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteVolunteerWorker(workerId: number): Promise<void> {
+  await api<void>(`/volunteers/workers/${workerId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listSponsorshipBudgetRounds(year?: number): Promise<SponsorshipBudgetRound[]> {
+  const query = year ? `?year=${year}` : "";
+  return api<SponsorshipBudgetRound[]>(`/sponsorships/budget-rounds${query}`);
+}
+
+export async function createSponsorshipBudgetRound(
+  payload: SponsorshipBudgetRoundPayload,
+): Promise<SponsorshipBudgetRound> {
+  return api<SponsorshipBudgetRound>("/sponsorships/budget-rounds", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSponsorshipBudgetRound(
+  roundId: number,
+  payload: SponsorshipBudgetRoundUpdatePayload,
+): Promise<SponsorshipBudgetRound> {
+  return api<SponsorshipBudgetRound>(`/sponsorships/budget-rounds/${roundId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSponsorshipBudgetRound(roundId: number): Promise<void> {
+  await api<void>(`/sponsorships/budget-rounds/${roundId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function createSponsorship(payload: SponsorshipPayload): Promise<Sponsorship> {
