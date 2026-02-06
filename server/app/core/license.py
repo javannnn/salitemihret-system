@@ -250,19 +250,27 @@ def _load_trial_started_at() -> datetime:
     return now
 
 
+def _normalize_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    token = "".join(value.split())
+    return token or None
+
+
 def _load_token() -> str | None:
     if LICENSE_TOKEN_PATH.exists():
-        token = LICENSE_TOKEN_PATH.read_text(encoding="utf-8").strip()
+        token = _normalize_token(LICENSE_TOKEN_PATH.read_text(encoding="utf-8"))
         if token:
             return token
     env_token = os.getenv("LICENSE_TOKEN")
-    if env_token:
-        return env_token.strip()
-    return None
+    return _normalize_token(env_token)
 
 
 def _persist_token(token: str) -> None:
-    LICENSE_TOKEN_PATH.write_text(token.strip(), encoding="utf-8")
+    normalized = _normalize_token(token)
+    if not normalized:
+        raise LicenseValidationError("License token cannot be empty")
+    LICENSE_TOKEN_PATH.write_text(normalized, encoding="utf-8")
 
 
 def _parse_datetime(value: str | None) -> datetime:
@@ -380,7 +388,5 @@ def get_license_status() -> LicenseStatus:
 
 
 def activate_license(token: str) -> LicenseStatus:
-    if not token.strip():
-        raise LicenseValidationError("License token cannot be empty")
-    _persist_token(token.strip())
+    _persist_token(token)
     return get_license_status()
