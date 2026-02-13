@@ -161,6 +161,95 @@ def test_sunday_school_content_workflow(client, authorize, admin_user, db_sessio
     assert any(item["title"] == "Hosanna" for item in public_list.json())
 
 
+def test_sunday_school_category_member_age_validation(client, authorize, admin_user, db_session):
+    _ensure_service_type(db_session, SUNDAY_SERVICE_CODE, "Sunday School Fee")
+    parent_member = _create_member(db_session, "Marta", "Guardian", birth=date(1989, 3, 2))
+    child_member = _create_member(db_session, "Liya", "Teen", birth=date(2014, 8, 20))
+    authorize(admin_user)
+
+    valid_child_with_parent_member = client.post(
+        "/sunday-school/participants",
+        json={
+            "member_username": parent_member.username,
+            "category": "Child",
+            "first_name": "Natan",
+            "last_name": "Guardian",
+            "gender": "Female",
+            "dob": date(2014, 8, 20).isoformat(),
+            "membership_date": date.today().isoformat(),
+            "pays_contribution": False,
+        },
+    )
+    assert valid_child_with_parent_member.status_code == 201, valid_child_with_parent_member.text
+
+    invalid_child_age = client.post(
+        "/sunday-school/participants",
+        json={
+            "member_username": parent_member.username,
+            "category": "Child",
+            "first_name": "Marta",
+            "last_name": "Guardian",
+            "gender": "Female",
+            "dob": date(1989, 3, 2).isoformat(),
+            "membership_date": date.today().isoformat(),
+            "pays_contribution": False,
+        },
+    )
+    assert invalid_child_age.status_code == 400
+    assert "under 18" in invalid_child_age.text
+
+    adult_category_with_child = client.post(
+        "/sunday-school/participants",
+        json={
+            "member_username": child_member.username,
+            "category": "Adult",
+            "first_name": "Liya",
+            "last_name": "Minor",
+            "gender": "Female",
+            "dob": date(2014, 8, 20).isoformat(),
+            "membership_date": date.today().isoformat(),
+            "pays_contribution": False,
+        },
+    )
+    assert adult_category_with_child.status_code == 400
+    assert "18 or older" in adult_category_with_child.text
+
+    youth_category_with_child = client.post(
+        "/sunday-school/participants",
+        json={
+            "member_username": child_member.username,
+            "category": "Youth",
+            "first_name": "Liya",
+            "last_name": "Teen",
+            "gender": "Female",
+            "dob": date(2014, 8, 20).isoformat(),
+            "membership_date": date.today().isoformat(),
+            "pays_contribution": False,
+        },
+    )
+    assert youth_category_with_child.status_code == 400
+    assert "18 or older" in youth_category_with_child.text
+
+
+def test_member_children_search_returns_parent_contact(client, authorize, admin_user, db_session):
+    parent = _create_member(db_session, "Hanna", "Parent", birth=date(1988, 1, 12))
+    parent.email = "hanna.parent@example.com"
+    parent.phone = "+14165550111"
+    db_session.add(parent)
+    db_session.commit()
+    _create_child(db_session, parent, "Lidya", "Hanna", birth=date(2016, 6, 5))
+
+    authorize(admin_user)
+    resp = client.get("/members/children-search?q=Lidya&limit=5")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["items"]
+    item = payload["items"][0]
+    assert item["parent_member_id"] == parent.id
+    assert item["parent_username"] == parent.username
+    assert item["parent_email"] == "hanna.parent@example.com"
+
+
 def test_create_abenet_enrollment_and_record_payment(client, authorize, admin_user, db_session):
     _ensure_service_type(db_session, ABENET_SERVICE_CODE, "Abenet School Tuition")
     parent = _create_member(db_session, "Abel", "Parent", birth=date(1985, 3, 3))

@@ -338,6 +338,11 @@ def ensure_optional_columns() -> None:
         )
         connection.execute(
             text(
+                "ALTER TABLE members ADD COLUMN IF NOT EXISTS contribution_exception_attachment_path VARCHAR(255)"
+            )
+        )
+        connection.execute(
+            text(
                 "UPDATE members SET contribution_currency = 'CAD' WHERE contribution_currency IS NULL"
             )
         )

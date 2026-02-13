@@ -14,6 +14,7 @@ import {
   MemberDetail,
   MemberSummary,
   Member,
+  MemberChildSearchItem,
   SchoolsMeta,
   api,
   ApiError,
@@ -23,6 +24,7 @@ import {
   listAbenetEnrollments,
   recordAbenetPayment,
   searchMembers,
+  searchMemberChildren,
   SundaySchoolCategory,
   SundaySchoolParticipant,
   SundaySchoolPaymentMethod,
@@ -123,6 +125,54 @@ const SUNDAY_CATEGORIES = [
   { value: "Adult", label: "Adult" },
 ];
 
+const ADULT_MIN_AGE = 18;
+
+const calculateAgeFromDateValue = (value?: string | null): number | null => {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null;
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) {
+    age -= 1;
+  }
+  return age;
+};
+
+const validateAdultSourceMember = (
+  category: Exclude<SundayFormState["category"], "Child">,
+  member: Member,
+): { valid: boolean; message?: string } => {
+  const age = calculateAgeFromDateValue(member.birth_date);
+  if (age === null) {
+    return { valid: false, message: `${category} category requires a member with a valid birth date.` };
+  }
+  if (age < ADULT_MIN_AGE) {
+    return { valid: false, message: `${category} category only allows adult members aged 18 or older.` };
+  }
+  return { valid: true };
+};
+
+const validateChildBirthDate = (birthDate?: string | null): { valid: boolean; message?: string } => {
+  const age = calculateAgeFromDateValue(birthDate);
+  if (age === null) {
+    return { valid: false, message: "Child category requires a valid child birth date." };
+  }
+  if (age >= ADULT_MIN_AGE) {
+    return { valid: false, message: "Child category only allows children under 18." };
+  }
+  return { valid: true };
+};
+
+const validateChildCandidate = (child: MemberChildSearchItem): { valid: boolean; message?: string } =>
+  validateChildBirthDate(child.birth_date);
+
 export default function SchoolsWorkspace() {
   const permissions = usePermissions();
   const toast = useToast();
@@ -154,6 +204,9 @@ export default function SchoolsWorkspace() {
   const [sundayForm, setSundayForm] = useState<SundayFormState>(defaultSundayForm);
   const [sundayMemberSearch, setSundayMemberSearch] = useState("");
   const [sundayMemberResults, setSundayMemberResults] = useState<Member[]>([]);
+  const [sundayChildResults, setSundayChildResults] = useState<MemberChildSearchItem[]>([]);
+  const [selectedSundayMember, setSelectedSundayMember] = useState<Member | null>(null);
+  const [selectedSundayChild, setSelectedSundayChild] = useState<MemberChildSearchItem | null>(null);
   const [sundayPaymentTarget, setSundayPaymentTarget] = useState<SundaySchoolParticipant | null>(null);
   const [showSundayPaymentModal, setShowSundayPaymentModal] = useState(false);
   const [sundayPaymentForm, setSundayPaymentForm] = useState({ amount: "", method: "CASH", memo: "" });
@@ -291,7 +344,7 @@ export default function SchoolsWorkspace() {
     searchMembers(parentSearch.trim(), 5)
       .then((results) => {
         if (!cancelled) {
-          setParentResults(results);
+          setParentResults(results.items);
         }
       })
       .catch((error) => console.error(error));
@@ -301,22 +354,36 @@ export default function SchoolsWorkspace() {
   }, [parentSearch]);
 
   useEffect(() => {
-    if (sundayMemberSearch.trim().length < 2) {
+    const term = sundayMemberSearch.trim();
+    if (term.length < 2) {
       setSundayMemberResults([]);
+      setSundayChildResults([]);
       return;
     }
     let cancelled = false;
-    searchMembers(sundayMemberSearch.trim(), 5)
-      .then((results) => {
-        if (!cancelled) {
-          setSundayMemberResults(results);
-        }
-      })
-      .catch((error) => console.error(error));
+    if (sundayForm.category === "Child") {
+      setSundayMemberResults([]);
+      searchMemberChildren(term, 8)
+        .then((results) => {
+          if (!cancelled) {
+            setSundayChildResults(results);
+          }
+        })
+        .catch((error) => console.error(error));
+    } else {
+      setSundayChildResults([]);
+      searchMembers(term, 5)
+        .then((results) => {
+          if (!cancelled) {
+            setSundayMemberResults(results.items);
+          }
+        })
+        .catch((error) => console.error(error));
+    }
     return () => {
       cancelled = true;
     };
-  }, [sundayMemberSearch]);
+  }, [sundayMemberSearch, sundayForm.category]);
 
   const selectedChild = useMemo(() => {
     if (!parentDetail || !enrollmentForm.child_id) return null;
@@ -327,10 +394,25 @@ export default function SchoolsWorkspace() {
     setSundayForm(defaultSundayForm);
     setSundayMemberSearch("");
     setSundayMemberResults([]);
+    setSundayChildResults([]);
+    setSelectedSundayMember(null);
+    setSelectedSundayChild(null);
   };
 
   const handleSundayMemberSelect = (member: Member) => {
+    if (sundayForm.category === "Child") {
+      toast.push("Select a child from the membership children list for Child category.");
+      return;
+    }
+    const categoryValidation = validateAdultSourceMember(sundayForm.category, member);
+    if (!categoryValidation.valid) {
+      toast.push(categoryValidation.message || "Selected member does not match this category.");
+      return;
+    }
+    setSelectedSundayMember(member);
+    setSelectedSundayChild(null);
     setSundayMemberResults([]);
+    setSundayChildResults([]);
     setSundayMemberSearch(`${member.first_name} ${member.last_name}`);
     setSundayForm((prev) => ({
       ...prev,
@@ -344,7 +426,51 @@ export default function SchoolsWorkspace() {
     }));
   };
 
+  const handleSundayChildSelect = (child: MemberChildSearchItem) => {
+    const childValidation = validateChildCandidate(child);
+    if (!childValidation.valid) {
+      toast.push(childValidation.message || "Selected child does not match Child category.");
+      return;
+    }
+    setSelectedSundayChild(child);
+    setSelectedSundayMember(null);
+    setSundayChildResults([]);
+    setSundayMemberResults([]);
+    setSundayMemberSearch(child.full_name);
+    setSundayForm((prev) => ({
+      ...prev,
+      member_username: child.parent_username,
+      first_name: child.first_name,
+      last_name: child.last_name,
+      phone: child.parent_phone || prev.phone,
+      email: child.parent_email || prev.email,
+      gender: (child.gender as SundayFormState["gender"]) || prev.gender,
+      dob: child.birth_date || prev.dob,
+    }));
+  };
+
   const handleSundayFormSubmit = async () => {
+    if (sundayForm.category === "Child") {
+      if (!selectedSundayChild) {
+        toast.push("Select a child from the children list before saving.");
+        return;
+      }
+      const childValidation = validateChildCandidate(selectedSundayChild);
+      if (!childValidation.valid) {
+        toast.push(childValidation.message || "Selected child does not match Child category.");
+        return;
+      }
+    } else {
+      if (!selectedSundayMember) {
+        toast.push("Select an adult member from the member list before saving.");
+        return;
+      }
+      const memberValidation = validateAdultSourceMember(sundayForm.category, selectedSundayMember);
+      if (!memberValidation.valid) {
+        toast.push(memberValidation.message || "Selected member does not match this category.");
+        return;
+      }
+    }
     if (!sundayForm.member_username.trim()) {
       toast.push("Select a member before saving.");
       return;
@@ -360,6 +486,13 @@ export default function SchoolsWorkspace() {
     if (!sundayForm.dob) {
       toast.push("Enter the participant's date of birth.");
       return;
+    }
+    if (sundayForm.category === "Child") {
+      const dobValidation = validateChildBirthDate(sundayForm.dob);
+      if (!dobValidation.valid) {
+        toast.push(dobValidation.message || "Participant date of birth does not match Child category.");
+        return;
+      }
     }
     const payload: SundaySchoolParticipantPayload = {
       member_username: sundayForm.member_username.trim(),
@@ -384,6 +517,17 @@ export default function SchoolsWorkspace() {
       getSundaySchoolStats().then(setSundayStats).catch(() => { });
     } catch (error) {
       console.error(error);
+      if (error instanceof ApiError) {
+        try {
+          const parsed = JSON.parse(error.body || "{}") as { detail?: string };
+          if (parsed.detail) {
+            toast.push(parsed.detail);
+            return;
+          }
+        } catch {
+          // ignore parse errors and fall through to generic message
+        }
+      }
       toast.push("Unable to save participant.");
     }
   };
@@ -1216,23 +1360,63 @@ export default function SchoolsWorkspace() {
               <Modal title="New Sunday School participant" onClose={() => setShowSundayForm(false)}>
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Search member</label>
+                    <label className="text-xs uppercase text-mute block mb-1">
+                      {sundayForm.category === "Child" ? "Search child" : "Search member"}
+                    </label>
                     <Input
-                      placeholder="Search by name"
+                      placeholder={sundayForm.category === "Child" ? "Search child by name" : "Search adult member by name"}
                       value={sundayMemberSearch}
                       onChange={(event) => setSundayMemberSearch(event.target.value)}
                     />
-                    {sundayMemberResults.length > 0 && (
+                    {sundayForm.category === "Child" && sundayChildResults.length > 0 && (
+                      <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70 max-h-52 overflow-y-auto">
+                        {sundayChildResults.map((result) => {
+                          const childValidation = validateChildCandidate(result);
+                          return (
+                            <li
+                              key={result.child_id}
+                              className={`px-3 py-2 text-sm ${childValidation.valid ? "hover:bg-accent/10 cursor-pointer" : "bg-card/60 text-mute cursor-not-allowed"}`}
+                              onClick={() => {
+                                if (!childValidation.valid) return;
+                                handleSundayChildSelect(result);
+                              }}
+                            >
+                              <div>{result.full_name}</div>
+                              <div className="text-xs text-mute">
+                                Parent: {result.parent_first_name} {result.parent_last_name}
+                                {result.parent_email ? ` • ${result.parent_email}` : ""}
+                              </div>
+                              {!childValidation.valid && childValidation.message && (
+                                <div className="text-xs">{childValidation.message}</div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {sundayForm.category !== "Child" && sundayMemberResults.length > 0 && (
                       <ul className="mt-2 border border-border rounded-xl divide-y divide-border/70 max-h-40 overflow-y-auto">
-                        {sundayMemberResults.map((result) => (
-                          <li
-                            key={result.id}
-                            className="px-3 py-2 text-sm hover:bg-accent/10 cursor-pointer"
-                            onClick={() => handleSundayMemberSelect(result)}
-                          >
-                            {result.first_name} {result.last_name}
-                          </li>
-                        ))}
+                        {sundayMemberResults.map((result) => {
+                          const categoryValidation = validateAdultSourceMember(
+                            sundayForm.category as Exclude<SundayFormState["category"], "Child">,
+                            result,
+                          );
+                          return (
+                            <li
+                              key={result.id}
+                              className={`px-3 py-2 text-sm ${categoryValidation.valid ? "hover:bg-accent/10 cursor-pointer" : "bg-card/60 text-mute cursor-not-allowed"}`}
+                              onClick={() => {
+                                if (!categoryValidation.valid) return;
+                                handleSundayMemberSelect(result);
+                              }}
+                            >
+                              <div>{result.first_name} {result.last_name}</div>
+                              {!categoryValidation.valid && categoryValidation.message && (
+                                <div className="text-xs">{categoryValidation.message}</div>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>
@@ -1242,7 +1426,11 @@ export default function SchoolsWorkspace() {
                       <Input
                         placeholder="hanna.mengistu"
                         value={sundayForm.member_username}
-                        onChange={(event) => setSundayForm((prev) => ({ ...prev, member_username: event.target.value }))}
+                        onChange={(event) => {
+                          setSelectedSundayMember(null);
+                          setSelectedSundayChild(null);
+                          setSundayForm((prev) => ({ ...prev, member_username: event.target.value }));
+                        }}
                       />
                     </div>
                   </div>
@@ -1267,9 +1455,24 @@ export default function SchoolsWorkspace() {
                       <label className="text-xs uppercase text-mute block mb-1">Category</label>
                       <Select
                         value={sundayForm.category}
-                        onChange={(event) =>
-                          setSundayForm((prev) => ({ ...prev, category: event.target.value as SundayFormState["category"] }))
-                        }
+                        onChange={(event) => {
+                          const nextCategory = event.target.value as SundayFormState["category"];
+                          setSelectedSundayMember(null);
+                          setSelectedSundayChild(null);
+                          setSundayMemberResults([]);
+                          setSundayChildResults([]);
+                          setSundayMemberSearch("");
+                          setSundayForm((prev) => ({
+                            ...prev,
+                            category: nextCategory,
+                            member_username: "",
+                            first_name: "",
+                            last_name: "",
+                            dob: todayISO(),
+                            phone: "",
+                            email: "",
+                          }));
+                        }}
                       >
                         {SUNDAY_CATEGORIES.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -1277,6 +1480,13 @@ export default function SchoolsWorkspace() {
                           </option>
                         ))}
                       </Select>
+                      <p className="mt-1 text-xs text-mute">
+                        {sundayForm.category === "Child"
+                          ? "Child category picks from membership children and auto-fills parent contact."
+                          : sundayForm.category === "Adult"
+                            ? "Adult category only allows adult members (18+) from member list."
+                            : "Youth category is classified separately but still selects adult members (18+)."}
+                      </p>
                     </div>
                   </div>
                   <div className="grid md:grid-cols-2 gap-3">

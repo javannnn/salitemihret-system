@@ -127,6 +127,7 @@ export type Member = {
   contribution_amount?: number | null;
   contribution_currency: string;
   contribution_exception_reason?: string | null;
+  contribution_exception_attachment_path?: string | null;
   notes?: string | null;
   family_count: number;
   household_size_override?: number | null;
@@ -204,6 +205,21 @@ export type MemberSummary = {
   id: number;
   first_name: string;
   last_name: string;
+};
+
+export type MemberChildSearchItem = {
+  child_id: number;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  gender?: string | null;
+  birth_date?: string | null;
+  parent_member_id: number;
+  parent_username: string;
+  parent_first_name: string;
+  parent_last_name: string;
+  parent_email?: string | null;
+  parent_phone?: string | null;
 };
 
 export type MemberDuplicateMatch = {
@@ -286,6 +302,18 @@ export type PaymentSummaryItem = {
 export type PaymentSummaryResponse = {
   items: PaymentSummaryItem[];
   grand_total: number;
+};
+
+export type ReportActivityItem = {
+  id: string;
+  category: "promotion" | "member" | "sponsorship" | "user";
+  action: string;
+  actor?: string | null;
+  target?: string | null;
+  detail?: string | null;
+  occurred_at: string;
+  entity_type?: string | null;
+  entity_id?: number | null;
 };
 
 export type AdminUserMemberSummary = {
@@ -566,6 +594,10 @@ export type SponsorshipSponsorContext = {
   member_id: number;
   member_name: string;
   member_status?: string | null;
+  marital_status?: string | null;
+  spouse_name?: string | null;
+  spouse_phone?: string | null;
+  spouse_email?: string | null;
   last_sponsorship_id?: number | null;
   last_sponsorship_date?: string | null;
   last_sponsorship_status?: string | null;
@@ -1105,6 +1137,68 @@ export async function exportPaymentsReport(params: PaymentFilters = {}): Promise
   return res.blob();
 }
 
+type SponsorshipExportParams = SponsorshipFilters & { ids?: string };
+
+export async function exportSponsorshipsCsv(params: SponsorshipExportParams = {}): Promise<Blob> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const primaryUrl = `${API_BASE}/sponsorships/export.csv${query ? `?${query}` : ""}`;
+  const fallbackUrl = `${API_BASE}/sponsorships/export${query ? `?${query}` : ""}`;
+  let res = await authFetch(primaryUrl, { headers: { Accept: "text/csv" } });
+  if (res.status === 404) {
+    res = await authFetch(fallbackUrl, { headers: { Accept: "text/csv" } });
+  }
+
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (res.status === 403) {
+    const message = await res.text();
+    throw new ApiError(403, message || "Forbidden");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Export failed");
+  }
+  return res.blob();
+}
+
+export async function exportSponsorshipsExcel(params: SponsorshipExportParams = {}): Promise<Blob> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const primaryUrl = `${API_BASE}/sponsorships/export.xlsx${query ? `?${query}` : ""}`;
+  const fallbackUrl = `${API_BASE}/sponsorships/export/excel${query ? `?${query}` : ""}`;
+  let res = await authFetch(primaryUrl, {
+    headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  });
+  if (res.status === 404) {
+    res = await authFetch(fallbackUrl, {
+      headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    });
+  }
+
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (res.status === 403) {
+    const message = await res.text();
+    throw new ApiError(403, message || "Forbidden");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Export failed");
+  }
+  return res.blob();
+}
+
 export async function listSponsorships(params: SponsorshipFilters = {}): Promise<SponsorshipListResponse> {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -1119,8 +1213,13 @@ export async function getSponsorship(id: number): Promise<Sponsorship> {
   return api<Sponsorship>(`/sponsorships/${id}`);
 }
 
-export async function getSponsorshipMetrics(): Promise<SponsorshipMetrics> {
-  return api<SponsorshipMetrics>("/sponsorships/metrics");
+export async function getSponsorshipMetrics(filters: { start_date?: string; end_date?: string } = {}): Promise<SponsorshipMetrics> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) search.set(key, value);
+  });
+  const query = search.toString();
+  return api<SponsorshipMetrics>(`/sponsorships/metrics${query ? `?${query}` : ""}`);
 }
 
 export async function getSponsorContext(memberId: number): Promise<SponsorshipSponsorContext> {
@@ -1484,6 +1583,11 @@ export type AvatarUploadResponse = {
   avatar_url: string;
 };
 
+export type ContributionExceptionAttachmentUploadResponse = {
+  attachment_url: string;
+  attachment_name: string;
+};
+
 export async function uploadAvatar(memberId: number, file: File): Promise<AvatarUploadResponse> {
   const body = new FormData();
   body.append("file", file);
@@ -1511,6 +1615,39 @@ export async function deleteAvatar(memberId: number): Promise<void> {
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || "Avatar deletion failed");
+  }
+}
+
+export async function uploadContributionExceptionAttachment(
+  memberId: number,
+  file: File,
+): Promise<ContributionExceptionAttachmentUploadResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await authFetch(`${API_BASE}/members/${memberId}/contribution-exception-attachment`, {
+    method: "POST",
+    body,
+  });
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new Error(message || "Attachment upload failed");
+  }
+  return res.json();
+}
+
+export async function deleteContributionExceptionAttachment(memberId: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/members/${memberId}/contribution-exception-attachment`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new Error(message || "Attachment deletion failed");
   }
 }
 
@@ -1638,6 +1775,14 @@ export async function searchMembers(query: string, limit = 5): Promise<Page<Memb
   params.set("page_size", String(limit));
   params.set("sort", "-updated_at");
   return api<Page<Member>>(`/members?${params.toString()}`);
+}
+
+export async function searchMemberChildren(query: string, limit = 8): Promise<MemberChildSearchItem[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  params.set("limit", String(limit));
+  const response = await api<{ items: MemberChildSearchItem[] }>(`/members/children-search?${params.toString()}`);
+  return response.items;
 }
 
 export async function getPromotionPreview(withinDays?: number): Promise<ChildPromotionPreview> {
@@ -1880,6 +2025,16 @@ export async function getPaymentSummary(filters: { start_date?: string; end_date
   };
 }
 
+export async function getReportActivity(filters: { start_date?: string; end_date?: string; limit?: number } = {}): Promise<ReportActivityItem[]> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<ReportActivityItem[]>(`/reports/activity${query ? `?${query}` : ""}`);
+}
+
 export async function getPaymentServiceTypes(includeInactive = false): Promise<PaymentServiceType[]> {
   const query = includeInactive ? "?include_inactive=true" : "";
   return api<PaymentServiceType[]>(`/payments/service-types${query}`);
@@ -2113,8 +2268,13 @@ export async function recordSundaySchoolContribution(
   });
 }
 
-export async function getSundaySchoolStats(): Promise<SundaySchoolStats> {
-  return api<SundaySchoolStats>("/sunday-school/participants/stats");
+export async function getSundaySchoolStats(filters: { start_date?: string; end_date?: string } = {}): Promise<SundaySchoolStats> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) search.set(key, value);
+  });
+  const query = search.toString();
+  return api<SundaySchoolStats>(`/sunday-school/participants/stats${query ? `?${query}` : ""}`);
 }
 
 export async function listSundaySchoolContent(params: {

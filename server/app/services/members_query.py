@@ -35,6 +35,8 @@ def build_members_query(
     has_children: bool | None = None,
     missing_phone: bool | None = None,
     new_this_month: bool | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
     member_ids: list[int] | None = None,
 ) -> Query:
     query: Query = base_query if base_query is not None else db.query(Member)
@@ -101,6 +103,13 @@ def build_members_query(
         today = date.today()
         month_start = datetime(today.year, today.month, 1)
         query = query.filter(Member.created_at >= month_start)
+
+    if created_from:
+        start_dt = datetime(created_from.year, created_from.month, created_from.day)
+        query = query.filter(Member.created_at >= start_dt)
+    if created_to:
+        end_dt = datetime(created_to.year, created_to.month, created_to.day, 23, 59, 59, 999999)
+        query = query.filter(Member.created_at <= end_dt)
 
     if member_ids:
         query = query.filter(Member.id.in_(member_ids))

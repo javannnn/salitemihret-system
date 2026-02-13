@@ -1,19 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getSponsorshipMetrics, SponsorshipMetrics } from "@/lib/api";
 import { StatCard } from "./StatCard";
-import { AlertCircle, CheckCircle2, Clock, Heart, PieChart as PieIcon, PauseCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Heart, PieChart as PieIcon, PauseCircle, BadgeCheck } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { useToast } from "@/components/Toast";
+import { DateRangeControls, DateRangeValue } from "./DateRangeControls";
 
 export function SponsorshipsReport() {
+    const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [metrics, setMetrics] = useState<SponsorshipMetrics | null>(null);
     const [loading, setLoading] = useState(true);
     const toast = useToast();
 
+    const normalizedRange = useMemo(() => {
+        if (dateRange.start && dateRange.end && dateRange.start > dateRange.end) {
+            return { start: dateRange.end, end: dateRange.start };
+        }
+        return dateRange;
+    }, [dateRange]);
+    const hasRange = Boolean(normalizedRange.start || normalizedRange.end);
+
     useEffect(() => {
         const fetchMetrics = async () => {
+            setLoading(true);
             try {
-                const data = await getSponsorshipMetrics();
+                const data = await getSponsorshipMetrics({
+                    start_date: normalizedRange.start || undefined,
+                    end_date: normalizedRange.end || undefined,
+                });
                 setMetrics(data);
             } catch (error) {
                 console.error("Failed to fetch sponsorship metrics:", error);
@@ -24,7 +38,7 @@ export function SponsorshipsReport() {
         };
 
         fetchMetrics();
-    }, [toast]);
+    }, [toast, normalizedRange.start, normalizedRange.end]);
 
     if (loading) {
         return <div className="p-8 text-center text-muted">Loading sponsorship statistics...</div>;
@@ -42,9 +56,21 @@ export function SponsorshipsReport() {
         { name: "Available", value: availableSlots, color: "#10b981" },
     ];
 
+    const executedLabel = hasRange ? "Executed (Range)" : "Executed (Month)";
+    const executedDescription = hasRange ? "Completed in selected range" : "Completed this month";
+    const budgetLabel = hasRange ? "Budget Utilization" : "Budget Utilization";
+    const budgetDescription = hasRange ? "Based on range end month" : "Current month utilization";
+
     return (
         <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                    <h2 className="text-xl font-semibold text-ink">Sponsorship Report</h2>
+                    <p className="text-sm text-muted">Monitor sponsorship pipeline and budget usage.</p>
+                </div>
+                <DateRangeControls value={dateRange} onChange={setDateRange} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
                 <StatCard
                     title="Active Cases"
                     value={metrics.active_cases}
@@ -58,10 +84,10 @@ export function SponsorshipsReport() {
                     description="Pending approval"
                 />
                 <StatCard
-                    title="Executed (Month)"
+                    title={executedLabel}
                     value={metrics.month_executed}
                     icon={CheckCircle2}
-                    description="Completed this month"
+                    description={executedDescription}
                 />
                 <StatCard
                     title="Suspended Cases"
@@ -70,15 +96,21 @@ export function SponsorshipsReport() {
                     description="On hold"
                 />
                 <StatCard
-                    title="Budget Utilization"
+                    title={budgetLabel}
                     value={`${metrics.budget_utilization_percent}%`}
                     icon={PieIcon}
-                    description="Current month utilization"
+                    description={budgetDescription}
                     trend={{
                         value: metrics.budget_utilization_percent,
                         label: "used",
                         positive: metrics.budget_utilization_percent < 90,
                     }}
+                />
+                <StatCard
+                    title="Available Slots"
+                    value={availableSlots}
+                    icon={BadgeCheck}
+                    description="Remaining this round"
                 />
             </div>
 
@@ -115,22 +147,46 @@ export function SponsorshipsReport() {
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-border bg-card p-6">
-                    <h3 className="mb-4 text-lg font-semibold text-ink">Recent Alerts</h3>
-                    {metrics.alerts.length === 0 ? (
-                        <div className="flex h-[200px] items-center justify-center text-muted">
-                            No active alerts. Great job!
+                <div className="space-y-6">
+                    <div className="rounded-xl border border-border bg-card p-6">
+                        <h3 className="mb-4 text-lg font-semibold text-ink">Case Pipeline</h3>
+                        <div className="space-y-3 text-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Submitted for review</span>
+                                <span className="font-semibold text-ink">{metrics.submitted_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Active cases</span>
+                                <span className="font-semibold text-ink">{metrics.active_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Suspended</span>
+                                <span className="font-semibold text-ink">{metrics.suspended_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Executed this month</span>
+                                <span className="font-semibold text-ink">{metrics.month_executed}</span>
+                            </div>
                         </div>
-                    ) : (
-                        <div className="space-y-4">
-                            {metrics.alerts.map((alert, index) => (
-                                <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                                    <p className="text-sm text-ink">{alert}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-card p-6">
+                        <h3 className="mb-4 text-lg font-semibold text-ink">Recent Alerts</h3>
+                        {metrics.alerts.length === 0 ? (
+                            <div className="flex h-[200px] items-center justify-center text-muted">
+                                No active alerts. Great job!
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {metrics.alerts.map((alert, index) => (
+                                    <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                                        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                                        <p className="text-sm text-ink">{alert}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

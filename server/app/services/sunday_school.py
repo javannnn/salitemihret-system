@@ -36,6 +36,7 @@ from app.schemas.payment import PaymentCreate
 
 SUNDAY_SCHOOL_SERVICE_CODE = "SCHOOLFEE"
 ALLOWED_PAYMENT_METHODS = {"CASH", "DIRECT_DEPOSIT", "E_TRANSFER", "CREDIT"}
+MIN_ADULT_AGE = 18
 
 
 def _normalize_payment_method(method: str | None) -> str:
@@ -63,6 +64,40 @@ def _get_member(db: Session, username: str) -> Member:
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
     return member
+
+
+def _calculate_age(birth_date: date, today: date | None = None) -> int:
+    reference = today or date.today()
+    return reference.year - birth_date.year - ((reference.month, reference.day) < (birth_date.month, birth_date.day))
+
+
+def _validate_child_birth_date(birth_date: date | None) -> None:
+    if birth_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Child category requires a valid child birth date.",
+        )
+    age = _calculate_age(birth_date)
+    if age >= MIN_ADULT_AGE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Child category only allows children under 18.",
+        )
+
+
+def _validate_adult_source_member(member: Member, category: str) -> None:
+    if category not in {"Adult", "Youth"}:
+        return
+    if member.birth_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{category} category requires a member with a valid birth date.",
+        )
+    if _calculate_age(member.birth_date) < MIN_ADULT_AGE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{category} category only allows adult members aged 18 or older.",
+        )
 
 
 def _log_audit(
@@ -226,10 +261,19 @@ def _apply_participant_updates(db: Session, record: SundaySchoolEnrollment, payl
             "is_active",
         ],
     )
+    target_member = _get_member(db, payload.member_username) if payload.member_username else db.get(Member, record.member_id)
+    if not target_member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found.")
+    target_category = payload.category or getattr(record.category, "value", record.category)
+    target_dob = payload.dob or record.date_of_birth
+    if target_category == "Child":
+        _validate_child_birth_date(target_dob)
+    else:
+        _validate_adult_source_member(target_member, target_category)
+
     if payload.member_username:
-        member = _get_member(db, payload.member_username)
-        record.member_id = member.id
-        record.member_username = member.username
+        record.member_id = target_member.id
+        record.member_username = target_member.username
     for field in (
         "first_name",
         "last_name",
@@ -261,6 +305,10 @@ def _apply_participant_updates(db: Session, record: SundaySchoolEnrollment, payl
 
 def create_participant(db: Session, payload: ParticipantCreate, actor: User) -> ParticipantOut:
     member = _get_member(db, payload.member_username)
+    if payload.category == "Child":
+        _validate_child_birth_date(payload.dob)
+    else:
+        _validate_adult_source_member(member, payload.category)
     record = SundaySchoolEnrollment(
         member_id=member.id,
         member_username=member.username,
@@ -386,7 +434,7 @@ def record_contribution(db: Session, participant_id: int, payload: ContributionC
     return _serialize_participant(record)
 
 
-def participants_stats(db: Session) -> SundaySchoolStats:
+def participants_stats(db: Session, *, start_date: date | None = None, end_date: date | None = None) -> SundaySchoolStats:
     base_query = db.query(SundaySchoolEnrollment).filter(SundaySchoolEnrollment.is_active.is_(True))
     total = base_query.count()
     child_count = base_query.filter(SundaySchoolEnrollment.category == "Child").count()
@@ -396,13 +444,17 @@ def participants_stats(db: Session) -> SundaySchoolStats:
     non_paying = total - paying
 
     service = _get_service_type(db)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    revenue_last_30 = (
-        db.query(func.coalesce(func.sum(Payment.amount), 0))
-        .filter(Payment.service_type_id == service.id, Payment.posted_at >= cutoff)
-        .scalar()
-        or 0
-    )
+    revenue_query = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(Payment.service_type_id == service.id)
+    if start_date:
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        revenue_query = revenue_query.filter(Payment.posted_at >= start_dt)
+    if end_date:
+        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+        revenue_query = revenue_query.filter(Payment.posted_at <= end_dt)
+    if not start_date and not end_date:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        revenue_query = revenue_query.filter(Payment.posted_at >= cutoff)
+    revenue_last_30 = revenue_query.scalar() or 0
 
     pending_counts = dict.fromkeys(["Mezmur", "Lesson", "Art"], 0)
     rows = (

@@ -32,6 +32,7 @@ _TRACKED_FIELDS = {
     "contribution_amount",
     "contribution_currency",
     "contribution_exception_reason",
+    "contribution_exception_attachment_path",
     "notes",
     "avatar_path",
     "household_id",

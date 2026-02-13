@@ -56,6 +56,7 @@ class Member(Base):
     contribution_amount = Column(Numeric(10, 2), nullable=False, default=75)
     contribution_currency = Column(String(3), nullable=False, default="CAD")
     contribution_exception_reason = Column(ContributionExceptionReason, nullable=True)
+    contribution_exception_attachment_path = Column(String(255), nullable=True)
     contribution_last_paid_at = Column(DateTime(timezone=True), nullable=True)
     contribution_next_due_at = Column(DateTime(timezone=True), nullable=True)
     status_auto = Column(MemberStatus, nullable=False, default="Pending")

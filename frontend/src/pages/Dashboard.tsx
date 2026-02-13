@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Users, CreditCard, Activity, ArrowUpRight, Bell, GraduationCap, CalendarDays, Shield, Search } from "lucide-react";
 
 import { Card, Badge, Button } from "@/components/ui";
 import {
   ApiError,
+  ChildPromotionCandidate,
   ChildPromotionPreview,
+  ChildPromotionRunResponse,
   Member,
   Page,
   Payment,
@@ -19,6 +21,8 @@ import {
   listPayments,
   listVolunteerGroups,
   listVolunteerWorkers,
+  promoteChild,
+  runChildPromotions,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -29,6 +33,13 @@ type Summary = {
   total: number;
   active: number;
   archived: number;
+};
+
+type PromotionActivity = {
+  id: string;
+  title: string;
+  detail: string;
+  at: string;
 };
 
 type SmartSearchResult = {
@@ -75,6 +86,14 @@ export default function Dashboard() {
   const [searchMessage, setSearchMessage] = useState("Type at least two characters to search globally.");
   const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
   const [recentPaymentsStatus, setRecentPaymentsStatus] = useState<"idle" | "loading" | "ready" | "empty" | "restricted" | "error">("idle");
+  const [promotionModalOpen, setPromotionModalOpen] = useState(false);
+  const [promotionRunStatus, setPromotionRunStatus] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [promotionRunResult, setPromotionRunResult] = useState<ChildPromotionRunResponse | null>(null);
+  const [promotionRunError, setPromotionRunError] = useState<string | null>(null);
+  const [promotionConfirmChecked, setPromotionConfirmChecked] = useState(false);
+  const [promotionActivity, setPromotionActivity] = useState<PromotionActivity[]>([]);
+  const [promotingChildId, setPromotingChildId] = useState<number | null>(null);
+  const [promotionSingleError, setPromotionSingleError] = useState<string | null>(null);
 
   const toast = useToast();
   const permissions = usePermissions();
@@ -82,6 +101,17 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const isSuperAdmin = user?.is_super_admin ?? false;
   const isMobile = useMediaQuery("(max-width: 1023px)");
+
+  useEffect(() => {
+    if (!promotionModalOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPromotionModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [promotionModalOpen]);
 
   useEffect(() => {
     if (!permissions.viewMembers) {
@@ -336,11 +366,12 @@ export default function Dashboard() {
     return Math.round((summary.active / summary.total) * 100);
   }, [summary]);
 
-  const readyCount = useMemo(() => {
-    if (!promotions) return 0;
+  const readyPromotions = useMemo(() => {
+    if (!promotions) return [];
     const today = new Date();
-    return promotions.items.filter((item) => new Date(item.turns_on) <= today).length;
+    return promotions.items.filter((item) => new Date(item.turns_on) <= today);
   }, [promotions]);
+  const readyCount = readyPromotions.length;
 
   const statusBreakdown = useMemo(() => {
     if (!summary) return [];
@@ -373,6 +404,101 @@ export default function Dashboard() {
     });
     return list;
   }, [summary, financeSummary, promotions, readyCount]);
+
+  const openPromotionModal = () => {
+    setPromotionModalOpen(true);
+    setPromotionRunStatus("idle");
+    setPromotionRunResult(null);
+    setPromotionRunError(null);
+    setPromotionConfirmChecked(false);
+    setPromotionSingleError(null);
+    setPromotingChildId(null);
+  };
+
+  const handleRunPromotions = async () => {
+    if (!permissions.runPromotions || promotionRunStatus === "running") return;
+    if (readyCount > 0 && !promotionConfirmChecked) return;
+    setPromotionRunStatus("running");
+    setPromotionRunError(null);
+    setPromotionSingleError(null);
+    try {
+      const result = await runChildPromotions();
+      setPromotionRunResult(result);
+      setPromotionRunStatus("success");
+      const promotedCount = result.promoted.length;
+      toast.push(promotedCount ? `${promotedCount} child${promotedCount === 1 ? "" : "ren"} promoted.` : "No children were eligible yet.");
+      const timestamp = new Date().toISOString();
+      setPromotionActivity((prev) => [
+        {
+          id: `bulk-${timestamp}`,
+          title: "Bulk promotion run",
+          detail: promotedCount ? `${promotedCount} child${promotedCount === 1 ? "" : "ren"} promoted` : "No eligible children",
+          at: timestamp,
+        },
+        ...prev,
+      ].slice(0, 5));
+      setPromotionConfirmChecked(false);
+      if (permissions.viewPromotions) {
+        setPromotionsLoading(true);
+        try {
+          const refreshed = await getPromotionPreview();
+          setPromotions(refreshed);
+        } catch (error) {
+          console.error(error);
+        } finally {
+          setPromotionsLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      const message =
+        error instanceof ApiError
+          ? error.body || error.message
+          : "Unable to run promotions right now. Please try again.";
+      setPromotionRunError(message);
+      setPromotionRunStatus("error");
+    }
+  };
+
+  const handlePromoteSingle = async (item: ChildPromotionCandidate) => {
+    if (!permissions.runPromotions || promotingChildId) return;
+    setPromotingChildId(item.child_id);
+    setPromotionSingleError(null);
+    try {
+      const result = await promoteChild(item.child_id);
+      toast.push(`${item.child_name} promoted to member.`);
+      const timestamp = new Date().toISOString();
+      setPromotionActivity((prev) => [
+        {
+          id: `single-${item.child_id}-${timestamp}`,
+          title: `Promoted ${item.child_name}`,
+          detail: `New member #${result.new_member_id} · ${result.new_member_name}`,
+          at: timestamp,
+        },
+        ...prev,
+      ].slice(0, 5));
+      if (permissions.viewPromotions) {
+        setPromotionsLoading(true);
+        try {
+          const refreshed = await getPromotionPreview();
+          setPromotions(refreshed);
+        } catch (error) {
+          console.error(error);
+        } finally {
+          setPromotionsLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      const message =
+        error instanceof ApiError
+          ? error.body || error.message
+          : "Unable to promote this child right now. Please try again.";
+      setPromotionSingleError(message);
+    } finally {
+      setPromotingChildId(null);
+    }
+  };
 
   const searchSections = useMemo(
     () =>
@@ -652,6 +778,15 @@ export default function Dashboard() {
                 <h2 className="text-xs font-semibold tracking-wide text-ink uppercase">Upcoming promotions</h2>
                 <p className="text-[11px] text-muted">Children moving to membership</p>
               </div>
+              {permissions.runPromotions && (
+                <Button
+                  variant="ghost"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={openPromotionModal}
+                >
+                  Promote
+                </Button>
+              )}
             </div>
             {permissions.viewPromotions ? (
               promotions ? (
@@ -718,6 +853,198 @@ export default function Dashboard() {
             )}
           </motion.div>
         </section>
+
+        <AnimatePresence>
+          {promotionModalOpen && (
+            <motion.div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div
+                className="absolute inset-0 bg-ink/60 backdrop-blur-sm"
+                onClick={() => setPromotionModalOpen(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="relative z-10 w-full max-w-xl"
+              >
+                <Card className="p-6 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-ink">Promote children to members</h3>
+                      <p className="text-sm text-muted">
+                        Promote children who have reached the membership age. This creates new member records.
+                      </p>
+                    </div>
+                    <Button variant="ghost" onClick={() => setPromotionModalOpen(false)}>
+                      Close
+                    </Button>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-card/70 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge>{readyCount} ready now</Badge>
+                      <span className="text-muted">
+                        {promotions ? `${promotions.total} upcoming in the next window` : "Preview loading…"}
+                      </span>
+                    </div>
+                    {readyPromotions.length ? (
+                      <ul className="mt-3 space-y-2 text-sm">
+                        {readyPromotions.slice(0, 5).map((item) => (
+                          <li
+                            key={item.child_id}
+                            className="flex flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div>
+                              <div className="font-medium text-ink">{item.child_name}</div>
+                              <div className="text-[11px] text-muted">
+                                Turns 18 on {new Date(item.turns_on).toLocaleDateString()}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {permissions.runPromotions && (
+                                <Button
+                                  variant="soft"
+                                  className="h-7 px-2 text-[11px]"
+                                  onClick={() => handlePromoteSingle(item)}
+                                  disabled={promotionRunStatus === "running" || promotingChildId === item.child_id}
+                                >
+                                  {promotingChildId === item.child_id ? "Promoting…" : "Promote now"}
+                                </Button>
+                              )}
+                              {item.parent_member_id ? (
+                                <Button
+                                  variant="ghost"
+                                  className="h-7 px-2 text-[11px]"
+                                  onClick={() => navigate(`/members/${item.parent_member_id}/edit`)}
+                                >
+                                  View parent
+                                </Button>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="mt-3 rounded-lg border border-dashed border-border bg-card/60 px-3 py-4 text-sm text-muted">
+                        No children are ready to promote yet.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-card/70 p-4 text-sm">
+                    <div className="font-semibold text-ink">Confirm bulk promotion</div>
+                    {!promotions ? (
+                      <p className="text-[11px] text-muted">Loading promotion preview…</p>
+                    ) : readyCount > 0 ? (
+                      <>
+                        <p className="text-[11px] text-muted">
+                          This will create member records for {readyCount} child{readyCount === 1 ? "" : "ren"}.
+                        </p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <input
+                            id="confirm-promotions"
+                            type="checkbox"
+                            checked={promotionConfirmChecked}
+                            onChange={(event) => setPromotionConfirmChecked(event.target.checked)}
+                          />
+                          <label htmlFor="confirm-promotions" className="text-sm">
+                            I understand this will promote {readyCount} child{readyCount === 1 ? "" : "ren"}.
+                          </label>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-muted">No children are ready yet. Bulk promotion is disabled.</p>
+                    )}
+                  </div>
+
+                  {promotionRunStatus === "success" && promotionRunResult && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-900">
+                      <div className="font-semibold">Promotions completed</div>
+                      <div className="text-[11px] text-emerald-800">
+                        {promotionRunResult.promoted.length
+                          ? `${promotionRunResult.promoted.length} member record${promotionRunResult.promoted.length === 1 ? "" : "s"} created.`
+                          : "No members needed promotion this run."}
+                      </div>
+                      {promotionRunResult.promoted.length > 0 && (
+                        <ul className="mt-2 space-y-1 text-[11px]">
+                          {promotionRunResult.promoted.slice(0, 5).map((item) => (
+                            <li key={item.new_member_id} className="flex items-center justify-between gap-2">
+                              <span>{item.new_member_name}</span>
+                              <Button
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => navigate(`/members/${item.new_member_id}/edit`)}
+                              >
+                                Open
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {promotionRunStatus === "error" && promotionRunError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50/70 p-3 text-sm text-red-700">
+                      {promotionRunError}
+                    </div>
+                  )}
+
+                  {promotionSingleError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50/70 p-3 text-sm text-red-700">
+                      {promotionSingleError}
+                    </div>
+                  )}
+
+                  {promotionActivity.length > 0 && (
+                    <div className="rounded-xl border border-border bg-card/70 p-4 text-sm">
+                      <div className="font-semibold text-ink">Recent promotion activity</div>
+                      <ul className="mt-2 space-y-2 text-[11px]">
+                        {promotionActivity.map((entry) => (
+                          <li key={entry.id} className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-ink">{entry.title}</div>
+                              <div className="text-muted">{entry.detail}</div>
+                            </div>
+                            <div className="text-[10px] text-muted">{new Date(entry.at).toLocaleString()}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setPromotionModalOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleRunPromotions}
+                      disabled={
+                        !permissions.runPromotions ||
+                        promotionRunStatus === "running" ||
+                        (promotions !== null && readyCount === 0) ||
+                        (readyCount > 0 && !promotionConfirmChecked)
+                      }
+                    >
+                      {promotionRunStatus === "running"
+                        ? "Promoting…"
+                        : promotions && readyCount === 0
+                          ? "No one ready yet"
+                          : readyCount
+                            ? `Promote ${readyCount} now`
+                            : "Promote now"}
+                    </Button>
+                  </div>
+                </Card>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
       </div>
     </div>

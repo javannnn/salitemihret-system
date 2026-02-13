@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.deps import get_current_user, require_roles
 from app.core.db import get_db
 from app.models.household import Household
-from app.models.member import Member
+from app.models.member import Child, Member
 from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.ministry import Ministry
 from app.models.payment import Payment, PaymentServiceType
@@ -33,6 +33,8 @@ from app.schemas.member import (
     SpouseOut,
     MemberSundaySchoolParticipantOut,
     MemberSundaySchoolPaymentOut,
+    MemberChildSearchItem,
+    MemberChildSearchResponse,
 )
 from app.services.audit import record_member_changes, snapshot_member
 from app.services.members_query import apply_member_sort, build_members_query
@@ -69,6 +71,8 @@ READ_ROLES = (
     "Clerk",
     "FinanceAdmin",
     "SponsorshipCommittee",
+    "SundaySchoolViewer",
+    "SundaySchoolAdmin",
 )
 WRITE_ROLES = ("PublicRelations", "Registrar", "Admin")
 DELETE_ROLES = ("PublicRelations", "Admin")
@@ -214,6 +218,8 @@ def list_members(
     has_children: bool | None = Query(default=None),
     missing_phone: bool | None = Query(default=None),
     new_this_month: bool | None = Query(default=None),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
     ids: str | None = Query(default=None),
     sort: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -240,6 +246,8 @@ def list_members(
         has_children=has_children,
         missing_phone=missing_phone,
         new_this_month=new_this_month,
+        created_from=created_from,
+        created_to=created_to,
         member_ids=member_ids,
     )
     total = count_query.order_by(None).count()
@@ -255,6 +263,8 @@ def list_members(
         has_children=has_children,
         missing_phone=missing_phone,
         new_this_month=new_this_month,
+        created_from=created_from,
+        created_to=created_to,
         member_ids=member_ids,
     )
     query = apply_member_sort(query, sort)
@@ -305,6 +315,59 @@ def check_member_duplicates(
         for member, reasons in matches
     ]
     return MemberDuplicateResponse(items=items)
+
+
+@router.get("/children-search", response_model=MemberChildSearchResponse)
+def search_member_children(
+    *,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=8, ge=1, le=25),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> MemberChildSearchResponse:
+    query = (
+        db.query(Child, Member)
+        .join(Member, Child.member_id == Member.id)
+        .filter(
+            Member.deleted_at.is_(None),
+            Child.promoted_at.is_(None),
+        )
+    )
+    if q:
+        keyword = f"%{q.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(Child.first_name).like(keyword),
+                func.lower(Child.last_name).like(keyword),
+                func.lower(Child.full_name).like(keyword),
+                func.lower(Member.first_name).like(keyword),
+                func.lower(Member.last_name).like(keyword),
+                func.lower(Member.username).like(keyword),
+            )
+        )
+    rows = (
+        query.order_by(Child.id.desc())
+        .limit(limit)
+        .all()
+    )
+    items = [
+        MemberChildSearchItem(
+            child_id=child.id,
+            first_name=child.first_name or "",
+            last_name=child.last_name or "",
+            full_name=child.full_name,
+            gender=getattr(child.gender, "value", child.gender),
+            birth_date=child.birth_date,
+            parent_member_id=parent.id,
+            parent_username=parent.username,
+            parent_first_name=parent.first_name,
+            parent_last_name=parent.last_name,
+            parent_email=parent.email,
+            parent_phone=parent.phone,
+        )
+        for child, parent in rows
+    ]
+    return MemberChildSearchResponse(items=items)
 
 
 @router.post("", response_model=MemberDetailOut, status_code=status.HTTP_201_CREATED)

@@ -21,7 +21,9 @@ import {
   getPaymentServiceTypes,
   listPayments,
   uploadAvatar,
+  uploadContributionExceptionAttachment,
   deleteAvatar,
+  deleteContributionExceptionAttachment,
 } from "@/lib/api";
 import { AvatarEditor } from "@/components/AvatarEditor";
 import { useToast } from "@/components/Toast";
@@ -33,8 +35,10 @@ import {
   BookOpen,
   ChevronDown,
   CreditCard,
+  FileText,
   GraduationCap,
   MoreVertical,
+  Paperclip,
   PlusCircle,
   ShieldAlert,
   Trash2,
@@ -237,6 +241,7 @@ const createBlankMemberDetail = (): MemberDetail => {
     contribution_amount: 75,
     contribution_currency: "CAD",
     contribution_exception_reason: null,
+    contribution_exception_attachment_path: null,
     notes: null,
     family_count: 1,
     household_size_override: null,
@@ -376,6 +381,9 @@ function SummaryCards({ member, formatDate }: { member: MemberDetail; formatDate
               )}
               {member.contribution_exception_reason && (
                 <span className="text-amber-600"> · {member.contribution_exception_reason === "LowIncome" ? "Low income" : member.contribution_exception_reason} exception</span>
+              )}
+              {member.contribution_exception_reason === "LowIncome" && member.contribution_exception_attachment_path && (
+                <span className="text-emerald-700 dark:text-emerald-300"> · PDF attached</span>
               )}
             </div>
           </div>
@@ -660,6 +668,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [memberLoadError, setMemberLoadError] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarRemoving, setAvatarRemoving] = useState(false);
+  const [exceptionAttachmentUploading, setExceptionAttachmentUploading] = useState(false);
+  const [exceptionAttachmentRemoving, setExceptionAttachmentRemoving] = useState(false);
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
@@ -690,6 +700,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
   const baselineMemberRef = useRef<MemberDetail | null>(null);
+  const exceptionAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("identity");
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionId, boolean>>({
     identity: false,
@@ -1717,7 +1728,85 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     }
   };
 
+  const handleExceptionAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!member || !member.id) {
+      event.target.value = "";
+      return;
+    }
+
+    const file = event.target.files?.[0];
+    if (!file) {
+      event.target.value = "";
+      return;
+    }
+
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      toast.push("Upload a PDF document only.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.push("PDF is too large. Please keep it under 5MB.");
+      event.target.value = "";
+      return;
+    }
+
+    setExceptionAttachmentUploading(true);
+    try {
+      const response = await uploadContributionExceptionAttachment(member.id, file);
+      const relative = response.attachment_url.startsWith("/static/")
+        ? response.attachment_url.replace("/static/", "")
+        : response.attachment_url;
+      setMember((prev) => (prev ? { ...prev, contribution_exception_attachment_path: relative } : prev));
+      toast.push("Low-income document uploaded");
+      refreshAudit(member.id);
+    } catch (error) {
+      console.error(error);
+      if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        if (message.includes("low income")) {
+          toast.push("Select Low income exception before uploading a PDF.");
+        } else if (message.includes("too large") || message.includes("size")) {
+          toast.push("PDF is too large. Please keep it under 5MB.");
+        } else if (message.includes("pdf") || message.includes("type")) {
+          toast.push("Upload a valid PDF document.");
+        } else {
+          toast.push("Failed to upload the low-income document.");
+        }
+      } else {
+        toast.push("Failed to upload the low-income document.");
+      }
+    } finally {
+      setExceptionAttachmentUploading(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleExceptionAttachmentRemove = async () => {
+    if (!member || !member.id || !member.contribution_exception_attachment_path) {
+      return;
+    }
+    if (!window.confirm("Remove the uploaded low-income document?")) {
+      return;
+    }
+
+    setExceptionAttachmentRemoving(true);
+    try {
+      await deleteContributionExceptionAttachment(member.id);
+      setMember((prev) => (prev ? { ...prev, contribution_exception_attachment_path: null } : prev));
+      toast.push("Low-income document removed");
+      refreshAudit(member.id);
+    } catch (error) {
+      console.error(error);
+      toast.push("Failed to remove the low-income document.");
+    } finally {
+      setExceptionAttachmentRemoving(false);
+    }
+  };
+
   const avatarUrl = member ? buildAvatarUrl(member.avatar_path) : null;
+  const exceptionAttachmentUrl = member ? buildAvatarUrl(member.contribution_exception_attachment_path) : null;
 
   const formatDate = (value?: string | null) => {
     if (!value) return "—";
@@ -1778,6 +1867,16 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const lastSundayPaymentLabel = sundayPayments.length ? formatDate(sundayPayments[0].posted_at) : "No payments yet";
   const unsavedLabel = hasUnsavedChanges ? "Unsaved changes" : "All changes saved";
   const canSendWelcome = Boolean(member.email && member.email.trim());
+  const showLowIncomeAttachment = member.contribution_exception_reason === "LowIncome";
+  const hasExceptionAttachmentRole =
+    permissions.hasRole("Admin") ||
+    permissions.hasRole("FinanceAdmin") ||
+    permissions.hasRole("Registrar") ||
+    permissions.hasRole("PublicRelations");
+  const canManageExceptionAttachment = hasExceptionAttachmentRole;
+  const canUploadExceptionAttachmentNow = canManageExceptionAttachment && !isCreateMode && Boolean(member.id);
+  const exceptionAttachmentName =
+    member.contribution_exception_attachment_path?.split("/").pop() || null;
 
   return (
     <div className="min-h-screen bg-bg text-ink flex flex-col">
@@ -2550,6 +2649,93 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       ))}
                     </Select>
                   </div>
+                  {showLowIncomeAttachment && (
+                    <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-900/10 p-4 space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-white/80 dark:bg-slate-900/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-300">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-ink">Low-income PDF (optional)</p>
+                            <p className="text-xs text-mute">Attach one supporting document for this exception.</p>
+                          </div>
+                        </div>
+                        {exceptionAttachmentUrl && (
+                          <a
+                            href={exceptionAttachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+                          >
+                            View PDF
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </a>
+                        )}
+                      </div>
+
+                      <input
+                        ref={exceptionAttachmentInputRef}
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="hidden"
+                        onChange={handleExceptionAttachmentChange}
+                        disabled={!canUploadExceptionAttachmentNow || exceptionAttachmentUploading || exceptionAttachmentRemoving}
+                      />
+
+                      <div className="rounded-lg border border-dashed border-emerald-300/80 dark:border-emerald-900/70 bg-white/70 dark:bg-slate-900/30 px-3 py-3 flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[11px] uppercase tracking-wide text-mute">Attachment</div>
+                          <div className="flex items-center gap-2 text-sm text-ink min-w-0">
+                            <Paperclip className="h-3.5 w-3.5 shrink-0 text-mute" />
+                            <span className="truncate">{exceptionAttachmentName ?? "No PDF uploaded yet"}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="soft"
+                            className="rounded-full"
+                            onClick={() => {
+                              if (!canManageExceptionAttachment) return;
+                              if (!canUploadExceptionAttachmentNow) {
+                                toast.push("Save the member first, then upload the optional low-income PDF.");
+                                return;
+                              }
+                              exceptionAttachmentInputRef.current?.click();
+                            }}
+                            disabled={!canManageExceptionAttachment || exceptionAttachmentUploading || exceptionAttachmentRemoving}
+                          >
+                            {exceptionAttachmentUploading
+                              ? "Uploading…"
+                              : exceptionAttachmentUrl
+                                ? "Replace PDF"
+                                : "Upload PDF"}
+                          </Button>
+                          {exceptionAttachmentUrl && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="rounded-full text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                              onClick={handleExceptionAttachmentRemove}
+                              disabled={!canUploadExceptionAttachmentNow || exceptionAttachmentUploading || exceptionAttachmentRemoving}
+                            >
+                              {exceptionAttachmentRemoving ? "Removing…" : "Remove"}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-mute">PDF only, up to 5MB.</p>
+                      {!canManageExceptionAttachment ? (
+                        <p className="text-[11px] text-mute">
+                          Admin, Finance Admin, Registrar, or Public Relations roles are required to upload this attachment.
+                        </p>
+                      ) : !canUploadExceptionAttachmentNow ? (
+                        <p className="text-[11px] text-mute">Save the member first, then upload the optional low-income PDF.</p>
+                      ) : null}
+                    </div>
+                  )}
                   {disableFinance && (
                     <p className="text-xs text-mute">
                       Finance Admin permissions are required to adjust giving details.

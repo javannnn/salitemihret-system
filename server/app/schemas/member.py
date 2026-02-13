@@ -95,6 +95,25 @@ class ChildOut(ChildBase):
         from_attributes = True
 
 
+class MemberChildSearchItem(BaseModel):
+    child_id: int
+    first_name: str
+    last_name: str
+    full_name: str
+    gender: Optional[str] = None
+    birth_date: Optional[date] = None
+    parent_member_id: int
+    parent_username: str
+    parent_first_name: str
+    parent_last_name: str
+    parent_email: Optional[str] = None
+    parent_phone: Optional[str] = None
+
+
+class MemberChildSearchResponse(BaseModel):
+    items: List[MemberChildSearchItem]
+
+
 class TagOut(BaseModel):
     id: int
     name: str
@@ -365,6 +384,7 @@ class MemberListOut(BaseModel):
     contribution_amount: Optional[float]
     contribution_currency: str
     contribution_exception_reason: Optional[str]
+    contribution_exception_attachment_path: Optional[str]
     family_count: int
     has_father_confessor: bool
 
@@ -489,6 +509,11 @@ class MemberListResponse(BaseModel):
 
 class AvatarUploadResponse(BaseModel):
     avatar_url: str
+
+
+class ContributionExceptionAttachmentUploadResponse(BaseModel):
+    attachment_url: str
+    attachment_name: str
 
 
 class ContributionPaymentCreate(BaseModel):

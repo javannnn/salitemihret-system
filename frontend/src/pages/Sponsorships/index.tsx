@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Filter, Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
+import { ChevronRight, Download, Filter, Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
 
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -23,6 +23,8 @@ import {
   createSponsorshipBudgetRound,
   createNewcomer,
   createSponsorship,
+  exportSponsorshipsCsv,
+  exportSponsorshipsExcel,
   deleteSponsorshipBudgetRound,
   getApiCapabilities,
   getSponsorContext,
@@ -203,6 +205,10 @@ const buildSponsorContextFallback = (member: Member): SponsorshipSponsorContext 
   member_id: member.id,
   member_name: `${member.first_name} ${member.last_name}`.trim(),
   member_status: member.status,
+  marital_status: member.marital_status ?? null,
+  spouse_name: null,
+  spouse_phone: null,
+  spouse_email: null,
   last_sponsorship_id: null,
   last_sponsorship_date: null,
   last_sponsorship_status: null,
@@ -470,6 +476,8 @@ export default function SponsorshipWorkspace() {
     q: "",
     page: 1,
   });
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<number>>(new Set());
+  const [exportingFormat, setExportingFormat] = useState<"csv" | "xlsx" | null>(null);
   const [staff, setStaff] = useState<StaffSummary[]>([]);
   const [sponsorSearch, setSponsorSearch] = useState("");
   const [sponsorResults, setSponsorResults] = useState<Member[]>([]);
@@ -721,6 +729,19 @@ export default function SponsorshipWorkspace() {
         toast.push("Unable to load sponsorship metrics.");
       });
   }, [canView, toast]);
+
+  useEffect(() => {
+    setSelectedCaseIds(new Set());
+  }, [
+    filters.status,
+    filters.beneficiary_type,
+    filters.sponsor_id,
+    filters.county,
+    filters.assigned_staff_id,
+    filters.created_from,
+    filters.created_to,
+    debouncedQuery,
+  ]);
 
   useEffect(() => {
     if (!canView) return;
@@ -992,6 +1013,11 @@ export default function SponsorshipWorkspace() {
   }
 
   const totalPages = sponsorships ? Math.ceil(sponsorships.total / PAGE_SIZE) : 1;
+  const visibleCaseItems = sponsorships?.items ?? [];
+  const selectedCaseArray = Array.from(selectedCaseIds).sort((a, b) => a - b);
+  const selectedVisibleCount = visibleCaseItems.filter((item) => selectedCaseIds.has(item.id)).length;
+  const allVisibleSelected = visibleCaseItems.length > 0 && selectedVisibleCount === visibleCaseItems.length;
+  const anyCaseSelected = selectedCaseArray.length > 0;
   const activeFilters = [
     filters.status && `Status: ${filters.status}`,
     filters.beneficiary_type && `Beneficiary: ${filters.beneficiary_type}`,
@@ -1038,6 +1064,77 @@ export default function SponsorshipWorkspace() {
     setWizardOpen(false);
     setDraftEditingId(null);
     updateSearchParams({ draft: null });
+  };
+
+  const handleToggleCaseSelection = (caseId: number) => {
+    setSelectedCaseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(caseId)) {
+        next.delete(caseId);
+      } else {
+        next.add(caseId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisible = () => {
+    setSelectedCaseIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleCaseItems.forEach((item) => next.delete(item.id));
+      } else {
+        visibleCaseItems.forEach((item) => next.add(item.id));
+      }
+      return next;
+    });
+  };
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCaseExport = async (format: "csv" | "xlsx") => {
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    const params = {
+      status: filters.status || undefined,
+      beneficiary_type: filters.beneficiary_type || undefined,
+      sponsor_id: filters.sponsor_id ? Number(filters.sponsor_id) : undefined,
+      county: filters.county || undefined,
+      assigned_staff_id: filters.assigned_staff_id ? Number(filters.assigned_staff_id) : undefined,
+      created_from: filters.created_from || undefined,
+      created_to: filters.created_to || undefined,
+      q: debouncedQuery || undefined,
+      ids: anyCaseSelected ? selectedCaseArray.join(",") : undefined,
+    };
+    const scope = anyCaseSelected ? "selected" : "filtered";
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `sponsorships-${scope}-${stamp}.${format}`;
+    try {
+      const blob =
+        format === "csv"
+          ? await exportSponsorshipsCsv(params)
+          : await exportSponsorshipsExcel(params);
+      triggerBlobDownload(blob, filename);
+      toast.push(
+        anyCaseSelected
+          ? `${selectedCaseArray.length} selected case${selectedCaseArray.length === 1 ? "" : "s"} exported (${format.toUpperCase()}).`
+          : `Filtered cases exported (${format.toUpperCase()}).`,
+      );
+    } catch (error) {
+      console.error(error);
+      toast.push(`Unable to export sponsorship cases as ${format.toUpperCase()}.`);
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const getBudgetDraft = useCallback(
@@ -1663,6 +1760,34 @@ export default function SponsorshipWorkspace() {
               <Filter className="h-4 w-4 mr-2" /> Filters
             </Button>
           )}
+          {activeView === "cases" && (
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => handleCaseExport("csv")}
+                disabled={Boolean(exportingFormat)}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {exportingFormat === "csv"
+                  ? "Preparing CSV…"
+                  : anyCaseSelected
+                    ? `Export selected CSV (${selectedCaseArray.length})`
+                    : "Export CSV"}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => handleCaseExport("xlsx")}
+                disabled={Boolean(exportingFormat)}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {exportingFormat === "xlsx"
+                  ? "Preparing Excel…"
+                  : anyCaseSelected
+                    ? `Export selected Excel (${selectedCaseArray.length})`
+                    : "Export Excel"}
+              </Button>
+            </>
+          )}
           <Button variant="ghost" onClick={handleRefresh}>
             <RefreshCcw className="h-4 w-4 mr-2" /> Refresh
           </Button>
@@ -1840,13 +1965,25 @@ export default function SponsorshipWorkspace() {
 
           <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <p className="text-sm font-medium">Cases</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">Cases</p>
+            {anyCaseSelected && <Badge variant="outline">{selectedCaseArray.length} selected</Badge>}
+          </div>
           <Badge variant="outline">{sponsorships?.total ?? 0} total</Badge>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-mute">
               <tr>
+                <th className="px-3 py-2 text-left w-10">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={handleToggleSelectAllVisible}
+                    aria-label="Select all visible sponsorship cases"
+                    className="accent-accent"
+                  />
+                </th>
                 <th className="px-4 py-2 text-left">Case ID</th>
                 <th className="px-4 py-2 text-left">Sponsor</th>
                 <th className="px-4 py-2 text-left">Beneficiary</th>
@@ -1861,7 +1998,7 @@ export default function SponsorshipWorkspace() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={10} className="px-4 py-6 text-center text-sm text-mute">
                     <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
                     Loading cases...
                   </td>
@@ -1869,6 +2006,15 @@ export default function SponsorshipWorkspace() {
               ) : sponsorships?.items.length ? (
                 sponsorships.items.map((item) => (
                   <tr key={item.id} className="border-t border-border/60 hover:bg-muted/20">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedCaseIds.has(item.id)}
+                        onChange={() => handleToggleCaseSelection(item.id)}
+                        aria-label={`Select sponsorship case ${item.id}`}
+                        className="accent-accent"
+                      />
+                    </td>
                     <td className="px-4 py-2 font-medium">SP-{String(item.id).padStart(4, "0")}</td>
                     <td className="px-4 py-2">
                       <p className="font-medium">
@@ -1952,7 +2098,7 @@ export default function SponsorshipWorkspace() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={10} className="px-4 py-6 text-center text-sm text-mute">
                     No cases found.
                   </td>
                 </tr>
@@ -2431,6 +2577,13 @@ export default function SponsorshipWorkspace() {
                         <div className="text-sm text-mute">
                           Father of repentance: {sponsorContext.father_of_repentance_name || "Not set"}
                         </div>
+                        {sponsorContext.marital_status === "Married" && (
+                          <div className="text-sm text-mute">
+                            Spouse: {sponsorContext.spouse_name || "Not set in family profile"}
+                            {sponsorContext.spouse_phone ? ` • ${sponsorContext.spouse_phone}` : ""}
+                            {sponsorContext.spouse_email ? ` • ${sponsorContext.spouse_email}` : ""}
+                          </div>
+                        )}
                         {sponsorContext.budget_usage && (
                           <div className="text-sm text-mute">
                             Budget usage: {sponsorContext.budget_usage.used_slots}/{sponsorContext.budget_usage.total_slots}

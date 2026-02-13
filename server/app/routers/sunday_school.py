@@ -72,10 +72,12 @@ def list_participants(
 
 @router.get("/participants/stats", response_model=SundaySchoolStats)
 def get_stats(
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*VIEW_ROLES)),
 ) -> SundaySchoolStats:
-    return sunday_school_service.participants_stats(db)
+    return sunday_school_service.participants_stats(db, start_date=start_date, end_date=end_date)
 
 
 @router.post("/participants", response_model=ParticipantOut, status_code=status.HTTP_201_CREATED)

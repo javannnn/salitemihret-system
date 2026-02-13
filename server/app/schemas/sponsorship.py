@@ -282,6 +282,10 @@ class SponsorshipSponsorContext(BaseModel):
     member_id: int
     member_name: str
     member_status: Optional[str]
+    marital_status: Optional[str]
+    spouse_name: Optional[str]
+    spouse_phone: Optional[str]
+    spouse_email: Optional[str]
     last_sponsorship_id: Optional[int]
     last_sponsorship_date: Optional[date]
     last_sponsorship_status: Optional[str]

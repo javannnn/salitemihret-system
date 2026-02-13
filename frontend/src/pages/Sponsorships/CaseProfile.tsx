@@ -394,6 +394,13 @@ export default function SponsorshipCaseProfile() {
                 <div>12-mo history: {sponsorContext?.history_count_last_12_months ?? 0}</div>
                 <div>Volunteer services: {sponsorContext?.volunteer_services?.join(", ") || "-"}</div>
                 <div>Father of repentance: {sponsorContext?.father_of_repentance_name || "-"}</div>
+                {sponsorContext?.marital_status === "Married" && (
+                  <div>
+                    Spouse: {sponsorContext.spouse_name || "Not set in family profile"}
+                    {sponsorContext.spouse_phone ? ` • ${sponsorContext.spouse_phone}` : ""}
+                    {sponsorContext.spouse_email ? ` • ${sponsorContext.spouse_email}` : ""}
+                  </div>
+                )}
               </div>
             </Card>
 

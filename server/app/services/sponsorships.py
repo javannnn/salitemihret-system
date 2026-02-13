@@ -307,11 +307,9 @@ def _serialize(db: Session, sponsorship: Sponsorship) -> SponsorshipOut:
     )
 
 
-def list_sponsorships(
+def _build_sponsorship_query(
     db: Session,
     *,
-    page: int,
-    page_size: int,
     status_filter: str | None = None,
     program: str | None = None,
     sponsor_id: int | None = None,
@@ -329,7 +327,8 @@ def list_sponsorships(
     end_date: date | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
-) -> SponsorshipListResponse:
+    ids: list[int] | None = None,
+):
     query = (
         db.query(Sponsorship)
         .options(
@@ -342,6 +341,8 @@ def list_sponsorships(
         .order_by(Sponsorship.updated_at.desc())
     )
 
+    if ids:
+        query = query.filter(Sponsorship.id.in_(ids))
     if status_filter:
         query = query.filter(cast(Sponsorship.status, String) == status_filter)
     if program:
@@ -398,6 +399,52 @@ def list_sponsorships(
             | func.lower(func.coalesce(Newcomer.first_name, "")).like(like)
             | func.lower(func.coalesce(Newcomer.last_name, "")).like(like)
         )
+    return query
+
+
+def list_sponsorships(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+    status_filter: str | None = None,
+    program: str | None = None,
+    sponsor_id: int | None = None,
+    newcomer_id: int | None = None,
+    frequency: str | None = None,
+    beneficiary_type: str | None = None,
+    county: str | None = None,
+    assigned_staff_id: int | None = None,
+    budget_month: int | None = None,
+    budget_year: int | None = None,
+    budget_round_id: int | None = None,
+    search: str | None = None,
+    has_newcomer: bool | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+) -> SponsorshipListResponse:
+    query = _build_sponsorship_query(
+        db,
+        status_filter=status_filter,
+        program=program,
+        sponsor_id=sponsor_id,
+        newcomer_id=newcomer_id,
+        frequency=frequency,
+        beneficiary_type=beneficiary_type,
+        county=county,
+        assigned_staff_id=assigned_staff_id,
+        budget_month=budget_month,
+        budget_year=budget_year,
+        budget_round_id=budget_round_id,
+        search=search,
+        has_newcomer=has_newcomer,
+        start_date=start_date,
+        end_date=end_date,
+        created_from=created_from,
+        created_to=created_to,
+    )
 
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -407,6 +454,52 @@ def list_sponsorships(
         page=page,
         page_size=page_size,
     )
+
+
+def get_sponsorships_for_export(
+    db: Session,
+    *,
+    status_filter: str | None = None,
+    program: str | None = None,
+    sponsor_id: int | None = None,
+    newcomer_id: int | None = None,
+    frequency: str | None = None,
+    beneficiary_type: str | None = None,
+    county: str | None = None,
+    assigned_staff_id: int | None = None,
+    budget_month: int | None = None,
+    budget_year: int | None = None,
+    budget_round_id: int | None = None,
+    search: str | None = None,
+    has_newcomer: bool | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+    ids: list[int] | None = None,
+) -> list[Sponsorship]:
+    query = _build_sponsorship_query(
+        db,
+        status_filter=status_filter,
+        program=program,
+        sponsor_id=sponsor_id,
+        newcomer_id=newcomer_id,
+        frequency=frequency,
+        beneficiary_type=beneficiary_type,
+        county=county,
+        assigned_staff_id=assigned_staff_id,
+        budget_month=budget_month,
+        budget_year=budget_year,
+        budget_round_id=budget_round_id,
+        search=search,
+        has_newcomer=has_newcomer,
+        start_date=start_date,
+        end_date=end_date,
+        created_from=created_from,
+        created_to=created_to,
+        ids=ids,
+    )
+    return query.all()
 
 
 def _ensure_no_conflict(
@@ -835,8 +928,10 @@ def trigger_reminder(db: Session, sponsorship_id: int) -> SponsorshipOut:
     return _serialize(db, sponsorship)
 
 
-def get_sponsorship_metrics(db: Session) -> SponsorshipMetrics:
+def get_sponsorship_metrics(db: Session, *, start_date: date | None = None, end_date: date | None = None) -> SponsorshipMetrics:
     today = date.today()
+    range_start = datetime.combine(start_date, datetime.min.time()) if start_date else None
+    range_end = datetime.combine(end_date, datetime.max.time()) if end_date else None
     status_column = cast(Sponsorship.status, String)
     active_cases = (
         db.query(func.count(Sponsorship.id))
@@ -856,22 +951,30 @@ def get_sponsorship_metrics(db: Session) -> SponsorshipMetrics:
         .scalar()
         or 0
     )
-    month_executed = (
+    executed_query = (
         db.query(func.count(SponsorshipStatusAudit.id))
         .filter(SponsorshipStatusAudit.to_status == "Completed")
-        .filter(func.extract("month", SponsorshipStatusAudit.changed_at) == today.month)
-        .filter(func.extract("year", SponsorshipStatusAudit.changed_at) == today.year)
-        .scalar()
-        or 0
     )
+    if range_start:
+        executed_query = executed_query.filter(SponsorshipStatusAudit.changed_at >= range_start)
+    if range_end:
+        executed_query = executed_query.filter(SponsorshipStatusAudit.changed_at <= range_end)
+    if not range_start and not range_end:
+        executed_query = (
+            executed_query
+            .filter(func.extract("month", SponsorshipStatusAudit.changed_at) == today.month)
+            .filter(func.extract("year", SponsorshipStatusAudit.changed_at) == today.year)
+        )
+    month_executed = executed_query.scalar() or 0
 
+    budget_reference = end_date or today
     capacity_row = (
         db.query(
             func.coalesce(func.sum(Sponsorship.budget_slots), 0).label("total_slots"),
             func.coalesce(func.sum(Sponsorship.used_slots), 0).label("used_slots"),
         )
-        .filter(Sponsorship.budget_month == today.month)
-        .filter(Sponsorship.budget_year == today.year)
+        .filter(Sponsorship.budget_month == budget_reference.month)
+        .filter(Sponsorship.budget_year == budget_reference.year)
         .first()
     )
     current_budget = None
@@ -1058,7 +1161,15 @@ def delete_budget_round(db: Session, round_id: int) -> None:
 
 
 def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContext:
-    sponsor = db.query(Member).filter(Member.id == member_id).first()
+    sponsor = (
+        db.query(Member)
+        .options(
+            joinedload(Member.spouse),
+            joinedload(Member.father_confessor),
+        )
+        .filter(Member.id == member_id)
+        .first()
+    )
     if not sponsor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
@@ -1131,10 +1242,20 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
             "utilization_percent": utilization_percent,
         }
 
+    marital_status = _coerce_literal(getattr(sponsor, "marital_status", None))
+    spouse = getattr(sponsor, "spouse", None)
+    spouse_name = getattr(spouse, "full_name", None) if marital_status == "Married" else None
+    spouse_phone = getattr(spouse, "phone", None) if marital_status == "Married" else None
+    spouse_email = getattr(spouse, "email", None) if marital_status == "Married" else None
+
     return SponsorshipSponsorContext(
         member_id=sponsor.id,
         member_name=f"{sponsor.first_name} {sponsor.last_name}".strip(),
         member_status=sponsor.status,
+        marital_status=marital_status,
+        spouse_name=spouse_name,
+        spouse_phone=spouse_phone,
+        spouse_email=spouse_email,
         last_sponsorship_id=last_case.id if last_case else None,
         last_sponsorship_date=last_date,
         last_sponsorship_status=last_status,

@@ -144,6 +144,7 @@ export default function MembersList() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
 
 
   const handleArchive = async (id: number) => {
@@ -157,15 +158,6 @@ export default function MembersList() {
     }
   };
 
-  const handleSelect = (id: number) => {
-    const newSelected = new Set(selectedIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedIds(newSelected);
-  };
   const [accessIssue, setAccessIssue] = useState<{ status: number; message: string } | null>(null);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [draftFilters, setDraftFilters] = useState<Filters>(INITIAL_FILTERS);
@@ -206,6 +198,10 @@ export default function MembersList() {
     sessionStorage.setItem("members-view-mode", viewMode);
   }, [viewMode]);
 
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
   const syncSearchParams = useCallback(
     ({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage }: {
       query: string;
@@ -230,7 +226,58 @@ export default function MembersList() {
     [setSearchParams]
   );
 
+  const buildMembersFilterParams = useCallback(() => {
+    const params: Record<string, string | undefined> = {
+      q: query || undefined,
+      status: filters.status || undefined,
+      gender: filters.gender || undefined,
+      tag: filters.tag || undefined,
+      ministry: filters.ministry || undefined,
+      district: filters.district || undefined,
+      has_children: filters.hasChildren ? "true" : undefined,
+      missing_phone: filters.missingPhone ? "true" : undefined,
+      new_this_month: filters.newThisMonth ? "true" : undefined,
+      sort: sort || undefined,
+    };
+    return params;
+  }, [query, filters, sort]);
+
+  const buildMembersListSearchParams = useCallback(
+    (pageNumber: number, pageSize: number) => {
+      const params = new URLSearchParams({
+        page: String(pageNumber),
+        page_size: String(pageSize),
+      });
+      Object.entries(buildMembersFilterParams()).forEach(([key, value]) => {
+        if (!value) return;
+        params.set(key, value);
+      });
+      return params;
+    },
+    [buildMembersFilterParams]
+  );
+
+  const fetchAllFilteredMemberIds = useCallback(async (): Promise<number[]> => {
+    const pageSize = 100;
+    let currentPage = 1;
+    const ids: number[] = [];
+
+    while (true) {
+      const params = buildMembersListSearchParams(currentPage, pageSize);
+      const result = await api<Page<Member>>(`/members?${params.toString()}`);
+      ids.push(...result.items.map((member) => member.id));
+      if (ids.length >= result.total || result.items.length === 0) {
+        break;
+      }
+      currentPage += 1;
+    }
+
+    return ids;
+  }, [buildMembersListSearchParams]);
+
   const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const selectedCount = selectedArray.length;
+  const allFilteredSelected = Boolean(data && data.total > 0 && selectedCount === data.total);
   const selectedMembersList = useMemo(() => {
     if (!data) return [];
     return data.items
@@ -238,25 +285,18 @@ export default function MembersList() {
       .map((member) => ({ id: member.id, name: `${member.first_name} ${member.last_name}` }));
   }, [data, selectedIds]);
   const currentSpouseDraft = spouseMember.id ? spouseDraftsRef.current.get(spouseMember.id) ?? null : null;
-  const anySelected = selectedArray.length > 0;
+  const anySelected = selectedCount > 0;
   useEffect(() => {
     if (!canBulk && selectedIds.size > 0) {
-      setSelectedIds(new Set());
+      clearSelection();
     }
-  }, [canBulk, selectedIds]);
+  }, [canBulk, selectedIds, clearSelection]);
 
 
   const applyMembersResult = useCallback((result: Page<Member>) => {
     setData(result);
     setRowMenu(null);
     setActionsMenuOpen(false);
-    setSelectedIds((prev) => {
-      const keep = new Set<number>();
-      result.items.forEach((item) => {
-        if (prev.has(item.id)) keep.add(item.id);
-      });
-      return keep;
-    });
   }, []);
 
   const loadMembers = useCallback(
@@ -280,6 +320,9 @@ export default function MembersList() {
       const nextFilters = overrides?.filters ?? filters;
       const nextQuery = overrides?.query ?? query;
       const nextSort = overrides?.sort ?? sort;
+      if (overrides?.filters || overrides?.query !== undefined || overrides?.sort !== undefined) {
+        clearSelection();
+      }
       if (overrides?.filters) {
         setFilters(overrides.filters);
         setDraftFilters(overrides.filters);
@@ -364,6 +407,7 @@ export default function MembersList() {
     },
     [
       applyMembersResult,
+      clearSelection,
       filters,
       permissions.viewMembers,
       query,
@@ -514,29 +558,46 @@ export default function MembersList() {
     });
   };
 
-  const toggleSelectAll = () => {
+  const resolveSelectedMemberIds = useCallback((): number[] => {
+    return selectedArray;
+  }, [selectedArray]);
+
+  const toggleSelectAll = async () => {
     if (!canBulk || !data) return;
-    if (!data) return;
-    if (selectedIds.size === data.items.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(data.items.map((item) => item.id)));
+    if (selectingAll) return;
+    if (allFilteredSelected) {
+      clearSelection();
+      return;
+    }
+
+    setSelectingAll(true);
+    try {
+      const ids = await fetchAllFilteredMemberIds();
+      setSelectedIds(new Set(ids));
+      toast.push(`Selected ${ids.length} member${ids.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      console.error(error);
+      toast.push("Failed to select all filtered members.");
+    } finally {
+      setSelectingAll(false);
     }
   };
 
   const handleBulkArchive = async () => {
     if (!canBulk || !anySelected) return;
+    const targetIds = resolveSelectedMemberIds();
+    if (!targetIds.length) return;
     const confirmed = window.confirm(
-      `Archive ${selectedArray.length} selected member${selectedArray.length === 1 ? "" : "s"}?`
+      `Archive ${targetIds.length} selected member${targetIds.length === 1 ? "" : "s"}?`
     );
     if (!confirmed) return;
     setBulkWorking(true);
     try {
       await Promise.all(
-        selectedArray.map((id) => api(`/members/${id}`, { method: "DELETE" }))
+        targetIds.map((id) => api(`/members/${id}`, { method: "DELETE" }))
       );
       toast.push("Selected members archived");
-      setSelectedIds(new Set());
+      clearSelection();
       loadMembers(page);
     } catch (error) {
       console.error(error);
@@ -567,18 +628,7 @@ export default function MembersList() {
     }
     setExporting(true);
     try {
-      await downloadCsv({
-        q: query || undefined,
-        status: filters.status || undefined,
-        gender: filters.gender || undefined,
-        tag: filters.tag || undefined,
-        ministry: filters.ministry || undefined,
-        district: filters.district || undefined,
-        has_children: filters.hasChildren ? "true" : undefined,
-        missing_phone: filters.missingPhone ? "true" : undefined,
-        new_this_month: filters.newThisMonth ? "true" : undefined,
-        sort,
-      });
+      await downloadCsv(buildMembersFilterParams());
       toast.push("Export ready");
     } catch (error) {
       console.error(error);
@@ -593,7 +643,7 @@ export default function MembersList() {
       `Import complete — inserted ${report.inserted}, updated ${report.updated}, failed ${report.failed}`
     );
     setWizardOpen(false);
-    setSelectedIds(new Set());
+    clearSelection();
     loadMembers(1);
   };
 
@@ -752,7 +802,16 @@ export default function MembersList() {
       return;
     }
     try {
-      await downloadCsv({ ids: selectedArray.join(",") }, "members-selected.csv");
+      if (allFilteredSelected) {
+        await downloadCsv(buildMembersFilterParams(), "members-selected.csv");
+      } else {
+        const targetIds = resolveSelectedMemberIds();
+        if (!targetIds.length) {
+          toast.push("Select members first");
+          return;
+        }
+        await downloadCsv({ ids: targetIds.join(",") }, "members-selected.csv");
+      }
       toast.push("Export ready");
     } catch (error) {
       console.error(error);
@@ -797,8 +856,13 @@ export default function MembersList() {
         });
         toast.push("Father confessor updated");
       } else {
+        const targetIds = resolveSelectedMemberIds();
+        if (!targetIds.length) {
+          toast.push("Select members first");
+          return;
+        }
         await Promise.all(
-          selectedArray.map((id) =>
+          targetIds.map((id) =>
             api(`/members/${id}`, {
               method: "PATCH",
               body: JSON.stringify(payload),
@@ -1176,8 +1240,8 @@ export default function MembersList() {
             {canBulk && anySelected && (
               <Card className="p-4 flex flex-wrap gap-4 items-center justify-between border border-accent/30 bg-accent/5">
                 <div className="text-sm">
-                  <strong>{selectedArray.length}</strong> member
-                  {selectedArray.length === 1 ? "" : "s"} selected
+                  <strong>{selectedCount}</strong> member
+                  {selectedCount === 1 ? "" : "s"} selected
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
                   {permissions.editSpiritual && (
@@ -1327,7 +1391,7 @@ export default function MembersList() {
                     })}
                     onItemClick={(item) => {
                       if (item._isSelectionToggle) {
-                        handleSelect(item.id);
+                        toggleSelect(item.id);
                       } else {
                         handleRowClick(item.id);
                       }
@@ -1347,8 +1411,11 @@ export default function MembersList() {
                               type="button"
                               onClick={toggleSelectAll}
                               className="text-accent"
+                              disabled={selectingAll}
                             >
-                              {selectedIds.size === rows.length ? (
+                              {selectingAll ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : allFilteredSelected ? (
                                 <CheckSquare className="h-4 w-4" />
                               ) : (
                                 <Square className="h-4 w-4" />
@@ -1855,9 +1922,10 @@ export default function MembersList() {
                     )}
                     {assignContext?.mode === "bulk" && (
                       <p className="text-sm text-mute">
-                        For <span className="text-foreground font-medium">{selectedIds.size} members</span>
+                        For <span className="text-foreground font-medium">{selectedCount} members</span>
                       </p>
-                    )}      </div>
+                    )}
+                  </div>
                   <Button type="button" variant="ghost" onClick={() => closeAssignModal()}>
                     Close
                   </Button>
