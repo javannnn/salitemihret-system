@@ -19,6 +19,7 @@ import {
   listAdminUsers,
   listHouseholds,
   listPayments,
+  searchMembers,
   listVolunteerGroups,
   listVolunteerWorkers,
   promoteChild,
@@ -231,9 +232,8 @@ export default function Dashboard() {
     const normalizedTerm = term.toLowerCase();
     const tasks: Promise<SmartSearchResult[]>[] = [];
     if (permissions.viewMembers) {
-      const params = new URLSearchParams({ page: "1", page_size: "5", search: term });
       tasks.push(
-        api<Page<Member>>(`/members?${params.toString()}`).then((rs) =>
+        searchMembers(term, 5).then((rs) =>
           rs.items.map((member) => ({
             id: `member-${member.id}`,
             section: "Members",
@@ -333,10 +333,25 @@ export default function Dashboard() {
     setSearchMessage("Searching records…");
     setSearchResults([]);
     let cancelled = false;
-    Promise.all(tasks)
+    Promise.allSettled(tasks)
       .then((groups) => {
         if (cancelled) return;
-        const flattened = groups
+        const successfulGroups: SmartSearchResult[][] = [];
+        let failedCount = 0;
+        groups.forEach((group) => {
+          if (group.status === "fulfilled") {
+            successfulGroups.push(group.value);
+          } else {
+            failedCount += 1;
+          }
+        });
+        if (!successfulGroups.length) {
+          setSearchStatus("error");
+          setSearchMessage("We couldn't search right now. Try again later.");
+          setSearchResults([]);
+          return;
+        }
+        const flattened = successfulGroups
           .flat()
           .filter((item) => `${item.title} ${item.subtitle} ${item.badge}`.toLowerCase().includes(normalizedTerm));
         if (flattened.length === 0) {
@@ -344,7 +359,11 @@ export default function Dashboard() {
           setSearchMessage("No matches found.");
         } else {
           setSearchStatus("ready");
-          setSearchMessage("Select a result to open details.");
+          setSearchMessage(
+            failedCount > 0
+              ? "Some sources are unavailable. Select a result to open details."
+              : "Select a result to open details."
+          );
         }
         setSearchResults(flattened);
       })

@@ -5,7 +5,7 @@ import io
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Literal, Sequence
 
 from slugify import slugify
 from sqlalchemy import func
@@ -85,11 +85,29 @@ class ImportErrorDetail:
 
 
 @dataclass
+class ImportSuccessDetail:
+    row: int
+    action: Literal["inserted", "updated"]
+    member_id: int
+    username: str
+    full_name: str
+
+
+@dataclass
 class ImportReport:
     inserted: int = 0
     updated: int = 0
     failed: int = 0
     errors: List[ImportErrorDetail] = field(default_factory=list)
+    successes: List[ImportSuccessDetail] = field(default_factory=list)
+
+
+@dataclass
+class UpsertResult:
+    action: Literal["inserted", "updated"]
+    member_id: int
+    username: str
+    full_name: str
 
 
 class ImportRowError(Exception):
@@ -125,12 +143,21 @@ def import_members_from_csv(db: Session, file_bytes: bytes, actor_id: int) -> Im
 
         try:
             cleaned = _clean_row(row_index, normalized_row)
-            action = _upsert_member(db, row_index, cleaned, actor_id)
+            result = _upsert_member(db, row_index, cleaned, actor_id)
             db.commit()
-            if action == "inserted":
+            if result.action == "inserted":
                 report.inserted += 1
             else:
                 report.updated += 1
+            report.successes.append(
+                ImportSuccessDetail(
+                    row=row_index,
+                    action=result.action,
+                    member_id=result.member_id,
+                    username=result.username,
+                    full_name=result.full_name,
+                )
+            )
         except ImportRowError as exc:
             db.rollback()
             report.failed += 1
@@ -401,10 +428,10 @@ def _normalize_contribution_values(
         if exception_reason not in ALLOWED_CONTRIBUTION_EXCEPTION_REASONS:
             raise ImportRowError(row_number, f"Invalid contribution exception reason '{exception_reason}'")
     else:
-        if normalized_amount != DEFAULT_CONTRIBUTION_AMOUNT:
+        if normalized_amount < DEFAULT_CONTRIBUTION_AMOUNT:
             raise ImportRowError(
                 row_number,
-                f"Contribution amount must be {DEFAULT_CONTRIBUTION_AMOUNT} CAD unless an exception reason is provided",
+                f"Contribution amount must be at least {DEFAULT_CONTRIBUTION_AMOUNT} CAD unless an exception reason is provided",
             )
     return normalized_amount, exception_reason
 
@@ -459,7 +486,7 @@ def _split_multi_value(value: str) -> list[str]:
     return list(unique.values())
 
 
-def _upsert_member(db: Session, row_number: int, data: dict[str, Any], actor_id: int) -> str:
+def _upsert_member(db: Session, row_number: int, data: dict[str, Any], actor_id: int) -> UpsertResult:
     member = _locate_member(db, data)
     is_new = member is None
 
@@ -522,7 +549,13 @@ def _upsert_member(db: Session, row_number: int, data: dict[str, Any], actor_id:
     db.flush()
     record_member_changes(db, member, previous_snapshot, actor_id)
 
-    return "inserted" if is_new else "updated"
+    action: Literal["inserted", "updated"] = "inserted" if is_new else "updated"
+    return UpsertResult(
+        action=action,
+        member_id=member.id,
+        username=member.username or "",
+        full_name=f"{member.first_name or ''} {member.last_name or ''}".strip(),
+    )
 
 
 def _locate_member(db: Session, data: dict[str, Any]) -> Member | None:

@@ -5,6 +5,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, validator
 
+from app.schemas.member import normalize_optional_member_phone
+
 VolunteerServiceType = Literal["Holiday", "GeneralService"]
 
 
@@ -69,6 +71,10 @@ class VolunteerWorkerBase(BaseModel):
             raise ValueError("Name is required")
         return cleaned
 
+    @validator("phone")
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
+
 
 class VolunteerWorkerCreate(VolunteerWorkerBase):
     pass
@@ -91,6 +97,10 @@ class VolunteerWorkerUpdate(BaseModel):
         if not cleaned:
             raise ValueError("Name is required")
         return cleaned
+
+    @validator("phone")
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
 
 
 class VolunteerWorkerOut(VolunteerWorkerBase):

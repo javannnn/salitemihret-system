@@ -639,10 +639,7 @@ export default function MembersList() {
   };
 
   const handleImportComplete = (report: ImportReport) => {
-    toast.push(
-      `Import complete — inserted ${report.inserted}, updated ${report.updated}, failed ${report.failed}`
-    );
-    setWizardOpen(false);
+    toast.push(`Import complete — inserted ${report.inserted}, updated ${report.updated}, failed ${report.failed}`);
     clearSelection();
     loadMembers(1);
   };

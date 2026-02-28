@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import asc, desc, func, or_
+from sqlalchemy import asc, desc, func, literal, or_
 from sqlalchemy.orm import Query, Session
 
 from app.models.member import Child, Member
@@ -17,9 +17,6 @@ SORTABLE_FIELDS = {
     "created_at": Member.created_at,
     "updated_at": Member.updated_at,
 }
-
-
-from sqlalchemy.orm import Query, Session
 
 
 def build_members_query(
@@ -51,12 +48,29 @@ def build_members_query(
             query = query.filter(Member.status == status_filter)
 
     if q:
-        pattern = f"%{q.lower()}%"
+        normalized_q = " ".join(q.lower().split())
+        pattern = f"%{normalized_q}%"
+        first_last_name = func.lower(
+            func.trim(
+                func.coalesce(Member.first_name, "")
+                + literal(" ")
+                + func.coalesce(Member.last_name, "")
+            )
+        )
+        last_first_name = func.lower(
+            func.trim(
+                func.coalesce(Member.last_name, "")
+                + literal(" ")
+                + func.coalesce(Member.first_name, "")
+            )
+        )
         query = query.filter(
             or_(
                 func.lower(Member.first_name).like(pattern),
                 func.lower(Member.middle_name).like(pattern),
                 func.lower(Member.last_name).like(pattern),
+                first_last_name.like(pattern),
+                last_first_name.like(pattern),
                 func.lower(Member.username).like(pattern),
                 func.lower(Member.email).like(pattern),
                 func.lower(Member.phone).like(pattern),

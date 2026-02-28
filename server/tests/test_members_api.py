@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from app.models.member import Member
 from app.models.ministry import Ministry
@@ -84,6 +84,58 @@ def test_create_member_future_birth_date(client, authorize, registrar_user):
     assert response.status_code == 422
 
 
+def test_create_member_rejects_future_child_birth_date(client, authorize, registrar_user):
+    authorize(registrar_user)
+    payload = {
+        "first_name": "Parent",
+        "last_name": "Member",
+        "status": "Active",
+        "phone": "6135550123",
+        "pays_contribution": True,
+        "children": [
+            {
+                "first_name": "Future",
+                "last_name": "Child",
+                "birth_date": (date.today() + timedelta(days=1)).isoformat(),
+            }
+        ],
+    }
+    response = client.post("/members", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_member_allows_contribution_above_minimum_without_exception(client, authorize, registrar_user):
+    authorize(registrar_user)
+    payload = {
+        "first_name": "Meron",
+        "last_name": "Asfaw",
+        "status": "Active",
+        "phone": "6135550155",
+        "pays_contribution": True,
+        "contribution_amount": 120.0,
+    }
+    response = client.post("/members", json=payload)
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["contribution_amount"] == 120.0
+    assert data["contribution_exception_reason"] is None
+
+
+def test_create_member_rejects_contribution_below_minimum_without_exception(client, authorize, registrar_user):
+    authorize(registrar_user)
+    payload = {
+        "first_name": "Liya",
+        "last_name": "Bekele",
+        "status": "Active",
+        "phone": "6135550144",
+        "pays_contribution": True,
+        "contribution_amount": 50.0,
+    }
+    response = client.post("/members", json=payload)
+    assert response.status_code == 400
+    assert "at least 75.00 CAD" in response.text
+
+
 def test_update_member_regenerates_username(client, authorize, registrar_user, sample_member, db_session):
     authorize(registrar_user)
     response = client.put(
@@ -104,6 +156,23 @@ def test_patch_member_updates_status(client, authorize, admin_user, sample_membe
     assert response.status_code == 200
     member = db_session.get(Member, sample_member.id)
     assert member.status == "Inactive"
+
+
+def test_patch_member_rejects_future_child_birth_date(client, authorize, admin_user, sample_member):
+    authorize(admin_user)
+    response = client.patch(
+        f"/members/{sample_member.id}",
+        json={
+            "children": [
+                {
+                    "first_name": "Future",
+                    "last_name": "Child",
+                    "birth_date": (date.today() + timedelta(days=1)).isoformat(),
+                }
+            ]
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_delete_member_soft_delete(client, authorize, admin_user, sample_member, db_session):
@@ -157,6 +226,24 @@ def test_list_filter_by_gender_and_tag(client, authorize, office_admin_user, db_
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["username"] == sample_member.username
+
+
+def test_list_members_matches_full_name_search(client, authorize, office_admin_user, sample_member):
+    authorize(office_admin_user)
+    response = client.get("/members?q=Abeba Tesfaye")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == sample_member.id
+
+
+def test_list_members_matches_last_name_first_search(client, authorize, office_admin_user, sample_member):
+    authorize(office_admin_user)
+    response = client.get("/members?q=Tesfaye Abeba")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == sample_member.id
 
 
 def test_list_includes_archived_when_requested(client, authorize, admin_user, sample_member, db_session):

@@ -795,7 +795,7 @@ export default function SchoolsWorkspace() {
                       <th className="py-2 pr-4">Child</th>
                       <th className="py-2 pr-4">Parent</th>
                       <th className="py-2 pr-4">Service</th>
-                      <th className="py-2 pr-4">Monthly fee</th>
+                      <th className="py-2 pr-4">Contribution</th>
                       <th className="py-2 pr-4">Last payment</th>
                       <th className="py-2 pr-4 text-right">Actions</th>
                     </tr>
@@ -832,7 +832,7 @@ export default function SchoolsWorkspace() {
                               }}
                             >
                               <Wallet className="h-4 w-4 mr-1" />
-                              Record payment
+                              Record contribution
                             </Button>
                           )}
                         </td>
@@ -1063,7 +1063,7 @@ export default function SchoolsWorkspace() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Fixed monthly amount</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Contribution</label>
                       <Input value={currency(meta?.monthly_amount ?? 0)} disabled />
                     </div>
                   </div>
@@ -1096,10 +1096,10 @@ export default function SchoolsWorkspace() {
 
           <AnimatePresence>
             {showPaymentModal && selectedEnrollment && (
-              <Modal title="Record Abenet payment" onClose={() => setShowPaymentModal(false)}>
+              <Modal title="Record Abenet contribution" onClose={() => setShowPaymentModal(false)}>
                 <div className="space-y-3">
                   <p className="text-sm">
-                    Recording payment for{" "}
+                    Recording contribution for{" "}
                     <strong>
                       {selectedEnrollment.child.first_name} {selectedEnrollment.child.last_name}
                     </strong>{" "}
@@ -1107,7 +1107,7 @@ export default function SchoolsWorkspace() {
                   </p>
                   <div className="grid md:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Amount</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Contribution</label>
                       <Input value={currency(meta?.monthly_amount ?? 0)} disabled readOnly />
                     </div>
                     <div>
@@ -1144,7 +1144,7 @@ export default function SchoolsWorkspace() {
                     >
                       Cancel
                     </Button>
-                    <Button onClick={handlePaymentSubmit}>Record payment</Button>
+                    <Button onClick={handlePaymentSubmit}>Record contribution</Button>
                   </div>
                 </div>
               </Modal>

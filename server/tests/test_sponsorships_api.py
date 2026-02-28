@@ -18,7 +18,8 @@ def test_sponsorship_flow_with_newcomer_conversion(
     newcomer_payload = {
         "first_name": "Hanna",
         "last_name": "Bekele",
-        "contact_phone": "+251900777000",
+        "contact_phone": "+16135550199",
+        "contact_email": "hanna.bekele@example.com",
         "arrival_date": date.today().isoformat(),
         "service_type": "Family Settlement",
         "notes": "Arrived last Sunday",
@@ -90,6 +91,33 @@ def test_newcomer_requires_contact_info(client, authorize, public_relations_user
         "first_name": "Lensa",
         "last_name": "Abebe",
         "arrival_date": date.today().isoformat(),
+        "service_type": "Welcome",
+    }
+    resp = client.post("/newcomers", json=payload)
+    assert resp.status_code == 422
+
+
+def test_newcomer_requires_email_even_when_phone_is_present(client, authorize, public_relations_user):
+    authorize(public_relations_user)
+    payload = {
+        "first_name": "Meron",
+        "last_name": "Abebe",
+        "arrival_date": date.today().isoformat(),
+        "contact_phone": "+16135550100",
+        "service_type": "Welcome",
+    }
+    resp = client.post("/newcomers", json=payload)
+    assert resp.status_code == 422
+
+
+def test_newcomer_requires_canadian_phone_format(client, authorize, public_relations_user):
+    authorize(public_relations_user)
+    payload = {
+        "first_name": "Selam",
+        "last_name": "Abebe",
+        "arrival_date": date.today().isoformat(),
+        "contact_phone": "+251900777000",
+        "contact_email": "selam.abebe@example.com",
         "service_type": "Welcome",
     }
     resp = client.post("/newcomers", json=payload)

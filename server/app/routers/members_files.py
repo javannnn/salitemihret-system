@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_roles
@@ -29,6 +29,13 @@ ALLOWED_CONTENT_TYPES: dict[str, str] = {
     "image/webp": "webp",
 }
 ALLOWED_EXCEPTION_ATTACHMENT_MIME_TYPES = {"application/pdf"}
+
+
+def _is_low_income_exception(value: str | None) -> bool:
+    if not value:
+        return False
+    normalized = value.strip().replace(" ", "").replace("_", "").lower()
+    return normalized == "lowincome"
 
 
 def _relative_avatar_path(filename: str) -> str:
@@ -115,6 +122,7 @@ def upload_member_avatar(
 def upload_contribution_exception_attachment(
     member_id: int,
     file: UploadFile = File(...),
+    exception_reason: str | None = Form(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*EXCEPTION_ATTACHMENT_ROLES)),
 ) -> ContributionExceptionAttachmentUploadResponse:
@@ -125,7 +133,10 @@ def upload_contribution_exception_attachment(
     )
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
-    if member.contribution_exception_reason != "LowIncome":
+    should_set_low_income = _is_low_income_exception(exception_reason) and not _is_low_income_exception(
+        member.contribution_exception_reason
+    )
+    if not _is_low_income_exception(member.contribution_exception_reason) and not should_set_low_income:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Select Low income exception before uploading supporting documents.",
@@ -156,6 +167,8 @@ def upload_contribution_exception_attachment(
 
     old_path = member.contribution_exception_attachment_path
     old_snapshot = snapshot_member(member)
+    if should_set_low_income:
+        member.contribution_exception_reason = "LowIncome"
     member.contribution_exception_attachment_path = _relative_exception_attachment_path(filename)
     member.updated_by_id = current_user.id
 

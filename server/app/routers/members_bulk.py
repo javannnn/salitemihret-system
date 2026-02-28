@@ -31,6 +31,7 @@ from app.schemas.member import (
     ChildPromotionResultItem,
     ChildPromotionRunResponse,
     ImportErrorItem,
+    ImportSuccessItem,
     ImportReportResponse,
     MemberAuditFeedItem,
     MemberMetaResponse,
@@ -359,6 +360,16 @@ def import_members(
         updated=report.updated,
         failed=report.failed,
         errors=[ImportErrorItem(row=error.row, reason=error.reason) for error in report.errors],
+        successes=[
+            ImportSuccessItem(
+                row=success.row,
+                action=success.action,
+                member_id=success.member_id,
+                username=success.username,
+                full_name=success.full_name,
+            )
+            for success in report.successes
+        ],
     )
 
 

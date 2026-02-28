@@ -480,7 +480,7 @@ export default function NewcomerProfile() {
                   <Phone className="h-4 w-4" /> {newcomer.contact_phone || newcomer.contact_whatsapp || "-"}
                 </div>
                 <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" /> {newcomer.county || "No county"}
+                  <MapPin className="h-4 w-4" /> Province: {newcomer.county || "No province"}
                 </div>
                 <div>Interpreter: {newcomer.interpreter_required ? "Required" : "No"}</div>
                 <div>Assigned to: {newcomer.assigned_owner_name || "-"}</div>
@@ -575,7 +575,7 @@ export default function NewcomerProfile() {
             {activeTab === "Overview" && (
               <Card className="p-4 space-y-2">
                 <div className="text-sm text-mute">Last interaction: {formatDate(newcomer.last_interaction_at)}</div>
-                <div className="text-sm text-mute">Preferred language: {newcomer.preferred_language || "-"}</div>
+                <div className="text-sm text-mute">Preferred languages: {newcomer.preferred_language || "-"}</div>
                 <div className="text-sm text-mute">Follow-up due: {formatDate(newcomer.followup_due_date)}</div>
                 <div className="text-sm text-mute">Current status: {newcomer.status}</div>
                 {newcomer.is_inactive && (

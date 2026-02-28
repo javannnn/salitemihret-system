@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type Ref
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
+import { PhoneInput } from "@/components/PhoneInput";
 import {
   API_BASE,
   ApiError,
@@ -20,6 +21,7 @@ import {
   getMembersMeta,
   getPaymentServiceTypes,
   listPayments,
+  createPriest,
   uploadAvatar,
   uploadContributionExceptionAttachment,
   deleteAvatar,
@@ -29,6 +31,7 @@ import { AvatarEditor } from "@/components/AvatarEditor";
 import { useToast } from "@/components/Toast";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
+import { COUNTRY_OPTIONS } from "@/lib/options";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -75,9 +78,38 @@ const SECTION_NAV_ITEMS = [
 ] as const;
 
 type SectionId = (typeof SECTION_NAV_ITEMS)[number]["id"];
+type HouseholdSelectionMode = "none" | "existing" | "new";
+type NewFatherConfessorFormState = {
+  fullName: string;
+  phone: string;
+  email: string;
+};
 
 const CANADIAN_COUNTRY_CODE = "+1";
 const CANADA_FLAG = "🇨🇦";
+const CREATE_FATHER_CONFESSOR_OPTION = "__create_father_confessor__";
+const QUICK_AMOUNT_OPTIONS = [30, 75, 100] as const;
+
+const createEmptyFatherConfessorForm = (): NewFatherConfessorFormState => ({
+  fullName: "",
+  phone: "",
+  email: "",
+});
+
+const getCountryOptionsForValue = (value: string) =>
+  value && !COUNTRY_OPTIONS.some((option) => option.value === value)
+    ? [{ value, label: `${value} (saved)` }, ...COUNTRY_OPTIONS]
+    : COUNTRY_OPTIONS;
+
+const upsertSortedHouseholds = (
+  households: MembersMeta["households"],
+  household: MembersMeta["households"][number]
+) => [...households.filter((item) => item.id !== household.id), household].sort((a, b) => a.name.localeCompare(b.name));
+
+const upsertSortedFatherConfessors = (
+  priests: MembersMeta["father_confessors"],
+  priest: MembersMeta["father_confessors"][number]
+) => [...priests.filter((item) => item.id !== priest.id), priest].sort((a, b) => a.full_name.localeCompare(b.full_name));
 
 const extractCanadianDigits = (value?: string | null) => {
   if (!value) return "";
@@ -164,6 +196,21 @@ const formatCanadianPostalCode = (value: string) => {
   }
 
   return formatted;
+};
+
+const formatDateInputValue = (value: Date) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getQuickAmountValue = (amount?: number | string | null) => {
+  if (amount === null || amount === undefined || amount === "") {
+    return "";
+  }
+  const parsed = typeof amount === "number" ? amount : Number(amount);
+  return QUICK_AMOUNT_OPTIONS.some((option) => option === parsed) ? String(parsed) : "";
 };
 
 type SpouseFormState = {
@@ -654,10 +701,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const disableCore = disableAll || !permissions.editCore;
   const disableFinance = disableAll || !permissions.editFinance;
   const disableSpiritual = disableAll || !permissions.editSpiritual;
+  const canCreateFatherConfessor =
+    permissions.isSuperAdmin || permissions.hasRole("Admin") || permissions.hasRole("PublicRelations");
   const canViewAudit = permissions.viewAudit;
   const canSubmit = !disableAll;
   const canUploadAvatar = !disableCore;
   const canOverrideStatus = permissions.editStatus || permissions.editFinance;
+  const requiredFieldInputClass = "border-amber-300 bg-amber-50/40 focus:border-amber-500";
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [meta, setMeta] = useState<MembersMeta | null>(null);
   const exceptionReasons = meta?.contribution_exception_reasons ?? [];
@@ -675,9 +725,14 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
   const [auditEntries, setAuditEntries] = useState<MemberAuditEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(true);
+  const [householdMode, setHouseholdMode] = useState<HouseholdSelectionMode>("none");
+  const [householdSearch, setHouseholdSearch] = useState("");
   const [selectedHousehold, setSelectedHousehold] = useState<string>("");
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [fatherConfessorId, setFatherConfessorId] = useState<string>("");
+  const [newFatherConfessorOpen, setNewFatherConfessorOpen] = useState(false);
+  const [newFatherConfessor, setNewFatherConfessor] = useState<NewFatherConfessorFormState>(createEmptyFatherConfessorForm);
+  const [creatingFatherConfessor, setCreatingFatherConfessor] = useState(false);
   const [spouseForm, setSpouseForm] = useState<SpouseFormState | null>(null);
   const [childrenForm, setChildrenForm] = useState<ChildFormState[]>([]);
   const [newPayment, setNewPayment] = useState<MemberPaymentForm>(() => ({
@@ -695,6 +750,35 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     if (!serviceTypes.length) return "";
     return serviceTypes.find((type) => type.code === "CONTRIBUTION")?.code || serviceTypes[0].code;
   }, [serviceTypes]);
+  const todayDateInputMax = useMemo(() => formatDateInputValue(new Date()), []);
+  const filteredHouseholds = useMemo(() => {
+    const households = meta?.households ?? [];
+    const query = householdSearch.trim().toLowerCase();
+    if (!query) {
+      return households;
+    }
+    return households.filter((household) => household.name.toLowerCase().includes(query));
+  }, [householdSearch, meta]);
+  const visibleHouseholds = useMemo(() => {
+    if (!selectedHousehold) {
+      return filteredHouseholds;
+    }
+    const selected = (meta?.households ?? []).find((household) => String(household.id) === selectedHousehold);
+    if (!selected) {
+      return filteredHouseholds;
+    }
+    return filteredHouseholds.some((household) => household.id === selected.id)
+      ? filteredHouseholds
+      : [selected, ...filteredHouseholds];
+  }, [filteredHouseholds, meta, selectedHousehold]);
+  const selectedHouseholdDetails = useMemo(
+    () => (meta?.households ?? []).find((household) => String(household.id) === selectedHousehold) ?? null,
+    [meta, selectedHousehold]
+  );
+  const householdSuggestions = useMemo(
+    () => visibleHouseholds.slice(0, householdSearch.trim() ? 8 : 6),
+    [householdSearch, visibleHouseholds]
+  );
   const [duplicateMatches, setDuplicateMatches] = useState<MemberDuplicateMatch[]>([]);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -746,6 +830,16 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const openConfirm = (config: ConfirmConfig) => setConfirmConfig(config);
   const closeConfirm = () => setConfirmConfig(null);
   const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
+  const renderFieldLabel = (text: string, requiredInCreate = false) => (
+    <label className="inline-flex items-center gap-1 text-xs uppercase text-mute">
+      <span>{text}</span>
+      {isCreateMode && requiredInCreate && (
+        <span className="text-[10px] font-semibold normal-case tracking-normal text-rose-600">
+          Required
+        </span>
+      )}
+    </label>
+  );
 
   const handlePostalCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
@@ -894,9 +988,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
 
 
   const initializeFormsFromMember = useCallback((details: MemberDetail) => {
+    setHouseholdMode(details.household ? "existing" : "none");
+    setHouseholdSearch("");
     setSelectedHousehold(details.household ? String(details.household.id) : "");
     setNewHouseholdName("");
     setFatherConfessorId(details.father_confessor ? String(details.father_confessor.id) : "");
+    setNewFatherConfessorOpen(false);
+    setNewFatherConfessor(createEmptyFatherConfessorForm());
     if (details.marital_status === "Married") {
       setSpouseForm({
         first_name: details.spouse?.first_name ?? "",
@@ -1198,24 +1296,90 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const acceptAutoAdjustedPhone = () => setPhoneAutoAdjusted(false);
 
 
-  const handleHouseholdSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleHouseholdModeChange = (mode: HouseholdSelectionMode) => {
     if (disableCore) {
       return;
     }
-    const value = event.target.value;
-    setSelectedHousehold(value);
-    if (value !== "new") {
-      setNewHouseholdName("");
-    }
+    setHouseholdMode(mode);
     setMember((prev) => {
       if (!prev) return prev;
-      if (value === "" || value === "new") {
+      if (mode !== "existing" || !selectedHousehold) {
         return { ...prev, household: null };
       }
-      const household = meta?.households.find((item) => String(item.id) === value);
+      const household = meta?.households.find((item) => String(item.id) === selectedHousehold);
       return { ...prev, household: household ?? null };
     });
     markDirty();
+  };
+
+  const handleHouseholdSelect = (value: string) => {
+    if (disableCore) {
+      return;
+    }
+    setHouseholdMode("existing");
+    setSelectedHousehold(value);
+    const household = meta?.households.find((item) => String(item.id) === value) ?? null;
+    setHouseholdSearch("");
+    setMember((prev) => {
+      if (!prev) return prev;
+      if (value === "") {
+        return { ...prev, household: null };
+      }
+      return { ...prev, household: household ?? null };
+    });
+    markDirty();
+  };
+
+  const handleHouseholdSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    if (!householdSuggestions.length) {
+      return;
+    }
+    event.preventDefault();
+    handleHouseholdSelect(String(householdSuggestions[0].id));
+  };
+
+  const handleCreateFatherConfessor = async () => {
+    if (!canCreateFatherConfessor) {
+      toast.push("Only Admin or PR Admin can add a new father confessor.");
+      return;
+    }
+    const fullName = newFatherConfessor.fullName.trim();
+    if (!fullName) {
+      toast.push("Father confessor full name is required");
+      return;
+    }
+
+    setCreatingFatherConfessor(true);
+    try {
+      const created = await createPriest({
+        full_name: fullName,
+        phone: newFatherConfessor.phone || undefined,
+        email: newFatherConfessor.email.trim() || undefined,
+      });
+      setMeta((prev) =>
+        prev
+          ? { ...prev, father_confessors: upsertSortedFatherConfessors(prev.father_confessors, created) }
+          : prev
+      );
+      setMember((prev) => (prev ? { ...prev, father_confessor: created, has_father_confessor: true } : prev));
+      setFatherConfessorId(String(created.id));
+      setNewFatherConfessorOpen(false);
+      setNewFatherConfessor(createEmptyFatherConfessorForm());
+      markDirty();
+      toast.push("Father confessor created");
+    } catch (error) {
+      console.error(error);
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Failed to create father confessor");
+      } else {
+        toast.push("Failed to create father confessor");
+      }
+    } finally {
+      setCreatingFatherConfessor(false);
+    }
   };
 
   const toggleBoolean = (field: "is_tither" | "pays_contribution" | "has_father_confessor") =>
@@ -1331,7 +1495,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     setMember((prev) => {
       if (!prev) return prev;
       const nextReason = value || null;
-      const nextAmount = nextReason ? (prev.contribution_amount ?? 75) : 75;
+      const currentAmount = prev.contribution_amount ?? 75;
+      const nextAmount = nextReason ? currentAmount : Math.max(currentAmount, 75);
       return {
         ...prev,
         contribution_exception_reason: nextReason,
@@ -1339,6 +1504,21 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       };
     });
     markDirty();
+  };
+
+  const handleContributionQuickAmountChange = (value: string) => {
+    if (disableFinance || !value) return;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setMember((prev) => (prev ? { ...prev, contribution_amount: parsed } : prev));
+    markDirty();
+  };
+
+  const handlePaymentQuickAmountChange = (value: string) => {
+    if (!value) return;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setNewPayment((prev) => ({ ...prev, amount: parsed.toFixed(2) }));
   };
 
   const handleOverrideToggle = (checked: boolean) => {
@@ -1444,8 +1624,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         return;
       }
       normalizedContribution = Math.round(amountValue * 100) / 100;
-      if (!member.contribution_exception_reason && Math.abs(normalizedContribution - 75) > 0.01) {
-        toast.push("Standard membership contribution is 75 CAD unless an exception is selected.");
+      if (!member.contribution_exception_reason && normalizedContribution < 75) {
+        toast.push("Standard membership contribution is a minimum of 75 CAD unless an exception is selected.");
         setUpdating(false);
         return;
       }
@@ -1498,6 +1678,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           if (child.birth_date) {
             const birth = new Date(child.birth_date);
             const today = new Date();
+            if (birth > today) {
+              toast.push(`Child ${child.first_name || child.last_name || "birth date"} cannot be in the future.`);
+              setUpdating(false);
+              return;
+            }
             let age = today.getFullYear() - birth.getFullYear();
             const hasHadBirthday =
               today.getMonth() > birth.getMonth() ||
@@ -1564,7 +1749,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       payload.status_override_value = member.status_override ? member.status_override_value ?? member.status : null;
       payload.status_override_reason = member.status_override ? trimOrNull(member.status_override_reason) : null;
 
-      if (selectedHousehold === "new") {
+      if (householdMode === "new") {
         const trimmed = newHouseholdName.trim();
         if (!trimmed) {
           toast.push("Enter a household name or choose an existing household.");
@@ -1572,10 +1757,15 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           return;
         }
         payload.household_name = trimmed;
-      } else if (selectedHousehold === "") {
-        payload.household_id = 0;
-      } else {
+      } else if (householdMode === "existing") {
+        if (!selectedHousehold) {
+          toast.push("Choose a household or switch to create a new one.");
+          setUpdating(false);
+          return;
+        }
         payload.household_id = Number(selectedHousehold);
+      } else {
+        payload.household_id = 0;
       }
 
       if (!disableSpiritual && member.has_father_confessor) {
@@ -1622,6 +1812,22 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         body: JSON.stringify(payload),
       });
       const normalized = cloneMemberDetail(updated);
+      setMeta((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        let next = prev;
+        if (normalized.household) {
+          next = { ...next, households: upsertSortedHouseholds(next.households, normalized.household) };
+        }
+        if (normalized.father_confessor) {
+          next = {
+            ...next,
+            father_confessors: upsertSortedFatherConfessors(next.father_confessors, normalized.father_confessor),
+          };
+        }
+        return next;
+      });
       setMember(normalized);
       initializeFormsFromMember(normalized);
       baselineMemberRef.current = cloneMemberDetail(updated);
@@ -1754,7 +1960,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
 
     setExceptionAttachmentUploading(true);
     try {
-      const response = await uploadContributionExceptionAttachment(member.id, file);
+      const response = await uploadContributionExceptionAttachment(
+        member.id,
+        file,
+        member.contribution_exception_reason,
+      );
       const relative = response.attachment_url.startsWith("/static/")
         ? response.attachment_url.replace("/static/", "")
         : response.attachment_url;
@@ -1978,6 +2188,17 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
             <div className="space-y-6">
               <form id="member-form" className="space-y-6" onSubmit={handleSubmit}>
+                {isCreateMode && (
+                  <Card className="border border-amber-200 bg-amber-50/80 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Required before save</p>
+                    <p className="mt-1 text-sm text-amber-900">
+                      First name, last name, phone, postal code, and membership contribution must be provided.
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      Conditional requirements: spouse first/last name (if married), father confessor (if enabled), and household name (if creating a new household).
+                    </p>
+                  </Card>
+                )}
                 <SectionCard
                   id="identity"
                   ref={setSectionRef("identity")}
@@ -1988,12 +2209,24 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 >
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs uppercase text-mute">First name</label>
-                      <Input value={member.first_name} onChange={handleChange("first_name")} required disabled={disableCore} />
+                      {renderFieldLabel("First name", true)}
+                      <Input
+                        value={member.first_name}
+                        onChange={handleChange("first_name")}
+                        required
+                        disabled={disableCore}
+                        className={isCreateMode ? requiredFieldInputClass : ""}
+                      />
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute">Last name</label>
-                      <Input value={member.last_name} onChange={handleChange("last_name")} required disabled={disableCore} />
+                      {renderFieldLabel("Last name", true)}
+                      <Input
+                        value={member.last_name}
+                        onChange={handleChange("last_name")}
+                        required
+                        disabled={disableCore}
+                        className={isCreateMode ? requiredFieldInputClass : ""}
+                      />
                     </div>
                     <div>
                       <label className="text-xs uppercase text-mute">Middle name</label>
@@ -2321,7 +2554,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       <Input value={member.email ?? ""} onChange={handleChange("email")} type="email" disabled={disableCore} />
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute">Phone</label>
+                      {renderFieldLabel("Phone", true)}
                       <div className="flex gap-2">
                         <span className="inline-flex items-center rounded-xl border border-border bg-card/50 px-3 text-sm font-semibold text-ink">
                           {CANADA_FLAG} {CANADIAN_COUNTRY_CODE}
@@ -2332,6 +2565,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                           required
                           disabled={disableCore}
                           placeholder="(613) 555-0199"
+                          className={isCreateMode ? requiredFieldInputClass : ""}
                         />
                       </div>
                       {phoneAutoAdjusted && (
@@ -2395,7 +2629,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   </div>
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs uppercase text-mute">Postal code</label>
+                      {renderFieldLabel("Postal code", true)}
                       <Input
                         value={member.address_postal_code ?? ""}
                         onChange={handlePostalCodeChange}
@@ -2403,6 +2637,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                         placeholder="A1A 1A1"
                         maxLength={7}
                         required={!disableCore}
+                        className={isCreateMode ? requiredFieldInputClass : ""}
                       />
                     </div>
                     <div>
@@ -2451,32 +2686,125 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   onToggle={() => toggleSectionCollapse("household")}
                 >
                   <div className="grid md:grid-cols-2 gap-4">
-                    <div>
+                    <div className="space-y-3">
                       <label className="text-xs uppercase text-mute">Household</label>
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                        <Select value={selectedHousehold} onChange={handleHouseholdSelect} className="md:w-64" disabled={disableCore}>
-                          <option value="">No household</option>
-                          {meta?.households.map((household) => (
-                            <option key={household.id} value={String(household.id)}>
-                              {household.name}
-                            </option>
-                          ))}
-                          <option value="new">Add new household…</option>
-                        </Select>
-                        {selectedHousehold === "new" && (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant={householdMode === "none" ? "soft" : "ghost"}
+                          onClick={() => handleHouseholdModeChange("none")}
+                          disabled={disableCore}
+                        >
+                          No household
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={householdMode === "existing" ? "soft" : "ghost"}
+                          onClick={() => handleHouseholdModeChange("existing")}
+                          disabled={disableCore}
+                        >
+                          Choose existing
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={householdMode === "new" ? "soft" : "ghost"}
+                          onClick={() => handleHouseholdModeChange("new")}
+                          disabled={disableCore}
+                        >
+                          Create new
+                        </Button>
+                      </div>
+                      {householdMode === "existing" && (
+                        <div className="space-y-2 rounded-xl border border-border/70 bg-card/40 p-3">
                           <Input
-                            className="md:flex-1"
+                            value={householdSearch}
+                            onChange={(event) => {
+                              if (disableCore) return;
+                              setHouseholdSearch(event.target.value);
+                            }}
+                            onKeyDown={handleHouseholdSearchKeyDown}
+                            placeholder="Search households by name"
+                            disabled={disableCore}
+                          />
+                          {householdSearch.trim() ? (
+                            householdSuggestions.length > 0 ? (
+                              <div className="overflow-hidden rounded-xl border border-border bg-card">
+                                {householdSuggestions.map((household) => {
+                                  const isSelected = String(household.id) === selectedHousehold;
+                                  return (
+                                    <button
+                                      key={household.id}
+                                      type="button"
+                                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition ${
+                                        isSelected ? "bg-accent/10" : "hover:bg-accent/5"
+                                      }`}
+                                      onClick={() => handleHouseholdSelect(String(household.id))}
+                                      disabled={disableCore}
+                                    >
+                                      <div>
+                                        <div className="font-medium text-sm text-ink">{household.name}</div>
+                                        <div className="text-xs text-mute">
+                                          {household.members_count} member{household.members_count === 1 ? "" : "s"}
+                                          {household.head_member_name ? ` • Head: ${household.head_member_name}` : ""}
+                                        </div>
+                                      </div>
+                                      {isSelected && <span className="text-xs font-medium text-accent">Selected</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null
+                          ) : selectedHouseholdDetails ? (
+                            <div className="rounded-xl border border-accent/20 bg-accent/5 px-3 py-3">
+                              <div className="text-xs uppercase text-mute">Selected household</div>
+                              <div className="mt-1 font-medium text-ink">{selectedHouseholdDetails.name}</div>
+                              <div className="text-xs text-mute">
+                                {selectedHouseholdDetails.members_count} member{selectedHouseholdDetails.members_count === 1 ? "" : "s"}
+                                {selectedHouseholdDetails.head_member_name ? ` • Head: ${selectedHouseholdDetails.head_member_name}` : ""}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-mute">Start typing to see matching households in real time.</p>
+                          )}
+                          {filteredHouseholds.length === 0 && (
+                            <div className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-mute">
+                              {householdSearch.trim() ? "No households match this search." : "No households found yet."}
+                              <div className="mt-2">
+                                <Button
+                                  type="button"
+                                  variant="soft"
+                                  onClick={() => {
+                                    if (disableCore) return;
+                                    setHouseholdMode("new");
+                                    setNewHouseholdName(householdSearch.trim());
+                                    markDirty();
+                                  }}
+                                  disabled={disableCore}
+                                >
+                                  {householdSearch.trim() ? `Create "${householdSearch.trim()}" instead` : "Create new household"}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {householdMode === "new" && (
+                        <div className="space-y-2 rounded-xl border border-border/70 bg-card/40 p-3">
+                          <Input
+                            className={isCreateMode ? requiredFieldInputClass : ""}
                             value={newHouseholdName}
                             onChange={(event) => {
                               if (disableCore) return;
                               setNewHouseholdName(event.target.value);
                               markDirty();
                             }}
-                            placeholder="Household name"
+                            placeholder={isCreateMode ? "Household name (required)" : "Household name"}
                             disabled={disableCore}
+                            required={isCreateMode}
                           />
-                        )}
-                      </div>
+                          <p className="text-xs text-mute">This household will be created when you save the member.</p>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="text-xs uppercase text-mute">Household size override</label>
@@ -2505,7 +2833,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs uppercase text-mute">Father confessor</label>
+                    {renderFieldLabel("Father confessor", member.has_father_confessor)}
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -2519,6 +2847,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                           setMember((prev) => (prev ? { ...prev, has_father_confessor: checked } : prev));
                           if (!checked) {
                             setFatherConfessorId("");
+                            setNewFatherConfessorOpen(false);
+                            setNewFatherConfessor(createEmptyFatherConfessorForm());
                           }
                           markDirty();
                         }}
@@ -2527,23 +2857,101 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       <span className="text-sm">Member has a father confessor</span>
                     </div>
                     {member.has_father_confessor && (
-                      <Select
-                        className="md:w-72"
-                        value={fatherConfessorId}
-                        onChange={(event) => {
-                          setFatherConfessorId(event.target.value);
-                          markDirty();
-                        }}
-                        required
-                        disabled={disableSpiritual}
-                      >
-                        <option value="">Select father confessor…</option>
-                        {(meta?.father_confessors ?? []).map((confessor) => (
-                          <option key={confessor.id} value={String(confessor.id)}>
-                            {confessor.full_name}
-                          </option>
-                        ))}
-                      </Select>
+                      <div className="space-y-3">
+                        <Select
+                          className={`md:w-72 ${isCreateMode ? requiredFieldInputClass : ""}`}
+                          value={fatherConfessorId}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (value === CREATE_FATHER_CONFESSOR_OPTION) {
+                              setNewFatherConfessorOpen(true);
+                              return;
+                            }
+                            setFatherConfessorId(value);
+                            setNewFatherConfessorOpen(false);
+                            setMember((prev) => {
+                              if (!prev) return prev;
+                              const confessor = (meta?.father_confessors ?? []).find((item) => String(item.id) === value);
+                              return { ...prev, father_confessor: confessor ?? null };
+                            });
+                            markDirty();
+                          }}
+                          required
+                          disabled={disableSpiritual}
+                        >
+                          <option value="">Select father confessor…</option>
+                          {(meta?.father_confessors ?? []).map((confessor) => (
+                            <option key={confessor.id} value={String(confessor.id)}>
+                              {confessor.full_name}
+                            </option>
+                          ))}
+                          {canCreateFatherConfessor && <option value={CREATE_FATHER_CONFESSOR_OPTION}>Add new father confessor…</option>}
+                        </Select>
+                        {!disableSpiritual && !canCreateFatherConfessor && (
+                          <p className="text-xs text-mute">Need a new one added? Ask an Admin or PR Admin to create the father confessor record.</p>
+                        )}
+                        {newFatherConfessorOpen && canCreateFatherConfessor && (
+                          <div className="space-y-3 rounded-xl border border-border bg-card/60 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium">Add new father confessor</div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                  setNewFatherConfessorOpen(false);
+                                  setNewFatherConfessor(createEmptyFatherConfessorForm());
+                                }}
+                                disabled={creatingFatherConfessor}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase text-mute">Full name</label>
+                              <Input
+                                value={newFatherConfessor.fullName}
+                                onChange={(event) =>
+                                  setNewFatherConfessor((prev) => ({ ...prev, fullName: event.target.value }))
+                                }
+                                placeholder="Abba Kidus"
+                                disabled={creatingFatherConfessor}
+                              />
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs uppercase text-mute">Phone</label>
+                                <PhoneInput
+                                  value={newFatherConfessor.phone}
+                                  onChange={(value) => setNewFatherConfessor((prev) => ({ ...prev, phone: value }))}
+                                  disabled={creatingFatherConfessor}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs uppercase text-mute">Email</label>
+                                <Input
+                                  type="email"
+                                  value={newFatherConfessor.email}
+                                  onChange={(event) =>
+                                    setNewFatherConfessor((prev) => ({ ...prev, email: event.target.value }))
+                                  }
+                                  placeholder="Optional"
+                                  disabled={creatingFatherConfessor}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex justify-end">
+                              <Button
+                                type="button"
+                                variant="soft"
+                                onClick={handleCreateFatherConfessor}
+                                disabled={creatingFatherConfessor}
+                              >
+                                {creatingFatherConfessor ? "Saving…" : "Save father confessor"}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                     {disableSpiritual && (
                       <p className="text-xs text-mute">Registrar or PR Admin must manage Father Confessor assignments.</p>
@@ -2572,7 +2980,15 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       Tither
                     </label>
                     <label
-                      className={`flex items-center gap-2 text-sm transition ${payWarningPulse ? "animate-pulse ring-2 ring-amber-400 rounded-lg px-2 -mx-2" : ""}`}
+                      className={`flex items-center gap-2 text-sm transition ${
+                        payWarningPulse || isCreateMode ? "rounded-lg px-2 -mx-2" : ""
+                      } ${
+                        payWarningPulse
+                          ? "animate-pulse ring-2 ring-amber-400"
+                          : isCreateMode
+                            ? "ring-1 ring-amber-300 bg-amber-50/60"
+                            : ""
+                      }`}
                     >
                       <input
                         type="checkbox"
@@ -2581,7 +2997,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                         onChange={toggleBoolean("pays_contribution")}
                         disabled={disableFinance}
                       />
-                      Pays membership contribution (required)
+                      Pays membership contribution {isCreateMode ? "(Required)" : "(required)"}
                     </label>
                   </div>
                   <div className="grid md:grid-cols-2 gap-4">
@@ -2606,29 +3022,52 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                     </div>
                     <div>
                       <label className="text-xs uppercase text-mute">Contribution amount</label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={member.contribution_amount ?? ""}
-                        onChange={(event) => {
-                          if (disableFinance) return;
-                          const value = event.target.value;
-                          const parsed = Number(value);
-                          setMember((prev) =>
-                            prev
-                              ? {
-                                ...prev,
-                                contribution_amount:
-                                  value === "" || Number.isNaN(parsed) ? null : parsed,
-                              }
-                              : prev
-                          );
-                          markDirty();
-                        }}
-                        disabled={disableFinance || !member.contribution_exception_reason}
-                      />
+                      <div className="space-y-2">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={member.contribution_exception_reason ? 0.01 : 75}
+                          value={member.contribution_amount ?? ""}
+                          onChange={(event) => {
+                            if (disableFinance) return;
+                            const value = event.target.value;
+                            const parsed = Number(value);
+                            setMember((prev) =>
+                              prev
+                                ? {
+                                  ...prev,
+                                  contribution_amount:
+                                    value === "" || Number.isNaN(parsed) ? null : parsed,
+                                }
+                                : prev
+                            );
+                            markDirty();
+                          }}
+                          disabled={disableFinance}
+                        />
+                        <Select
+                          aria-label="Quick contribution amount"
+                          value={getQuickAmountValue(member.contribution_amount)}
+                          onChange={(event) => handleContributionQuickAmountChange(event.target.value)}
+                          disabled={disableFinance}
+                        >
+                          <option value="">Quick amount</option>
+                          {QUICK_AMOUNT_OPTIONS.map((amount) => {
+                            const requiresException = amount < 75;
+                            return (
+                              <option
+                                key={amount}
+                                value={String(amount)}
+                                disabled={requiresException && !member.contribution_exception_reason}
+                              >
+                                {amount.toFixed(2)} CAD{requiresException ? " (requires exception)" : ""}
+                              </option>
+                            );
+                          })}
+                        </Select>
+                      </div>
                       {!member.contribution_exception_reason ? (
-                        <p className="text-xs text-mute mt-1">Amount fixed at 75.00 CAD unless an exception is selected.</p>
+                        <p className="text-xs text-mute mt-1">No exception selected: amount must be at least 75.00 CAD.</p>
                       ) : (
                         <p className="text-xs text-mute mt-1">Adjust the collected contribution for this member.</p>
                       )}
@@ -2641,7 +3080,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       onChange={(event) => handleContributionExceptionChange(event.target.value)}
                       disabled={disableFinance}
                     >
-                      <option value="">No exception (75 CAD)</option>
+                      <option value="">No exception (minimum 75 CAD)</option>
                       {exceptionReasons.map((reason) => (
                         <option key={reason} value={reason}>
                           {reason === "LowIncome" ? "Low income" : reason}
@@ -2862,12 +3301,27 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       </div>
                       <div>
                         <label className="text-xs uppercase text-mute">Amount</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={newPayment.amount}
-                          onChange={(event) => setNewPayment((prev) => ({ ...prev, amount: event.target.value }))}
-                        />
+                        <div className="space-y-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={newPayment.amount}
+                            onChange={(event) => setNewPayment((prev) => ({ ...prev, amount: event.target.value }))}
+                          />
+                          <Select
+                            aria-label="Quick payment amount"
+                            value={getQuickAmountValue(newPayment.amount)}
+                            onChange={(event) => handlePaymentQuickAmountChange(event.target.value)}
+                            disabled={savingPayment}
+                          >
+                            <option value="">Quick amount</option>
+                            {QUICK_AMOUNT_OPTIONS.map((amount) => (
+                              <option key={amount} value={String(amount)}>
+                                {amount.toFixed(2)} CAD
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
                       </div>
                       <div>
                         <label className="text-xs uppercase text-mute">Paid on</label>
@@ -2921,12 +3375,22 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       <h4 className="text-xs uppercase text-mute tracking-wide">Spouse</h4>
                       <div className="grid md:grid-cols-2 gap-4">
                         <div>
-                          <label className="text-xs uppercase text-mute">First name</label>
-                          <Input value={spouseForm?.first_name ?? ""} onChange={(event) => updateSpouseField("first_name", event.target.value)} />
+                          {renderFieldLabel("First name", true)}
+                          <Input
+                            value={spouseForm?.first_name ?? ""}
+                            onChange={(event) => updateSpouseField("first_name", event.target.value)}
+                            className={isCreateMode ? requiredFieldInputClass : ""}
+                            required={member.marital_status === "Married"}
+                          />
                         </div>
                         <div>
-                          <label className="text-xs uppercase text-mute">Last name</label>
-                          <Input value={spouseForm?.last_name ?? ""} onChange={(event) => updateSpouseField("last_name", event.target.value)} />
+                          {renderFieldLabel("Last name", true)}
+                          <Input
+                            value={spouseForm?.last_name ?? ""}
+                            onChange={(event) => updateSpouseField("last_name", event.target.value)}
+                            className={isCreateMode ? requiredFieldInputClass : ""}
+                            required={member.marital_status === "Married"}
+                          />
                         </div>
                         <div>
                           <label className="text-xs uppercase text-mute">Gender</label>
@@ -2996,13 +3460,28 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                               </div>
                               <div>
                                 <label className="text-xs uppercase text-mute">Birth date</label>
-                                <Input type="date" value={child.birth_date} onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)} />
+                                <Input
+                                  type="date"
+                                  max={todayDateInputMax}
+                                  value={child.birth_date}
+                                  onChange={(event) => updateChildField(child.key, "birth_date", event.target.value)}
+                                />
                               </div>
                             </div>
                             <div className="grid md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-xs uppercase text-mute">Country of birth</label>
-                                <Input value={child.country_of_birth} onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)} />
+                                <Select
+                                  value={child.country_of_birth}
+                                  onChange={(event) => updateChildField(child.key, "country_of_birth", event.target.value)}
+                                >
+                                  <option value="">Select country</option>
+                                  {getCountryOptionsForValue(child.country_of_birth).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </Select>
                               </div>
                               <div>
                                 <label className="text-xs uppercase text-mute">Notes</label>

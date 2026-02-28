@@ -39,6 +39,32 @@ def test_upload_low_income_attachment_requires_low_income_exception(
     assert "Low income" in response.text
 
 
+def test_upload_low_income_attachment_accepts_exception_reason_form_field(
+    client,
+    authorize,
+    admin_user,
+    sample_member,
+    db_session,
+    monkeypatch,
+    tmp_path,
+):
+    _configure_upload_dirs(monkeypatch, tmp_path)
+    sample_member.contribution_exception_reason = None
+    db_session.commit()
+
+    authorize(admin_user)
+    response = client.post(
+        f"/members/{sample_member.id}/contribution-exception-attachment",
+        data={"exception_reason": "LowIncome"},
+        files={"file": ("proof.pdf", b"%PDF-1.4 sample", "application/pdf")},
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.refresh(sample_member)
+    assert sample_member.contribution_exception_reason == "LowIncome"
+    assert sample_member.contribution_exception_attachment_path
+
+
 def test_upload_and_delete_low_income_attachment(
     client,
     authorize,

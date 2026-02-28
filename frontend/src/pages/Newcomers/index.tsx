@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
 
+import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
@@ -27,15 +28,14 @@ import {
 import { parseApiFieldErrors } from "@/lib/formErrors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
+  CITY_OPTIONS_BY_PROVINCE,
   COUNTRY_OPTIONS,
-  COUNTY_OPTIONS,
   LANGUAGE_OPTIONS,
   PROVINCE_OPTIONS,
 } from "@/lib/options";
 import {
   getCanonicalCanadianPhone,
   hasValidEmail,
-  isLikelyPhoneNumber,
   normalizeEmailInput,
 } from "@/lib/validation";
 
@@ -46,13 +46,12 @@ type NewcomerWizardForm = {
   first_name: string;
   last_name: string;
   family_size: string;
-  preferred_language: string;
+  preferred_language: string[];
   interpreter_required: boolean;
   contact_phone: string;
   contact_whatsapp: string;
   contact_email: string;
   country: string;
-  county: string;
   temporary_address_street: string;
   temporary_address_city: string;
   temporary_address_province: string;
@@ -110,13 +109,12 @@ const emptyWizardForm = (): NewcomerWizardForm => ({
   first_name: "",
   last_name: "",
   family_size: "",
-  preferred_language: "",
+  preferred_language: [],
   interpreter_required: false,
   contact_phone: "",
   contact_whatsapp: "",
   contact_email: "",
   country: "",
-  county: "",
   temporary_address_street: "",
   temporary_address_city: "",
   temporary_address_province: "",
@@ -195,12 +193,16 @@ export default function NewcomersWorkspace() {
     if (!newcomers) return 1;
     return Math.max(1, Math.ceil(newcomers.total / PAGE_SIZE));
   }, [newcomers]);
+  const cityOptions = useMemo(
+    () => CITY_OPTIONS_BY_PROVINCE[wizardForm.temporary_address_province] ?? [],
+    [wizardForm.temporary_address_province]
+  );
 
   const activeFilters = useMemo(() => {
     const chips: string[] = [];
     if (filters.status) chips.push(`Status: ${filters.status}`);
     if (filters.county) {
-      chips.push(`County: ${filters.county}`);
+      chips.push(`Province: ${filters.county}`);
     }
     if (filters.assigned_owner_id) {
       const staffMember = staff.find((item) => item.id === Number(filters.assigned_owner_id));
@@ -342,55 +344,118 @@ export default function NewcomersWorkspace() {
     setWizardFieldErrors({});
   };
 
+  const togglePreferredLanguage = (language: string) => {
+    setWizardForm((prev) => ({
+      ...prev,
+      preferred_language: prev.preferred_language.includes(language)
+        ? prev.preferred_language.filter((value) => value !== language)
+        : [...prev.preferred_language, language],
+    }));
+  };
+
+  const validateWizardSteps = (steps: WizardStep[]) => {
+    const fieldErrors: NewcomerFieldErrors = {};
+    let firstInvalidStep: WizardStep | null = null;
+
+    const addFieldError = (step: WizardStep, field: keyof NewcomerWizardForm, message: string) => {
+      if (!fieldErrors[field]) {
+        fieldErrors[field] = message;
+      }
+      if (firstInvalidStep === null) {
+        firstInvalidStep = step;
+      }
+    };
+
+    if (steps.includes(0)) {
+      if (!wizardForm.first_name.trim()) {
+        addFieldError(0, "first_name", "First name is required.");
+      }
+      if (!wizardForm.last_name.trim()) {
+        addFieldError(0, "last_name", "Last name is required.");
+      }
+      if (wizardForm.family_size) {
+        const size = Number(wizardForm.family_size);
+        if (!Number.isInteger(size) || size < 1 || size > 20) {
+          addFieldError(0, "family_size", "Family size must be between 1 and 20.");
+        }
+      }
+    }
+
+    if (steps.includes(1)) {
+      const phoneInput = wizardForm.contact_phone.trim();
+      const emailInput = wizardForm.contact_email.trim();
+      const normalizedEmail = emailInput ? normalizeEmailInput(emailInput) : "";
+      const whatsappInput = wizardForm.contact_whatsapp.trim();
+      const canonicalPhone = phoneInput ? getCanonicalCanadianPhone(phoneInput) : null;
+      const canonicalWhatsApp = whatsappInput ? getCanonicalCanadianPhone(whatsappInput) : null;
+
+      if (!phoneInput) {
+        addFieldError(1, "contact_phone", "Phone is required.");
+      } else if (!canonicalPhone) {
+        addFieldError(1, "contact_phone", "Enter a valid Canadian phone number in +1########## format.");
+      }
+
+      if (!emailInput) {
+        addFieldError(1, "contact_email", "Email is required.");
+      } else if (!hasValidEmail(normalizedEmail)) {
+        addFieldError(1, "contact_email", "Enter a valid email address in the format name@example.com.");
+      }
+
+      if (whatsappInput && !canonicalWhatsApp) {
+        addFieldError(1, "contact_whatsapp", "Enter a valid Canadian WhatsApp number in +1########## format.");
+      }
+    }
+
+    const formError =
+      firstInvalidStep === 1
+        ? "Phone and email are required before you can continue."
+        : firstInvalidStep !== null
+          ? "Fix the highlighted fields."
+          : null;
+
+    return {
+      fieldErrors,
+      firstInvalidStep,
+      formError,
+      isValid: Object.keys(fieldErrors).length === 0,
+    };
+  };
+
+  const handleWizardContinue = () => {
+    const validation = validateWizardSteps([wizardStep]);
+    if (!validation.isValid) {
+      setWizardFieldErrors(validation.fieldErrors);
+      setWizardError(validation.formError);
+      return;
+    }
+    setWizardFieldErrors({});
+    setWizardError(null);
+    setWizardStep((prev) => ((prev + 1) as WizardStep));
+  };
+
   const handleWizardClose = () => {
     setWizardOpen(false);
     resetWizard();
   };
 
   const handleCreateNewcomer = async () => {
-    const fieldErrors: NewcomerFieldErrors = {};
-    const firstName = wizardForm.first_name.trim();
-    const lastName = wizardForm.last_name.trim();
-    const emailInput = wizardForm.contact_email.trim();
-    const normalizedEmail = emailInput ? normalizeEmailInput(emailInput) : "";
-    const phoneInput = wizardForm.contact_phone.trim();
-    const whatsappInput = wizardForm.contact_whatsapp.trim();
-    const canonicalPhone = phoneInput ? getCanonicalCanadianPhone(phoneInput) : null;
-    const canonicalWhatsApp = whatsappInput ? getCanonicalCanadianPhone(whatsappInput) : null;
-
-    if (!firstName) {
-      fieldErrors.first_name = "First name is required.";
-    }
-    if (!lastName) {
-      fieldErrors.last_name = "Last name is required.";
-    }
-    if (emailInput && !hasValidEmail(normalizedEmail)) {
-      fieldErrors.contact_email = "Enter a valid email address.";
-    }
-    if (phoneInput && !canonicalPhone && !isLikelyPhoneNumber(phoneInput)) {
-      fieldErrors.contact_phone = "Enter a valid phone number (ex: +1 5551234567).";
-    }
-    if (whatsappInput && !canonicalWhatsApp && !isLikelyPhoneNumber(whatsappInput)) {
-      fieldErrors.contact_whatsapp = "Enter a valid WhatsApp number (ex: +1 5551234567).";
-    }
-    if (wizardForm.family_size) {
-      const size = Number(wizardForm.family_size);
-      if (!Number.isInteger(size) || size < 1 || size > 20) {
-        fieldErrors.family_size = "Family size must be between 1 and 20.";
-      }
-    }
-
-    const missingContact = !phoneInput && !emailInput && !whatsappInput;
-    const hasFieldErrors = Object.keys(fieldErrors).length > 0;
-    if (missingContact || hasFieldErrors) {
-      setWizardFieldErrors(fieldErrors);
-      if (missingContact) {
-        setWizardError("Provide at least one contact method.");
-      } else {
-        setWizardError("Fix the highlighted fields.");
+    const validation = validateWizardSteps([0, 1]);
+    if (!validation.isValid) {
+      setWizardFieldErrors(validation.fieldErrors);
+      setWizardError(validation.formError);
+      if (validation.firstInvalidStep !== null) {
+        setWizardStep(validation.firstInvalidStep);
       }
       return;
     }
+
+    const firstName = wizardForm.first_name.trim();
+    const lastName = wizardForm.last_name.trim();
+    const normalizedEmail = normalizeEmailInput(wizardForm.contact_email);
+    const canonicalPhone = getCanonicalCanadianPhone(wizardForm.contact_phone)!;
+    const canonicalWhatsApp = wizardForm.contact_whatsapp
+      ? getCanonicalCanadianPhone(wizardForm.contact_whatsapp)
+      : null;
 
     setWizardSubmitting(true);
     setWizardError(null);
@@ -401,13 +466,13 @@ export default function NewcomersWorkspace() {
         last_name: lastName,
         household_type: wizardForm.household_type,
         family_size: wizardForm.family_size ? Number(wizardForm.family_size) : undefined,
-        preferred_language: wizardForm.preferred_language || undefined,
+        preferred_language: wizardForm.preferred_language.length ? wizardForm.preferred_language.join(", ") : undefined,
         interpreter_required: wizardForm.interpreter_required,
-        contact_phone: canonicalPhone || phoneInput || undefined,
-        contact_whatsapp: canonicalWhatsApp || whatsappInput || undefined,
-        contact_email: normalizedEmail || undefined,
+        contact_phone: canonicalPhone,
+        contact_whatsapp: canonicalWhatsApp || undefined,
+        contact_email: normalizedEmail,
         country: wizardForm.country || undefined,
-        county: wizardForm.county || undefined,
+        county: wizardForm.temporary_address_province || undefined,
         temporary_address_street: wizardForm.temporary_address_street || undefined,
         temporary_address_city: wizardForm.temporary_address_city || undefined,
         temporary_address_province: wizardForm.temporary_address_province || undefined,
@@ -607,13 +672,13 @@ export default function NewcomersWorkspace() {
             exit={{ opacity: 0, height: 0 }}
           >
             <div>
-              <label className="text-xs uppercase text-mute block mb-1">County</label>
+              <label className="text-xs uppercase text-mute block mb-1">Province</label>
               <Select
                 value={filters.county}
                 onChange={(event) => setFilters((prev) => ({ ...prev, county: event.target.value, page: 1 }))}
               >
-                <option value="">All counties</option>
-                {COUNTY_OPTIONS.map((option) => (
+                <option value="">All provinces</option>
+                {PROVINCE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -671,7 +736,7 @@ export default function NewcomersWorkspace() {
               <tr>
                 <th className="px-4 py-2 text-left">Newcomer ID</th>
                 <th className="px-4 py-2 text-left">Primary contact</th>
-                <th className="px-4 py-2 text-left">County</th>
+                <th className="px-4 py-2 text-left">Province</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-left">Assigned to</th>
                 <th className="px-4 py-2 text-left">Sponsored by</th>
@@ -848,18 +913,27 @@ export default function NewcomersWorkspace() {
                       )}
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Preferred language</label>
-                      <Select
-                        value={wizardForm.preferred_language}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
-                      >
-                        <option value="">Select language</option>
-                        {LANGUAGE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
+                      <label className="text-xs uppercase text-mute block mb-2">Preferred languages</label>
+                      <div className="flex flex-wrap gap-2">
+                        {LANGUAGE_OPTIONS.map((option) => {
+                          const selected = wizardForm.preferred_language.includes(option.value);
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`rounded-xl border px-3 py-2 text-sm transition ${
+                                selected
+                                  ? "border-accent bg-accent/10 text-accent"
+                                  : "border-border bg-card/70 text-ink hover:border-accent/40 hover:bg-accent/5"
+                              }`}
+                              onClick={() => togglePreferredLanguage(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-xs text-mute">Select all languages that apply.</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -877,29 +951,27 @@ export default function NewcomersWorkspace() {
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">Phone</label>
-                    <Input
-                      type="tel"
-                      inputMode="tel"
+                    <PhoneInput
                       value={wizardForm.contact_phone}
                       className={fieldErrorClass("contact_phone")}
-                      onChange={(event) => {
-                        setWizardForm((prev) => ({ ...prev, contact_phone: event.target.value }));
+                      onChange={(value) => {
+                        setWizardForm((prev) => ({ ...prev, contact_phone: value }));
                         clearWizardFieldError("contact_phone");
                       }}
                     />
-                    {wizardFieldErrors.contact_phone && (
+                    {wizardFieldErrors.contact_phone ? (
                       <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.contact_phone}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-mute">Required. Use a Canadian number in +1 format.</p>
                     )}
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">WhatsApp</label>
-                    <Input
-                      type="tel"
-                      inputMode="tel"
+                    <PhoneInput
                       value={wizardForm.contact_whatsapp}
                       className={fieldErrorClass("contact_whatsapp")}
-                      onChange={(event) => {
-                        setWizardForm((prev) => ({ ...prev, contact_whatsapp: event.target.value }));
+                      onChange={(value) => {
+                        setWizardForm((prev) => ({ ...prev, contact_whatsapp: value }));
                         clearWizardFieldError("contact_whatsapp");
                       }}
                     />
@@ -913,14 +985,23 @@ export default function NewcomersWorkspace() {
                       type="email"
                       inputMode="email"
                       value={wizardForm.contact_email}
+                      placeholder="name@example.com"
                       className={fieldErrorClass("contact_email")}
                       onChange={(event) => {
                         setWizardForm((prev) => ({ ...prev, contact_email: event.target.value }));
                         clearWizardFieldError("contact_email");
                       }}
+                      onBlur={() =>
+                        setWizardForm((prev) => ({
+                          ...prev,
+                          contact_email: prev.contact_email ? normalizeEmailInput(prev.contact_email) : "",
+                        }))
+                      }
                     />
-                    {wizardFieldErrors.contact_email && (
+                    {wizardFieldErrors.contact_email ? (
                       <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.contact_email}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-mute">Required. Use a full email like `name@example.com`.</p>
                     )}
                   </div>
                 </div>
@@ -944,13 +1025,19 @@ export default function NewcomersWorkspace() {
                       </Select>
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">County</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Province</label>
                       <Select
-                        value={wizardForm.county}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, county: event.target.value }))}
+                        value={wizardForm.temporary_address_province}
+                        onChange={(event) =>
+                          setWizardForm((prev) => ({
+                            ...prev,
+                            temporary_address_province: event.target.value,
+                            temporary_address_city: "",
+                          }))
+                        }
                       >
-                        <option value="">Select county</option>
-                        {COUNTY_OPTIONS.map((option) => (
+                        <option value="">Select province</option>
+                        {PROVINCE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -968,19 +1055,15 @@ export default function NewcomersWorkspace() {
                     </div>
                     <div>
                       <label className="text-xs uppercase text-mute block mb-1">City</label>
-                      <Input
+                      <Select
                         value={wizardForm.temporary_address_city}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, temporary_address_city: event.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Province</label>
-                      <Select
-                        value={wizardForm.temporary_address_province}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, temporary_address_province: event.target.value }))}
+                        disabled={!wizardForm.temporary_address_province}
                       >
-                        <option value="">Select province</option>
-                        {PROVINCE_OPTIONS.map((option) => (
+                        <option value="">
+                          {wizardForm.temporary_address_province ? "Select city" : "Select province first"}
+                        </option>
+                        {cityOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -1027,7 +1110,7 @@ export default function NewcomersWorkspace() {
               </Button>
               {wizardStep < 3 ? (
                 <Button
-                  onClick={() => setWizardStep((prev) => ((prev + 1) as WizardStep))}
+                  onClick={handleWizardContinue}
                   disabled={wizardSubmitting}
                 >
                   Continue

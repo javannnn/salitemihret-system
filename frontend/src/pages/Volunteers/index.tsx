@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { HandHeart, Loader2, Mail, Phone, PlusCircle, RefreshCcw, Search, Users } from "lucide-react";
 
+import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { parseApiFieldErrors } from "@/lib/formErrors";
 import {
   ApiError,
   VolunteerGroup,
@@ -22,6 +24,7 @@ import {
   deleteVolunteerWorker,
 } from "@/lib/api";
 import { VOLUNTEER_TYPE_OPTIONS } from "@/lib/options";
+import { getCanonicalCanadianPhone } from "@/lib/validation";
 
 const PAGE_SIZE = 12;
 const CURRENT_YEAR = new Date().getFullYear();
@@ -68,6 +71,9 @@ type WorkerFormState = {
   service_date: string;
   reason: string;
 };
+
+type WorkerFieldName = keyof WorkerFormState;
+type WorkerFieldErrors = Partial<Record<WorkerFieldName, string>>;
 
 const emptyWorkerForm = (): WorkerFormState => ({
   group_id: "",
@@ -132,6 +138,8 @@ export default function VolunteersWorkspace() {
 
   const [workerModal, setWorkerModal] = useState<WorkerModalState>({ open: false, worker: null });
   const [workerForm, setWorkerForm] = useState<WorkerFormState>(emptyWorkerForm());
+  const [workerFieldErrors, setWorkerFieldErrors] = useState<WorkerFieldErrors>({});
+  const [workerFormError, setWorkerFormError] = useState<string | null>(null);
   const [workerSaving, setWorkerSaving] = useState(false);
   const [workerDeletingId, setWorkerDeletingId] = useState<number | null>(null);
 
@@ -240,6 +248,8 @@ export default function VolunteersWorkspace() {
   };
 
   const openWorkerModal = (worker?: VolunteerWorker) => {
+    setWorkerFieldErrors({});
+    setWorkerFormError(null);
     if (worker) {
       setWorkerForm({
         group_id: String(worker.group_id),
@@ -263,22 +273,80 @@ export default function VolunteersWorkspace() {
   const closeWorkerModal = () => {
     setWorkerModal({ open: false, worker: null });
     setWorkerForm(emptyWorkerForm());
+    setWorkerFieldErrors({});
+    setWorkerFormError(null);
+  };
+
+  const clearWorkerFieldError = (field: WorkerFieldName) => {
+    setWorkerFieldErrors((prev) => {
+      if (!prev[field]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    if (workerFormError) {
+      setWorkerFormError(null);
+    }
+  };
+
+  const workerFieldClass = (field: WorkerFieldName) =>
+    workerFieldErrors[field] ? "border-rose-300 focus:border-rose-500 focus:shadow-rose-200" : "";
+
+  const validateWorkerForm = () => {
+    const fieldErrors: WorkerFieldErrors = {};
+
+    if (!workerForm.group_id) {
+      fieldErrors.group_id = "Select a volunteer group.";
+    }
+    if (!workerForm.service_type) {
+      fieldErrors.service_type = "Select a service type.";
+    }
+    if (!workerForm.first_name.trim()) {
+      fieldErrors.first_name = "First name is required.";
+    }
+    if (!workerForm.last_name.trim()) {
+      fieldErrors.last_name = "Last name is required.";
+    }
+    if (!workerForm.service_date) {
+      fieldErrors.service_date = "Service date is required.";
+    } else if (Number.isNaN(new Date(workerForm.service_date).getTime())) {
+      fieldErrors.service_date = "Enter a valid service date.";
+    }
+
+    const phoneInput = workerForm.phone.trim();
+    if (phoneInput && !getCanonicalCanadianPhone(phoneInput)) {
+      fieldErrors.phone = "Enter a valid Canadian phone number in +1########## format.";
+    }
+
+    return {
+      fieldErrors,
+      formError: Object.keys(fieldErrors).length ? "Fix the highlighted fields before saving." : null,
+      isValid: Object.keys(fieldErrors).length === 0,
+    };
   };
 
   const saveWorker = async () => {
-    if (!workerForm.group_id || !workerForm.first_name.trim() || !workerForm.last_name.trim() || !workerForm.service_type) {
-      toast.push("Complete the required fields.");
+    const validation = validateWorkerForm();
+    if (!validation.isValid) {
+      setWorkerFieldErrors(validation.fieldErrors);
+      setWorkerFormError(validation.formError);
       return;
     }
+
+    const canonicalPhone = workerForm.phone.trim() ? getCanonicalCanadianPhone(workerForm.phone) : null;
     const payload: VolunteerWorkerPayload = {
       group_id: Number(workerForm.group_id),
       first_name: workerForm.first_name.trim(),
       last_name: workerForm.last_name.trim(),
-      phone: workerForm.phone.trim() || null,
+      phone: canonicalPhone || null,
       service_type: workerForm.service_type as VolunteerServiceType,
       service_date: workerForm.service_date,
       reason: workerForm.reason.trim() || null,
     };
+    setWorkerFieldErrors({});
+    setWorkerFormError(null);
     setWorkerSaving(true);
     try {
       if (workerModal.worker) {
@@ -292,6 +360,12 @@ export default function VolunteersWorkspace() {
       setWorkerFilters((prev) => ({ ...prev }));
     } catch (error) {
       console.error(error);
+      const parsed = parseApiFieldErrors(error);
+      if (parsed) {
+        setWorkerFieldErrors(parsed.fieldErrors as WorkerFieldErrors);
+        setWorkerFormError(parsed.formError ?? "Fix the highlighted fields before saving.");
+        return;
+      }
       toast.push("Unable to save volunteer.");
     } finally {
       setWorkerSaving(false);
@@ -740,55 +814,121 @@ export default function VolunteersWorkspace() {
                 </Button>
               </div>
               <div className="space-y-3">
+                {workerFormError && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {workerFormError}
+                  </div>
+                )}
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Select
-                    value={workerForm.group_id}
-                    onChange={(event) => setWorkerForm((prev) => ({ ...prev, group_id: event.target.value }))}
-                  >
-                    <option value="">Select group</option>
-                    {groups.map((group) => (
-                      <option key={group.id} value={String(group.id)}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <Select
-                    value={workerForm.service_type}
-                    onChange={(event) =>
-                      setWorkerForm((prev) => ({ ...prev, service_type: event.target.value as VolunteerServiceType }))
-                    }
-                  >
-                    <option value="">Service type</option>
-                    {VOLUNTEER_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">Volunteer group</label>
+                    <Select
+                      className={workerFieldClass("group_id")}
+                      value={workerForm.group_id}
+                      onChange={(event) => {
+                        setWorkerForm((prev) => ({ ...prev, group_id: event.target.value }));
+                        clearWorkerFieldError("group_id");
+                      }}
+                    >
+                      <option value="">Select group</option>
+                      {groups.map((group) => (
+                        <option key={group.id} value={String(group.id)}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {workerFieldErrors.group_id && (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.group_id}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">Service type</label>
+                    <Select
+                      className={workerFieldClass("service_type")}
+                      value={workerForm.service_type}
+                      onChange={(event) => {
+                        setWorkerForm((prev) => ({ ...prev, service_type: event.target.value as VolunteerServiceType }));
+                        clearWorkerFieldError("service_type");
+                      }}
+                    >
+                      <option value="">Select service type</option>
+                      {VOLUNTEER_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                    {workerFieldErrors.service_type && (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.service_type}</p>
+                    )}
+                  </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Input
-                    value={workerForm.first_name}
-                    onChange={(event) => setWorkerForm((prev) => ({ ...prev, first_name: event.target.value }))}
-                    placeholder="First name"
-                  />
-                  <Input
-                    value={workerForm.last_name}
-                    onChange={(event) => setWorkerForm((prev) => ({ ...prev, last_name: event.target.value }))}
-                    placeholder="Last name"
-                  />
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">First name</label>
+                    <Input
+                      className={workerFieldClass("first_name")}
+                      value={workerForm.first_name}
+                      onChange={(event) => {
+                        setWorkerForm((prev) => ({ ...prev, first_name: event.target.value }));
+                        clearWorkerFieldError("first_name");
+                      }}
+                      placeholder="First name"
+                    />
+                    {workerFieldErrors.first_name && (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.first_name}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">Last name</label>
+                    <Input
+                      className={workerFieldClass("last_name")}
+                      value={workerForm.last_name}
+                      onChange={(event) => {
+                        setWorkerForm((prev) => ({ ...prev, last_name: event.target.value }));
+                        clearWorkerFieldError("last_name");
+                      }}
+                      placeholder="Last name"
+                    />
+                    {workerFieldErrors.last_name && (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.last_name}</p>
+                    )}
+                  </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Input
-                    value={workerForm.phone}
-                    onChange={(event) => setWorkerForm((prev) => ({ ...prev, phone: event.target.value }))}
-                    placeholder="Phone number"
-                  />
-                  <Input
-                    type="date"
-                    value={workerForm.service_date}
-                    onChange={(event) => setWorkerForm((prev) => ({ ...prev, service_date: event.target.value }))}
-                  />
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">Phone number</label>
+                    <PhoneInput
+                      className={workerFieldClass("phone")}
+                      value={workerForm.phone}
+                      onChange={(value) => {
+                        setWorkerForm((prev) => ({ ...prev, phone: value }));
+                        clearWorkerFieldError("phone");
+                      }}
+                    />
+                    {workerFieldErrors.phone ? (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.phone}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-mute">Optional. Use a Canadian number in +1 format.</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase text-mute">Date of service</label>
+                    <Input
+                      className={workerFieldClass("service_date")}
+                      type="date"
+                      value={workerForm.service_date}
+                      onChange={(event) => {
+                        setWorkerForm((prev) => ({ ...prev, service_date: event.target.value }));
+                        clearWorkerFieldError("service_date");
+                      }}
+                    />
+                    {workerFieldErrors.service_date ? (
+                      <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.service_date}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-mute">Use the day the volunteer served or is scheduled to serve.</p>
+                    )}
+                  </div>
                 </div>
                 {selectedGroup && (
                   <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-xs text-mute flex items-center gap-2">

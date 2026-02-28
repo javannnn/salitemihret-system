@@ -1542,6 +1542,13 @@ export type ImportReport = {
   updated: number;
   failed: number;
   errors: Array<{ row: number; reason: string }>;
+  successes: Array<{
+    row: number;
+    action: "inserted" | "updated";
+    member_id: number;
+    username: string;
+    full_name: string;
+  }>;
 };
 
 export async function importMembers(file: File | Blob, filename = "members_import.csv"): Promise<ImportReport> {
@@ -1621,9 +1628,13 @@ export async function deleteAvatar(memberId: number): Promise<void> {
 export async function uploadContributionExceptionAttachment(
   memberId: number,
   file: File,
+  exceptionReason?: string | null,
 ): Promise<ContributionExceptionAttachmentUploadResponse> {
   const body = new FormData();
   body.append("file", file);
+  if (exceptionReason && exceptionReason.trim()) {
+    body.append("exception_reason", exceptionReason.trim());
+  }
   const res = await authFetch(`${API_BASE}/members/${memberId}/contribution-exception-attachment`, {
     method: "POST",
     body,

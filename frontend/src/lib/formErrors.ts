@@ -12,9 +12,10 @@ type ApiErrorPayload = {
 export type FieldErrorMap = Record<string, string>;
 
 const FRIENDLY_FIELD_MESSAGES: Record<string, string> = {
-  contact_email: "Enter a valid email address.",
-  contact_phone: "Enter a valid phone number (ex: +1 5551234567).",
-  contact_whatsapp: "Enter a valid WhatsApp number (ex: +1 5551234567).",
+  phone: "Enter a valid Canadian phone number in +1########## format.",
+  contact_email: "Enter a valid email address in the format name@example.com.",
+  contact_phone: "Enter a valid Canadian phone number in +1########## format.",
+  contact_whatsapp: "Enter a valid Canadian WhatsApp number in +1########## format.",
   family_size: "Family size must be between 1 and 20.",
 };
 

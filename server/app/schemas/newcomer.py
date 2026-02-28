@@ -5,6 +5,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, model_validator, validator
 
+from app.schemas.member import normalize_member_phone, normalize_optional_member_phone
+
 NewcomerStatus = Literal["New", "Contacted", "Assigned", "InProgress", "Settled", "Closed"]
 NewcomerHouseholdType = Literal["Individual", "Family"]
 NewcomerInteractionType = Literal["Call", "Visit", "Meeting", "Note", "Other"]
@@ -50,8 +52,10 @@ class NewcomerBase(BaseModel):
 
     @model_validator(mode="after")
     def ensure_contact(self: "NewcomerBase") -> "NewcomerBase":
-        if not self.contact_phone and not self.contact_email and not self.contact_whatsapp:
-            raise ValueError("Provide at least a phone number, WhatsApp, or email for newcomer intake")
+        if not self.contact_phone:
+            raise ValueError("Phone is required for newcomer intake")
+        if not self.contact_email:
+            raise ValueError("Email is required for newcomer intake")
         return self
 
     @validator("arrival_date")
@@ -59,6 +63,25 @@ class NewcomerBase(BaseModel):
         if value > date.today():
             raise ValueError("Arrival date cannot be in the future")
         return value
+
+    @validator("contact_phone")
+    def validate_contact_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return normalize_member_phone(stripped)
+
+    @validator("contact_whatsapp")
+    def validate_contact_whatsapp(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
+
+    @validator("contact_email")
+    def normalize_contact_email(cls, value: Optional[EmailStr]) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value).strip().lower()
 
 
 class NewcomerCreate(NewcomerBase):
@@ -100,6 +123,20 @@ class NewcomerUpdate(BaseModel):
     father_of_repentance_id: Optional[int] = None
     assigned_owner_id: Optional[int] = None
     followup_due_date: Optional[date] = None
+
+    @validator("contact_phone")
+    def validate_contact_phone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
+
+    @validator("contact_whatsapp")
+    def validate_contact_whatsapp(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_member_phone(value)
+
+    @validator("contact_email")
+    def normalize_contact_email(cls, value: Optional[EmailStr]) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value).strip().lower()
 
 
 class NewcomerOut(BaseModel):

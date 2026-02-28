@@ -155,10 +155,10 @@ def _normalize_contribution(amount: Decimal, exception_reason: str | None) -> tu
         if exception_reason not in ALLOWED_CONTRIBUTION_EXCEPTION_REASONS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid contribution exception reason")
     else:
-        if amount != DEFAULT_CONTRIBUTION_AMOUNT:
+        if amount < DEFAULT_CONTRIBUTION_AMOUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Contribution amount must be {DEFAULT_CONTRIBUTION_AMOUNT} CAD unless an exception reason is selected",
+                detail=f"Contribution amount must be at least {DEFAULT_CONTRIBUTION_AMOUNT} CAD unless an exception reason is selected",
             )
     return amount, exception_reason
 

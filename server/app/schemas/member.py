@@ -82,6 +82,12 @@ class ChildBase(BaseModel):
             raise ValueError("Invalid gender value")
         return value
 
+    @validator("birth_date")
+    def validate_birth_date(cls, value: Optional[date]) -> Optional[date]:
+        if value and value > date.today():
+            raise ValueError("Birth date cannot be in the future")
+        return value
+
 
 class ChildCreate(ChildBase):
     pass
@@ -538,11 +544,20 @@ class ImportErrorItem(BaseModel):
     reason: str
 
 
+class ImportSuccessItem(BaseModel):
+    row: int
+    action: Literal["inserted", "updated"]
+    member_id: int
+    username: str
+    full_name: str
+
+
 class ImportReportResponse(BaseModel):
     inserted: int
     updated: int
     failed: int
     errors: List[ImportErrorItem]
+    successes: List[ImportSuccessItem] = Field(default_factory=list)
 
 
 class MemberAuditFeedItem(BaseModel):
