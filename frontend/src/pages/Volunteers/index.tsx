@@ -650,7 +650,16 @@ export default function VolunteersWorkspace() {
                         <td className="px-4 py-2 font-medium">
                           {worker.first_name} {worker.last_name}
                         </td>
-                        <td className="px-4 py-2">{worker.phone || "—"}</td>
+                        <td className="px-4 py-2">
+                          {worker.phone_valid === false ? (
+                            <div className="space-y-1">
+                              <div>{worker.phone || "Invalid phone on file"}</div>
+                              <div className="text-xs text-amber-600">Legacy phone is invalid and should be corrected.</div>
+                            </div>
+                          ) : (
+                            worker.phone || "—"
+                          )}
+                        </td>
                         <td className="px-4 py-2">{worker.group.name}</td>
                         <td className="px-4 py-2">
                           {VOLUNTEER_TYPE_OPTIONS.find((option) => option.value === worker.service_type)?.label ||
@@ -908,6 +917,10 @@ export default function VolunteersWorkspace() {
                     />
                     {workerFieldErrors.phone ? (
                       <p className="mt-1 text-xs text-rose-600">{workerFieldErrors.phone}</p>
+                    ) : workerModal.worker?.phone_valid === false ? (
+                      <p className="mt-1 text-xs text-amber-600">
+                        This record has an invalid legacy phone number. Replace it with a Canadian number or clear it.
+                      </p>
                     ) : (
                       <p className="mt-1 text-xs text-mute">Optional. Use a Canadian number in +1 format.</p>
                     )}

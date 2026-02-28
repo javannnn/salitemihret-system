@@ -20,6 +20,8 @@ from app.schemas.volunteer import (
     VolunteerWorkerListResponse,
     VolunteerWorkerOut,
     VolunteerWorkerUpdate,
+    VolunteerGroupSummary,
+    serialize_volunteer_phone,
 )
 
 READ_ROLES = (
@@ -53,6 +55,24 @@ def _get_worker(db: Session, worker_id: int) -> VolunteerWorker:
     if not worker:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volunteer worker not found")
     return worker
+
+
+def _serialize_worker(worker: VolunteerWorker) -> VolunteerWorkerOut:
+    phone, phone_valid = serialize_volunteer_phone(worker.phone)
+    return VolunteerWorkerOut(
+        id=worker.id,
+        group_id=worker.group_id,
+        first_name=worker.first_name,
+        last_name=worker.last_name,
+        phone=phone,
+        phone_valid=phone_valid,
+        service_type=worker.service_type,
+        service_date=worker.service_date,
+        reason=worker.reason,
+        group=VolunteerGroupSummary.from_orm(worker.group),
+        created_at=worker.created_at,
+        updated_at=worker.updated_at,
+    )
 
 
 @router.get("/groups", response_model=list[VolunteerGroupOut], status_code=status.HTTP_200_OK)
@@ -206,7 +226,7 @@ def list_workers(
         .all()
     )
     return VolunteerWorkerListResponse(
-        items=[VolunteerWorkerOut.from_orm(item) for item in items],
+        items=[_serialize_worker(item) for item in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -233,7 +253,7 @@ def create_worker(
     db.commit()
     db.refresh(worker)
     worker = _get_worker(db, worker.id)
-    return VolunteerWorkerOut.from_orm(worker)
+    return _serialize_worker(worker)
 
 
 @router.patch("/workers/{worker_id:int}", response_model=VolunteerWorkerOut, status_code=status.HTTP_200_OK)
@@ -265,7 +285,7 @@ def update_worker(
     db.commit()
     db.refresh(worker)
     worker = _get_worker(db, worker.id)
-    return VolunteerWorkerOut.from_orm(worker)
+    return _serialize_worker(worker)
 
 
 @router.delete("/workers/{worker_id:int}", response_model=None, status_code=status.HTTP_204_NO_CONTENT)

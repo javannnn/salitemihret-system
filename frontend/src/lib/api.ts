@@ -642,6 +642,7 @@ export type VolunteerWorker = {
   first_name: string;
   last_name: string;
   phone?: string | null;
+  phone_valid: boolean;
   service_type: VolunteerServiceType;
   service_date: string;
   reason?: string | null;

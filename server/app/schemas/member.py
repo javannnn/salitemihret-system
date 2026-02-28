@@ -15,6 +15,7 @@ ALLOWED_CONTRIBUTION_METHODS = {"Cash", "Debit", "Credit", "E-Transfer", "Cheque
 ALLOWED_CONTRIBUTION_EXCEPTION_REASONS = {"LowIncome", "Senior", "Student", "Other"}
 
 CANADIAN_PHONE_ERROR = "Phone number must be a valid Canadian number (e.g., +16475550123)"
+CANADIAN_PHONE_NATIONAL_PATTERN = re.compile(r"^[2-9]\d{2}[2-9]\d{6}$")
 
 
 def normalize_member_phone(value: str) -> str:
@@ -23,7 +24,7 @@ def normalize_member_phone(value: str) -> str:
         raise ValueError("Phone number is required")
     if digits.startswith("1") and len(digits) == 11:
         digits = digits[1:]
-    if len(digits) != 10:
+    if len(digits) != 10 or not CANADIAN_PHONE_NATIONAL_PATTERN.fullmatch(digits):
         raise ValueError(CANADIAN_PHONE_ERROR)
     return f"+1{digits}"
 

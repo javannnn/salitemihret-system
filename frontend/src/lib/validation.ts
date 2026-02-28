@@ -1,4 +1,4 @@
-const CANONICAL_CANADIAN_PHONE = /^\+1\d{10}$/;
+const CANONICAL_CANADIAN_PHONE = /^\+1[2-9]\d{2}[2-9]\d{6}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const PHONE_ALLOWED_CHARS = /^[\d\s()+\-.]+$/;
 

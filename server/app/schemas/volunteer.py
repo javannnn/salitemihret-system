@@ -10,6 +10,18 @@ from app.schemas.member import normalize_optional_member_phone
 VolunteerServiceType = Literal["Holiday", "GeneralService"]
 
 
+def serialize_volunteer_phone(value: Optional[str]) -> tuple[Optional[str], bool]:
+    if value is None:
+        return None, True
+    stripped = value.strip()
+    if not stripped:
+        return None, True
+    try:
+        return normalize_optional_member_phone(stripped), True
+    except ValueError:
+        return stripped, False
+
+
 class VolunteerGroupBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     team_lead_first_name: Optional[str] = Field(None, max_length=100)
@@ -81,12 +93,12 @@ class VolunteerWorkerCreate(VolunteerWorkerBase):
 
 
 class VolunteerWorkerUpdate(BaseModel):
-    group_id: Optional[int]
+    group_id: Optional[int] = None
     first_name: Optional[str] = Field(None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
     phone: Optional[str] = Field(None, max_length=40)
-    service_type: Optional[VolunteerServiceType]
-    service_date: Optional[date]
+    service_type: Optional[VolunteerServiceType] = None
+    service_date: Optional[date] = None
     reason: Optional[str] = Field(None, max_length=500)
 
     @validator("first_name", "last_name")
@@ -103,8 +115,16 @@ class VolunteerWorkerUpdate(BaseModel):
         return normalize_optional_member_phone(value)
 
 
-class VolunteerWorkerOut(VolunteerWorkerBase):
+class VolunteerWorkerOut(BaseModel):
     id: int
+    group_id: int
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    phone_valid: bool = True
+    service_type: VolunteerServiceType
+    service_date: date
+    reason: Optional[str] = None
     group: VolunteerGroupSummary
     created_at: datetime
     updated_at: datetime
