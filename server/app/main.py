@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal, engine
 from app.core.license import get_license_status
 from app.routers import auth as auth_router
+from app.routers import ai as ai_router
 from app.routers import account as account_router
 from app.routers import children as children_router
 from app.routers import emails as emails_router
@@ -77,6 +78,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
+app.include_router(ai_router.router)
 app.include_router(account_router.router)
 app.include_router(whoami_router.router)
 app.include_router(priests_router.router)

@@ -18,6 +18,23 @@ class Settings(BaseSettings):
     RECAPTCHA_MIN_SCORE: float = 0.5
     FRONTEND_BASE_URL: str = "http://localhost:5173"
 
+    AI_ENABLED: bool = False
+    AI_PROVIDER: str = "disabled"
+    AI_BASE_URL: str | None = None
+    AI_API_KEY: str | None = None
+    AI_TIMEOUT_SECONDS: int = 45
+    AI_DEFAULT_CHAT_MODEL: str = "Qwen/Qwen3-14B"
+    AI_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-4B"
+    AI_GUARD_MODEL: str | None = "Qwen/Qwen3Guard-4B"
+    AI_OCR_MODEL: str = "PaddleOCR-VL"
+    AI_ALLOWED_ROLES: str | None = "Admin,OfficeAdmin,PublicRelations"
+    AI_NEWCOMER_FOLLOW_UP_ENABLED: bool = False
+    AI_SEMANTIC_SEARCH_ENABLED: bool = False
+    AI_EMAIL_DRAFTS_ENABLED: bool = False
+    AI_DUPLICATE_REVIEW_ENABLED: bool = False
+    AI_DOCUMENT_INTAKE_ENABLED: bool = False
+    AI_REPORT_QA_ENABLED: bool = False
+
     LICENSE_REMOTE_STATUS_URL: str | None = None
     LICENSE_REMOTE_CHECK_INTERVAL_HOURS: int = 24
     LICENSE_REMOTE_GRACE_DAYS: int = 7
@@ -72,6 +89,10 @@ class Settings(BaseSettings):
     @property
     def MEMBERSHIP_STATUS_NOTIFY_ROLES_LIST(self) -> list[str]:
         return _split_csv(self.MEMBERSHIP_STATUS_NOTIFY_ROLES)
+
+    @property
+    def AI_ALLOWED_ROLES_LIST(self) -> list[str]:
+        return _split_csv(self.AI_ALLOWED_ROLES)
 
 
 def _split_csv(value: str | None) -> list[str]:

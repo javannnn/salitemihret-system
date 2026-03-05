@@ -1,6 +1,7 @@
 """API routers for the SaliteMihret application."""
 
 from app.routers import (  # noqa: F401
+    ai,
     auth,
     account,
     newcomers,

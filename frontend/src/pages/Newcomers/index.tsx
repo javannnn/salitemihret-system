@@ -35,6 +35,8 @@ import {
 } from "@/lib/options";
 import {
   getCanonicalCanadianPhone,
+  getCanadianPhoneSnapSuggestion,
+  getCanadianPhoneValidationMessage,
   hasValidEmail,
   normalizeEmailInput,
 } from "@/lib/validation";
@@ -197,6 +199,20 @@ export default function NewcomersWorkspace() {
     () => CITY_OPTIONS_BY_PROVINCE[wizardForm.temporary_address_province] ?? [],
     [wizardForm.temporary_address_province]
   );
+  const phoneSnapSuggestion = useMemo(() => {
+    const value = wizardForm.contact_phone.trim();
+    if (!value || getCanonicalCanadianPhone(value)) {
+      return null;
+    }
+    return getCanadianPhoneSnapSuggestion(value);
+  }, [wizardForm.contact_phone]);
+  const whatsAppSnapSuggestion = useMemo(() => {
+    const value = wizardForm.contact_whatsapp.trim();
+    if (!value || getCanonicalCanadianPhone(value)) {
+      return null;
+    }
+    return getCanadianPhoneSnapSuggestion(value);
+  }, [wizardForm.contact_whatsapp]);
 
   const activeFilters = useMemo(() => {
     const chips: string[] = [];
@@ -388,11 +404,19 @@ export default function NewcomersWorkspace() {
       const whatsappInput = wizardForm.contact_whatsapp.trim();
       const canonicalPhone = phoneInput ? getCanonicalCanadianPhone(phoneInput) : null;
       const canonicalWhatsApp = whatsappInput ? getCanonicalCanadianPhone(whatsappInput) : null;
+      const phoneValidationMessage = phoneInput ? getCanadianPhoneValidationMessage(phoneInput, "Phone") : null;
+      const whatsAppValidationMessage = whatsappInput
+        ? getCanadianPhoneValidationMessage(whatsappInput, "WhatsApp number")
+        : null;
 
       if (!phoneInput) {
         addFieldError(1, "contact_phone", "Phone is required.");
       } else if (!canonicalPhone) {
-        addFieldError(1, "contact_phone", "Enter a valid Canadian phone number in +1########## format.");
+        addFieldError(
+          1,
+          "contact_phone",
+          phoneValidationMessage || "Enter a valid Canadian phone number in +1########## format."
+        );
       }
 
       if (!emailInput) {
@@ -402,7 +426,11 @@ export default function NewcomersWorkspace() {
       }
 
       if (whatsappInput && !canonicalWhatsApp) {
-        addFieldError(1, "contact_whatsapp", "Enter a valid Canadian WhatsApp number in +1########## format.");
+        addFieldError(
+          1,
+          "contact_whatsapp",
+          whatsAppValidationMessage || "Enter a valid Canadian WhatsApp number in +1########## format."
+        );
       }
     }
 
@@ -964,6 +992,18 @@ export default function NewcomersWorkspace() {
                     ) : (
                       <p className="mt-1 text-xs text-mute">Required. Use a Canadian number in +1 format.</p>
                     )}
+                    {phoneSnapSuggestion && (
+                      <button
+                        type="button"
+                        className="mt-2 text-xs font-medium text-accent underline underline-offset-2 hover:text-accent/80"
+                        onClick={() => {
+                          setWizardForm((prev) => ({ ...prev, contact_phone: phoneSnapSuggestion }));
+                          clearWizardFieldError("contact_phone");
+                        }}
+                      >
+                        Snap to valid Canadian format: {phoneSnapSuggestion}
+                      </button>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">WhatsApp</label>
@@ -977,6 +1017,18 @@ export default function NewcomersWorkspace() {
                     />
                     {wizardFieldErrors.contact_whatsapp && (
                       <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.contact_whatsapp}</p>
+                    )}
+                    {whatsAppSnapSuggestion && (
+                      <button
+                        type="button"
+                        className="mt-2 text-xs font-medium text-accent underline underline-offset-2 hover:text-accent/80"
+                        onClick={() => {
+                          setWizardForm((prev) => ({ ...prev, contact_whatsapp: whatsAppSnapSuggestion }));
+                          clearWizardFieldError("contact_whatsapp");
+                        }}
+                      >
+                        Snap WhatsApp to valid Canadian format: {whatsAppSnapSuggestion}
+                      </button>
                     )}
                   </div>
                   <div>

@@ -31,6 +31,64 @@ export function hasValidCanadianPhone(value: string): boolean {
   return CANONICAL_CANADIAN_PHONE.test(value);
 }
 
+export function getCanadianPhoneValidationMessage(value: string, fieldLabel = "Phone number"): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const digitsOnly = trimmed.replace(/\D/g, "");
+  let nationalDigits = digitsOnly;
+  if (nationalDigits.length === 11 && nationalDigits.startsWith("1")) {
+    nationalDigits = nationalDigits.slice(1);
+  }
+
+  if (nationalDigits.length < 10) {
+    return `${fieldLabel} needs 10 digits after +1.`;
+  }
+  if (nationalDigits.length > 10) {
+    return `${fieldLabel} can only have 10 digits after +1.`;
+  }
+  if (!/^[2-9]/.test(nationalDigits)) {
+    return `${fieldLabel} area code must start with 2-9.`;
+  }
+  if (!/^[2-9]/.test(nationalDigits.slice(3))) {
+    return `${fieldLabel} exchange code (digits 4-6) must start with 2-9.`;
+  }
+
+  return null;
+}
+
+export function getCanadianPhoneSnapSuggestion(value: string): string | null {
+  const formatted = formatCanadianPhoneInput(value);
+  if (!formatted || CANONICAL_CANADIAN_PHONE.test(formatted)) {
+    return null;
+  }
+
+  const nationalDigits = formatted.slice(2);
+  if (nationalDigits.length !== 10) {
+    return null;
+  }
+
+  const nextDigits = nationalDigits.split("");
+  let changed = false;
+
+  if (!/[2-9]/.test(nextDigits[0] || "")) {
+    nextDigits[0] = "2";
+    changed = true;
+  }
+  if (!/[2-9]/.test(nextDigits[3] || "")) {
+    nextDigits[3] = "2";
+    changed = true;
+  }
+  if (!changed) {
+    return null;
+  }
+
+  const suggestion = `+1${nextDigits.join("")}`;
+  return CANONICAL_CANADIAN_PHONE.test(suggestion) ? suggestion : null;
+}
+
 export function normalizeEmailInput(value: string): string {
   return value.replace(/\s+/g, "").toLowerCase();
 }
