@@ -1063,12 +1063,12 @@ export default function NewcomersWorkspace() {
                 <div className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Country</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Country of origin</label>
                       <Select
                         value={wizardForm.country}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, country: event.target.value }))}
                       >
-                        <option value="">Select country</option>
+                        <option value="">Select country of origin</option>
                         {COUNTRY_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}

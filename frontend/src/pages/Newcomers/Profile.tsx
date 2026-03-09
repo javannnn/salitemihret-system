@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, MapPin, Phone, ShieldAlert, UserCheck } from "lucide-react";
 
+import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
+import { parseApiFieldErrors } from "@/lib/formErrors";
 import {
   ApiError,
   Newcomer,
@@ -25,7 +27,13 @@ import {
   transitionNewcomerStatus,
   updateNewcomer,
 } from "@/lib/api";
-import { MEMBER_STATUS_OPTIONS } from "@/lib/options";
+import { COUNTRY_OPTIONS, MEMBER_STATUS_OPTIONS, PROVINCE_OPTIONS } from "@/lib/options";
+import {
+  getCanonicalCanadianPhone,
+  getCanadianPhoneValidationMessage,
+  hasValidEmail,
+  normalizeEmailInput,
+} from "@/lib/validation";
 
 type StatusModalState = {
   open: boolean;
@@ -69,6 +77,67 @@ const TAB_OPTIONS = [
 ] as const;
 
 type TabOption = typeof TAB_OPTIONS[number];
+
+type NewcomerDetailsForm = {
+  first_name: string;
+  last_name: string;
+  household_type: Newcomer["household_type"];
+  family_size: string;
+  preferred_language: string;
+  interpreter_required: boolean;
+  contact_phone: string;
+  contact_whatsapp: string;
+  contact_email: string;
+  country: string;
+  temporary_address_street: string;
+  temporary_address_city: string;
+  temporary_address_province: string;
+  temporary_address_postal_code: string;
+  past_profession: string;
+  notes: string;
+};
+
+type NewcomerDetailFieldErrors = Partial<Record<keyof NewcomerDetailsForm, string>>;
+
+const emptyDetailsForm = (): NewcomerDetailsForm => ({
+  first_name: "",
+  last_name: "",
+  household_type: "Individual",
+  family_size: "",
+  preferred_language: "",
+  interpreter_required: false,
+  contact_phone: "",
+  contact_whatsapp: "",
+  contact_email: "",
+  country: "",
+  temporary_address_street: "",
+  temporary_address_city: "",
+  temporary_address_province: "",
+  temporary_address_postal_code: "",
+  past_profession: "",
+  notes: "",
+});
+
+function detailsFormFromNewcomer(newcomer: Newcomer): NewcomerDetailsForm {
+  return {
+    first_name: newcomer.first_name ?? "",
+    last_name: newcomer.last_name ?? "",
+    household_type: newcomer.household_type ?? "Individual",
+    family_size: newcomer.family_size != null ? String(newcomer.family_size) : "",
+    preferred_language: newcomer.preferred_language ?? "",
+    interpreter_required: Boolean(newcomer.interpreter_required),
+    contact_phone: newcomer.contact_phone ?? "",
+    contact_whatsapp: newcomer.contact_whatsapp ?? "",
+    contact_email: newcomer.contact_email ?? "",
+    country: newcomer.country ?? "",
+    temporary_address_street: newcomer.temporary_address_street ?? "",
+    temporary_address_city: newcomer.temporary_address_city ?? "",
+    temporary_address_province: newcomer.temporary_address_province ?? "",
+    temporary_address_postal_code: newcomer.temporary_address_postal_code ?? "",
+    past_profession: newcomer.past_profession ?? "",
+    notes: newcomer.notes ?? "",
+  };
+}
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -130,6 +199,11 @@ export default function NewcomerProfile() {
     notes: "",
     household_name: "",
   });
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [detailsSubmitting, setDetailsSubmitting] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailsFieldErrors, setDetailsFieldErrors] = useState<NewcomerDetailFieldErrors>({});
+  const [detailsForm, setDetailsForm] = useState<NewcomerDetailsForm>(emptyDetailsForm);
 
   useEffect(() => {
     if (!newcomer) return;
@@ -229,6 +303,140 @@ export default function NewcomerProfile() {
     if (!newcomer) return;
     const data = await listNewcomerInteractions(newcomer.id);
     setInteractions(data);
+  };
+
+  const refreshAddressHistory = async () => {
+    if (!newcomer) return;
+    const data = await listNewcomerAddressHistory(newcomer.id);
+    setAddressHistory(data);
+  };
+
+  const openDetailsModal = () => {
+    if (!newcomer) return;
+    setDetailsForm(detailsFormFromNewcomer(newcomer));
+    setDetailsFieldErrors({});
+    setDetailsError(null);
+    setDetailsModalOpen(true);
+  };
+
+  const clearDetailsFieldError = (field: keyof NewcomerDetailsForm) => {
+    setDetailsFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    if (detailsError) {
+      setDetailsError(null);
+    }
+  };
+
+  const detailsFieldClass = (field: keyof NewcomerDetailsForm) =>
+    detailsFieldErrors[field] ? "border-rose-300 focus:border-rose-500 focus:shadow-rose-200" : "";
+
+  const validateDetailsForm = () => {
+    const fieldErrors: NewcomerDetailFieldErrors = {};
+
+    if (!detailsForm.first_name.trim()) {
+      fieldErrors.first_name = "First name is required.";
+    }
+    if (!detailsForm.last_name.trim()) {
+      fieldErrors.last_name = "Last name is required.";
+    }
+
+    if (detailsForm.family_size.trim()) {
+      const size = Number(detailsForm.family_size.trim());
+      if (!Number.isInteger(size) || size < 1 || size > 20) {
+        fieldErrors.family_size = "Family size must be between 1 and 20.";
+      }
+    }
+
+    const phoneInput = detailsForm.contact_phone.trim();
+    if (phoneInput && !getCanonicalCanadianPhone(phoneInput)) {
+      fieldErrors.contact_phone =
+        getCanadianPhoneValidationMessage(phoneInput, "Phone") ||
+        "Enter a valid Canadian phone number in +1########## format.";
+    }
+
+    const whatsAppInput = detailsForm.contact_whatsapp.trim();
+    if (whatsAppInput && !getCanonicalCanadianPhone(whatsAppInput)) {
+      fieldErrors.contact_whatsapp =
+        getCanadianPhoneValidationMessage(whatsAppInput, "WhatsApp number") ||
+        "Enter a valid Canadian WhatsApp number in +1########## format.";
+    }
+
+    const emailInput = detailsForm.contact_email.trim();
+    if (emailInput && !hasValidEmail(normalizeEmailInput(emailInput))) {
+      fieldErrors.contact_email = "Enter a valid email address in the format name@example.com.";
+    }
+
+    return {
+      fieldErrors,
+      isValid: Object.keys(fieldErrors).length === 0,
+    };
+  };
+
+  const handleSaveDetails = async () => {
+    if (!newcomer) return;
+
+    const validation = validateDetailsForm();
+    if (!validation.isValid) {
+      setDetailsFieldErrors(validation.fieldErrors);
+      setDetailsError("Fix the highlighted fields.");
+      return;
+    }
+
+    const normalizedPhone = detailsForm.contact_phone.trim()
+      ? getCanonicalCanadianPhone(detailsForm.contact_phone.trim())
+      : null;
+    const normalizedWhatsApp = detailsForm.contact_whatsapp.trim()
+      ? getCanonicalCanadianPhone(detailsForm.contact_whatsapp.trim())
+      : null;
+    const normalizedEmail = detailsForm.contact_email.trim()
+      ? normalizeEmailInput(detailsForm.contact_email.trim())
+      : "";
+
+    setDetailsSubmitting(true);
+    setDetailsFieldErrors({});
+    setDetailsError(null);
+    try {
+      const updated = await updateNewcomer(newcomer.id, {
+        first_name: detailsForm.first_name.trim(),
+        last_name: detailsForm.last_name.trim(),
+        household_type: detailsForm.household_type,
+        family_size: detailsForm.family_size.trim() ? Number(detailsForm.family_size.trim()) : undefined,
+        preferred_language: detailsForm.preferred_language.trim() || undefined,
+        interpreter_required: detailsForm.interpreter_required,
+        contact_phone: normalizedPhone || undefined,
+        contact_whatsapp: normalizedWhatsApp || undefined,
+        contact_email: normalizedEmail || undefined,
+        country: detailsForm.country.trim() || undefined,
+        temporary_address_street: detailsForm.temporary_address_street.trim() || undefined,
+        temporary_address_city: detailsForm.temporary_address_city.trim() || undefined,
+        temporary_address_province: detailsForm.temporary_address_province.trim() || undefined,
+        temporary_address_postal_code: detailsForm.temporary_address_postal_code.trim() || undefined,
+        county: detailsForm.temporary_address_province.trim() || undefined,
+        past_profession: detailsForm.past_profession.trim() || undefined,
+        notes: detailsForm.notes.trim() || undefined,
+      });
+      setNewcomer(updated);
+      await Promise.all([refreshTimeline(), refreshAddressHistory()]);
+      setDetailsModalOpen(false);
+      toast.push("Newcomer details updated.");
+    } catch (error) {
+      console.error(error);
+      const parsed = parseApiFieldErrors(error);
+      if (parsed) {
+        setDetailsFieldErrors(parsed.fieldErrors as NewcomerDetailFieldErrors);
+        setDetailsError(parsed.formError || "Fix the highlighted fields.");
+      } else if (error instanceof ApiError) {
+        setDetailsError(error.body || "Unable to update newcomer details.");
+      } else {
+        setDetailsError("Unable to update newcomer details.");
+      }
+    } finally {
+      setDetailsSubmitting(false);
+    }
   };
 
   const handleStatusTransition = async (status: Newcomer["status"], reason?: string) => {
@@ -434,11 +642,18 @@ export default function NewcomerProfile() {
             <p className="text-sm text-mute">Newcomer profile and linked settlement timeline.</p>
           </div>
         </div>
-        {primaryAction && (
+        {(primaryAction || (canManage && newcomer)) && (
           <div className="flex flex-wrap gap-2">
-            <Button onClick={primaryAction.action} disabled={statusSubmitting}>
-              {primaryAction.label}
-            </Button>
+            {primaryAction && (
+              <Button onClick={primaryAction.action} disabled={statusSubmitting}>
+                {primaryAction.label}
+              </Button>
+            )}
+            {canManage && newcomer && (
+              <Button variant="ghost" onClick={openDetailsModal}>
+                Edit details
+              </Button>
+            )}
             {isAdmin && newcomer && !newcomer.is_inactive && (
               <Button variant="ghost" onClick={() => openStatusModal("inactivate")}>
                 Mark inactive
@@ -482,6 +697,7 @@ export default function NewcomerProfile() {
                 <div className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" /> Province: {newcomer.county || "No province"}
                 </div>
+                <div>Country of origin: {newcomer.country || "-"}</div>
                 <div>Interpreter: {newcomer.interpreter_required ? "Required" : "No"}</div>
                 <div>Assigned to: {newcomer.assigned_owner_name || "-"}</div>
                 <div>Sponsored by: {newcomer.sponsored_by_member_name || "-"}</div>
@@ -643,6 +859,10 @@ export default function NewcomerProfile() {
             {activeTab === "Background" && (
               <Card className="p-4 space-y-2">
                 <div>
+                  <div className="text-xs uppercase text-mute">Country of origin</div>
+                  <div className="text-sm text-ink">{newcomer.country || "-"}</div>
+                </div>
+                <div>
                   <div className="text-xs uppercase text-mute">Past profession</div>
                   <div className="text-sm text-ink whitespace-pre-wrap">{newcomer.past_profession || "-"}</div>
                 </div>
@@ -767,6 +987,263 @@ export default function NewcomerProfile() {
             )}
           </div>
         </div>
+      )}
+
+      {detailsModalOpen && newcomer && (
+        <>
+          <div
+            className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
+            onClick={() => setDetailsModalOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-4xl max-h-[92vh] flex flex-col">
+              <div className="p-5 border-b border-border flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold">Edit newcomer details</h3>
+                  <p className="text-sm text-mute">Update intake/contact/background details.</p>
+                </div>
+                <Button variant="ghost" onClick={() => setDetailsModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-4">
+                {detailsError && (
+                  <Card className="p-3 border-red-200 bg-red-50 text-red-700 text-sm">{detailsError}</Card>
+                )}
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">First name</label>
+                    <Input
+                      value={detailsForm.first_name}
+                      className={detailsFieldClass("first_name")}
+                      onChange={(event) => {
+                        setDetailsForm((prev) => ({ ...prev, first_name: event.target.value }));
+                        clearDetailsFieldError("first_name");
+                      }}
+                    />
+                    {detailsFieldErrors.first_name && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.first_name}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Last name</label>
+                    <Input
+                      value={detailsForm.last_name}
+                      className={detailsFieldClass("last_name")}
+                      onChange={(event) => {
+                        setDetailsForm((prev) => ({ ...prev, last_name: event.target.value }));
+                        clearDetailsFieldError("last_name");
+                      }}
+                    />
+                    {detailsFieldErrors.last_name && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.last_name}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Household type</label>
+                    <Select
+                      value={detailsForm.household_type}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({
+                          ...prev,
+                          household_type: event.target.value as Newcomer["household_type"],
+                        }))
+                      }
+                    >
+                      <option value="Individual">Individual</option>
+                      <option value="Family">Family</option>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Family size</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={detailsForm.family_size}
+                      className={detailsFieldClass("family_size")}
+                      onChange={(event) => {
+                        setDetailsForm((prev) => ({ ...prev, family_size: event.target.value }));
+                        clearDetailsFieldError("family_size");
+                      }}
+                    />
+                    {detailsFieldErrors.family_size && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.family_size}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Interpreter</label>
+                    <div className="h-10 px-3 rounded-xl border border-border bg-card/80 flex items-center">
+                      <label className="flex items-center gap-2 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={detailsForm.interpreter_required}
+                          onChange={(event) =>
+                            setDetailsForm((prev) => ({ ...prev, interpreter_required: event.target.checked }))
+                          }
+                        />
+                        Required
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Preferred language(s)</label>
+                  <Input
+                    value={detailsForm.preferred_language}
+                    placeholder="e.g. Amharic, English"
+                    onChange={(event) => setDetailsForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
+                  />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Phone</label>
+                    <PhoneInput
+                      value={detailsForm.contact_phone}
+                      className={detailsFieldClass("contact_phone")}
+                      onChange={(value) => {
+                        setDetailsForm((prev) => ({ ...prev, contact_phone: value }));
+                        clearDetailsFieldError("contact_phone");
+                      }}
+                    />
+                    {detailsFieldErrors.contact_phone && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.contact_phone}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">WhatsApp</label>
+                    <PhoneInput
+                      value={detailsForm.contact_whatsapp}
+                      className={detailsFieldClass("contact_whatsapp")}
+                      onChange={(value) => {
+                        setDetailsForm((prev) => ({ ...prev, contact_whatsapp: value }));
+                        clearDetailsFieldError("contact_whatsapp");
+                      }}
+                    />
+                    {detailsFieldErrors.contact_whatsapp && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.contact_whatsapp}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Email</label>
+                  <Input
+                    type="email"
+                    value={detailsForm.contact_email}
+                    className={detailsFieldClass("contact_email")}
+                    onChange={(event) => {
+                      setDetailsForm((prev) => ({ ...prev, contact_email: event.target.value }));
+                      clearDetailsFieldError("contact_email");
+                    }}
+                    onBlur={() =>
+                      setDetailsForm((prev) => ({
+                        ...prev,
+                        contact_email: prev.contact_email ? normalizeEmailInput(prev.contact_email) : "",
+                      }))
+                    }
+                  />
+                  {detailsFieldErrors.contact_email && (
+                    <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.contact_email}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Country of origin</label>
+                    <Select
+                      value={detailsForm.country}
+                      onChange={(event) => setDetailsForm((prev) => ({ ...prev, country: event.target.value }))}
+                    >
+                      <option value="">Select country of origin</option>
+                      {COUNTRY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Province</label>
+                    <Select
+                      value={detailsForm.temporary_address_province}
+                      onChange={(event) => setDetailsForm((prev) => ({ ...prev, temporary_address_province: event.target.value }))}
+                    >
+                      <option value="">Select province</option>
+                      {PROVINCE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="md:col-span-2">
+                    <label className="text-xs uppercase text-mute block mb-1">Street</label>
+                    <Input
+                      value={detailsForm.temporary_address_street}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, temporary_address_street: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">City</label>
+                    <Input
+                      value={detailsForm.temporary_address_city}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, temporary_address_city: event.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
+                  <Input
+                    value={detailsForm.temporary_address_postal_code}
+                    onChange={(event) =>
+                      setDetailsForm((prev) => ({ ...prev, temporary_address_postal_code: event.target.value }))
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Past profession</label>
+                  <Textarea
+                    value={detailsForm.past_profession}
+                    onChange={(event) => setDetailsForm((prev) => ({ ...prev, past_profession: event.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-mute block mb-1">Notes</label>
+                  <Textarea
+                    value={detailsForm.notes}
+                    onChange={(event) => setDetailsForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-border flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setDetailsModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveDetails} disabled={detailsSubmitting}>
+                  {detailsSubmitting ? "Saving..." : "Save details"}
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </>
       )}
 
       {statusModal.open && statusModal.mode && (
