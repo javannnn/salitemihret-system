@@ -5,6 +5,7 @@ import io
 import zipfile
 
 from app.models.member import Spouse
+from app.models.sponsorship import Sponsorship
 
 
 def test_sponsorship_flow_with_newcomer_conversion(
@@ -64,6 +65,96 @@ def test_sponsorship_flow_with_newcomer_conversion(
     assert detail["newcomer"] is None
     assert detail["volunteer_services"] == ["HolyDayCleanup", "MealSupport"]
     assert detail["volunteer_service_other"] == "Weekend outreach"
+    assert detail["last_sponsored_date"] is None
+
+
+def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    authorize(sponsorship_user)
+    prior_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Auto Date Immigrant",
+        monthly_amount="95.00",
+        frequency="Monthly",
+        status="Completed",
+        start_date=date(2024, 1, 15),
+        end_date=date(2024, 6, 1),
+    )
+    db_session.add(prior_case)
+    db_session.commit()
+
+    payload = {
+        "sponsor_member_id": sample_member.id,
+        "beneficiary_name": "Auto Date Immigrant",
+        "monthly_amount": "95.00",
+        "start_date": date(2025, 1, 15).isoformat(),
+        "status": "Draft",
+        "frequency": "Monthly",
+    }
+
+    create_resp = client.post("/sponsorships", json=payload)
+    assert create_resp.status_code == 201, create_resp.text
+    created = create_resp.json()
+    assert created["last_sponsored_date"] == "2024-06-01"
+
+    sponsorship_id = created["id"]
+    moved_start = date(2025, 2, 1)
+    update_resp = client.put(
+        f"/sponsorships/{sponsorship_id}",
+        json={"start_date": moved_start.isoformat()},
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    updated = update_resp.json()
+    assert updated["start_date"] == moved_start.isoformat()
+    assert updated["last_sponsored_date"] == "2024-06-01"
+
+    manual_last_date = date(2025, 1, 20)
+    manual_resp = client.put(
+        f"/sponsorships/{sponsorship_id}",
+        json={"last_sponsored_date": manual_last_date.isoformat()},
+    )
+    assert manual_resp.status_code == 200, manual_resp.text
+    assert manual_resp.json()["last_sponsored_date"] == manual_last_date.isoformat()
+
+    later_start = date(2025, 3, 1)
+    preserve_resp = client.put(
+        f"/sponsorships/{sponsorship_id}",
+        json={"start_date": later_start.isoformat()},
+    )
+    assert preserve_resp.status_code == 200, preserve_resp.text
+    preserved = preserve_resp.json()
+    assert preserved["start_date"] == later_start.isoformat()
+    assert preserved["last_sponsored_date"] == manual_last_date.isoformat()
+
+
+def test_sponsor_context_uses_current_case_date_not_prior_history(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+):
+    authorize(sponsorship_user)
+    payload = {
+        "sponsor_member_id": sample_member.id,
+        "beneficiary_name": "Context Immigrant",
+        "monthly_amount": "95.00",
+        "start_date": date(2025, 1, 15).isoformat(),
+        "last_sponsored_date": date(2024, 6, 1).isoformat(),
+        "status": "Draft",
+        "frequency": "Monthly",
+    }
+
+    create_resp = client.post("/sponsorships", json=payload)
+    assert create_resp.status_code == 201, create_resp.text
+
+    context_resp = client.get(f"/sponsorships/sponsors/{sample_member.id}/context")
+    assert context_resp.status_code == 200, context_resp.text
+    assert context_resp.json()["last_sponsorship_date"] == "2025-01-15"
 
 
 def test_office_admin_cannot_create_sponsorship(

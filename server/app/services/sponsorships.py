@@ -124,6 +124,47 @@ def _dump_volunteer_services(services: list[str] | None) -> str | None:
     return json.dumps(cleaned)
 
 
+def _case_reference_date(sponsorship: Sponsorship) -> date | None:
+    if sponsorship.end_date:
+        return sponsorship.end_date
+    if sponsorship.start_date:
+        return sponsorship.start_date
+    if sponsorship.created_at:
+        return sponsorship.created_at.date()
+    return None
+
+
+def _lookup_previous_sponsorship_date(
+    db: Session,
+    *,
+    beneficiary_member_id: int | None,
+    newcomer_id: int | None,
+    beneficiary_name: str | None,
+    exclude_id: int | None = None,
+    before_date: date | None = None,
+) -> date | None:
+    query = db.query(Sponsorship)
+    if exclude_id is not None:
+        query = query.filter(Sponsorship.id != exclude_id)
+    if beneficiary_member_id:
+        query = query.filter(Sponsorship.beneficiary_member_id == beneficiary_member_id)
+    elif newcomer_id:
+        query = query.filter(Sponsorship.newcomer_id == newcomer_id)
+    elif beneficiary_name and beneficiary_name.strip():
+        query = query.filter(func.lower(Sponsorship.beneficiary_name) == beneficiary_name.strip().lower())
+    else:
+        return None
+
+    latest_date = None
+    for previous_case in query.all():
+        case_date = _case_reference_date(previous_case)
+        if before_date and case_date and case_date > before_date:
+            continue
+        if case_date and (latest_date is None or case_date > latest_date):
+            latest_date = case_date
+    return latest_date
+
+
 def _validate_member(db: Session, member_id: int) -> Member:
     member = db.query(Member).filter(Member.id == member_id).first()
     if not member:
@@ -563,6 +604,13 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         newcomer_id=newcomer.id if newcomer else None,
         beneficiary_name=beneficiary_name,
     )
+    derived_last_sponsored_date = _lookup_previous_sponsorship_date(
+        db,
+        beneficiary_member_id=beneficiary_member.id if beneficiary_member else None,
+        newcomer_id=newcomer.id if newcomer else None,
+        beneficiary_name=beneficiary_name,
+        before_date=payload.start_date,
+    )
 
     father_id = payload.father_of_repentance_id
     if father_id is None and getattr(sponsor, "father_confessor_id", None):
@@ -598,7 +646,9 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         volunteer_services=volunteer_services_raw,
         volunteer_service_other=payload.volunteer_service_other,
         payment_information=payload.payment_information,
-        last_sponsored_date=payload.last_sponsored_date,
+        last_sponsored_date=payload.last_sponsored_date
+        if payload.last_sponsored_date is not None
+        else derived_last_sponsored_date,
         frequency=payload.frequency.strip() if payload.frequency else "Monthly",
         last_status=payload.last_status,
         last_status_reason=payload.last_status_reason,
@@ -673,7 +723,8 @@ def get_sponsorship(db: Session, sponsorship_id: int) -> SponsorshipOut:
 
 def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpdate, actor_id: int | None) -> SponsorshipOut:
     sponsorship = _load_sponsorship(db, sponsorship_id)
-    fields_set = payload.__fields_set__
+    fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
+    previous_start_date = sponsorship.start_date
 
     if payload.status is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update sponsorship status via the status endpoint")
@@ -687,6 +738,14 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         beneficiary_name=old_beneficiary_name,
         beneficiary_member=old_beneficiary_member,
         newcomer=old_newcomer,
+    )
+    previous_auto_last_sponsored_date = _lookup_previous_sponsorship_date(
+        db,
+        beneficiary_member_id=getattr(old_beneficiary_member, "id", None),
+        newcomer_id=getattr(old_newcomer, "id", None),
+        beneficiary_name=old_label,
+        exclude_id=sponsorship.id,
+        before_date=previous_start_date,
     )
 
     beneficiary_member = None
@@ -771,8 +830,6 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         sponsorship.volunteer_service_other = payload.volunteer_service_other
     if payload.payment_information is not None:
         sponsorship.payment_information = payload.payment_information
-    if payload.last_sponsored_date is not None:
-        sponsorship.last_sponsored_date = payload.last_sponsored_date
     if payload.assigned_staff_id is not None:
         sponsorship.assigned_staff_id = payload.assigned_staff_id or None
 
@@ -783,6 +840,29 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         beneficiary_name=sponsorship.beneficiary_name,
         exclude_id=sponsorship.id,
     )
+    derived_last_sponsored_date = _lookup_previous_sponsorship_date(
+        db,
+        beneficiary_member_id=sponsorship.beneficiary_member_id,
+        newcomer_id=sponsorship.newcomer_id,
+        beneficiary_name=sponsorship.beneficiary_name,
+        exclude_id=sponsorship.id,
+        before_date=sponsorship.start_date,
+    )
+    beneficiary_identity_changed = (
+        sponsorship.beneficiary_member_id != getattr(old_beneficiary_member, "id", None)
+        or sponsorship.newcomer_id != getattr(old_newcomer, "id", None)
+        or sponsorship.beneficiary_name != old_label
+    )
+    if "last_sponsored_date" in fields_set:
+        sponsorship.last_sponsored_date = (
+            payload.last_sponsored_date
+            if payload.last_sponsored_date is not None
+            else derived_last_sponsored_date
+        )
+    elif beneficiary_identity_changed and (
+        sponsorship.last_sponsored_date is None or sponsorship.last_sponsored_date == previous_auto_last_sponsored_date
+    ):
+        sponsorship.last_sponsored_date = derived_last_sponsored_date
 
     new_label = _normalize_beneficiary_name(
         beneficiary_name=sponsorship.beneficiary_name,
@@ -1096,7 +1176,7 @@ def update_budget_round(db: Session, round_id: int, payload: SponsorshipBudgetRo
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget round not found")
 
-    fields_set = payload.__fields_set__
+    fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
     next_year = payload.year if "year" in fields_set else record.year
     next_round = payload.round_number if "round_number" in fields_set else record.round_number
     if next_year != record.year or next_round != record.round_number:
@@ -1174,16 +1254,20 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
     today = date.today()
-    last_case = (
-        db.query(Sponsorship)
-        .filter(Sponsorship.sponsor_member_id == member_id)
-        .order_by(Sponsorship.created_at.desc())
-        .first()
+    sponsor_cases = db.query(Sponsorship).filter(Sponsorship.sponsor_member_id == member_id).all()
+    last_case = max(
+        sponsor_cases,
+        key=lambda case: (
+            _case_reference_date(case) or date.min,
+            case.created_at or datetime.min,
+            case.id,
+        ),
+        default=None,
     )
     last_status = last_case.status if last_case else None
     last_date = None
     if last_case:
-        last_date = last_case.last_sponsored_date or last_case.start_date or last_case.created_at.date()
+        last_date = _case_reference_date(last_case)
 
     since = date.today() - timedelta(days=365)
     history_count = (
