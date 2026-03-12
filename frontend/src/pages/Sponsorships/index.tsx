@@ -928,7 +928,7 @@ export default function SponsorshipWorkspace() {
           if (!active) return;
           setSponsorContext(context);
           if (context.member_status && context.member_status !== "Active") {
-            setWizardError("Sponsor must be Active before creating a case.");
+            setWizardError("Co-sponsor must be Active before creating a case.");
           }
         } catch (error) {
           if (!active) return;
@@ -937,7 +937,7 @@ export default function SponsorshipWorkspace() {
             return;
           }
           console.error(error);
-          toast.push("Unable to load sponsor context.");
+          toast.push("Unable to load co-sponsor context.");
         }
       })
       .catch((error) => {
@@ -1020,8 +1020,8 @@ export default function SponsorshipWorkspace() {
   const anyCaseSelected = selectedCaseArray.length > 0;
   const activeFilters = [
     filters.status && `Status: ${filters.status}`,
-    filters.beneficiary_type && `Beneficiary: ${filters.beneficiary_type}`,
-    filters.sponsor_id && `Sponsor ID: ${filters.sponsor_id}`,
+    filters.beneficiary_type && `Immigrant: ${filters.beneficiary_type}`,
+    filters.sponsor_id && `Co-sponsor ID: ${filters.sponsor_id}`,
     filters.county && `County: ${filters.county}`,
     filters.assigned_staff_id && `Assigned ID: ${filters.assigned_staff_id}`,
     filters.created_from && `From ${filters.created_from}`,
@@ -1440,7 +1440,7 @@ export default function SponsorshipWorkspace() {
       const fallback = buildSponsorContextFallback(member);
       setSponsorContext(fallback);
       if (fallback.member_status !== "Active") {
-        setWizardError("Sponsor must be Active before creating a case.");
+        setWizardError("Co-sponsor must be Active before creating a case.");
       } else {
         setWizardError(null);
       }
@@ -1450,7 +1450,7 @@ export default function SponsorshipWorkspace() {
       const context = await getSponsorContext(member.id);
       setSponsorContext(context);
       if (context.member_status && context.member_status !== "Active") {
-        setWizardError("Sponsor must be Active before creating a case.");
+        setWizardError("Co-sponsor must be Active before creating a case.");
       } else {
         setWizardError(null);
       }
@@ -1460,14 +1460,14 @@ export default function SponsorshipWorkspace() {
         const fallback = buildSponsorContextFallback(member);
         setSponsorContext(fallback);
         if (fallback.member_status !== "Active") {
-          setWizardError("Sponsor must be Active before creating a case.");
+          setWizardError("Co-sponsor must be Active before creating a case.");
         } else {
           setWizardError(null);
         }
         return;
       }
       console.error(error);
-      setWizardError("Unable to load sponsor context.");
+      setWizardError("Unable to load co-sponsor context.");
     }
   };
 
@@ -1600,15 +1600,15 @@ export default function SponsorshipWorkspace() {
 
   const handleWizardSubmit = async (status: Sponsorship["status"]) => {
     if (!wizardForm.sponsor_member_id) {
-      setWizardError("Select a sponsor to continue.");
+      setWizardError("Select a co-sponsor to continue.");
       return;
     }
     if (!wizardForm.beneficiary_mode) {
-      setWizardError("Select a beneficiary to continue.");
+      setWizardError("Select an immigrant to continue.");
       return;
     }
     if (!wizardForm.beneficiary_name.trim()) {
-      setWizardError("Provide a beneficiary name.");
+      setWizardError("Provide an immigrant name.");
       return;
     }
     if (!wizardForm.monthly_amount.trim()) {
@@ -1733,7 +1733,7 @@ export default function SponsorshipWorkspace() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Sponsorship Management</h1>
-          <p className="text-sm text-mute">Case-based sponsorship tracking with sponsor and beneficiary context.</p>
+          <p className="text-sm text-mute">Case-based sponsorship tracking with co-sponsor and immigrant context.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -1832,7 +1832,7 @@ export default function SponsorshipWorkspace() {
           <div className="flex items-center gap-2 w-full md:max-w-md">
             <Search className="h-4 w-4 text-mute" />
             <Input
-              placeholder="Search sponsor or beneficiary"
+              placeholder="Search co-sponsor or immigrant"
               value={filters.q}
               onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))}
             />
@@ -1869,7 +1869,7 @@ export default function SponsorshipWorkspace() {
               exit={{ opacity: 0, height: 0 }}
             >
               <div>
-                <label className="text-xs uppercase text-mute block mb-1">Beneficiary type</label>
+                <label className="text-xs uppercase text-mute block mb-1">Immigrant type</label>
                 <Select
                   value={filters.beneficiary_type}
                   onChange={(event) => setFilters((prev) => ({ ...prev, beneficiary_type: event.target.value, page: 1 }))}
@@ -1881,7 +1881,7 @@ export default function SponsorshipWorkspace() {
                 </Select>
               </div>
               <div>
-                <label className="text-xs uppercase text-mute block mb-1">Sponsor</label>
+                <label className="text-xs uppercase text-mute block mb-1">Co-sponsor</label>
                 <Input
                   placeholder="Search member"
                   value={sponsorSearch}
@@ -1985,11 +1985,11 @@ export default function SponsorshipWorkspace() {
                   />
                 </th>
                 <th className="px-4 py-2 text-left">Case ID</th>
-                <th className="px-4 py-2 text-left">Sponsor</th>
-                <th className="px-4 py-2 text-left">Beneficiary</th>
+                <th className="px-4 py-2 text-left">Co-sponsor</th>
+                <th className="px-4 py-2 text-left">Immigrant</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-left">Created</th>
-                <th className="px-4 py-2 text-left">Last sponsored by</th>
+                <th className="px-4 py-2 text-left">Last sponsored date</th>
                 <th className="px-4 py-2 text-left">Next action</th>
                 <th className="px-4 py-2 text-left">Actions</th>
                 <th className="px-4 py-2 text-left">Last update</th>
@@ -2031,12 +2031,7 @@ export default function SponsorshipWorkspace() {
                       </Badge>
                     </td>
                     <td className="px-4 py-2">{formatDate(item.created_at)}</td>
-                    <td className="px-4 py-2">
-                      <div className="font-medium">
-                        {item.sponsor.first_name} {item.sponsor.last_name}
-                      </div>
-                      <div className="text-xs text-mute">{formatDate(item.last_sponsored_date)}</div>
-                    </td>
+                    <td className="px-4 py-2">{formatDate(item.last_sponsored_date)}</td>
                     <td className="px-4 py-2 text-mute">{nextActionLabel(item.status)}</td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-2">
@@ -2410,8 +2405,8 @@ export default function SponsorshipWorkspace() {
                 <thead className="bg-muted/40 text-mute">
                   <tr>
                     <th className="px-4 py-2 text-left">Case ID</th>
-                    <th className="px-4 py-2 text-left">Sponsor</th>
-                    <th className="px-4 py-2 text-left">Beneficiary</th>
+                    <th className="px-4 py-2 text-left">Co-sponsor</th>
+                    <th className="px-4 py-2 text-left">Immigrant</th>
                     <th className="px-4 py-2 text-left">Status</th>
                     <th className="px-4 py-2 text-left">Budget round</th>
                     <th className="px-4 py-2 text-left">Budget slots</th>
@@ -2530,7 +2525,7 @@ export default function SponsorshipWorkspace() {
                 {wizardStep === 0 && (
                   <div className="space-y-4">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Sponsor search</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Co-sponsor search</label>
                     <Input
                       placeholder="Search member by name"
                       value={sponsorSearch}
@@ -2565,11 +2560,11 @@ export default function SponsorshipWorkspace() {
                           <Badge variant="outline">{sponsorContext.member_status || "Unknown"}</Badge>
                         </div>
                         <div className="text-sm text-mute">
-                          Last sponsorship: {sponsorContext.last_sponsorship_status || "None"} •{" "}
+                          Last co-sponsorship: {sponsorContext.last_sponsorship_status || "None"} •{" "}
                           {formatDate(sponsorContext.last_sponsorship_date)}
                         </div>
                         <div className="text-sm text-mute">
-                          Sponsorships (last 12 months): {sponsorContext.history_count_last_12_months}
+                          Co-sponsorships (last 12 months): {sponsorContext.history_count_last_12_months}
                         </div>
                         <div className="text-sm text-mute">
                           Volunteer services: {sponsorContext.volunteer_services.length ? sponsorContext.volunteer_services.join(", ") : "None"}
@@ -2736,7 +2731,7 @@ export default function SponsorshipWorkspace() {
                         onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}
                       >
                         <p className="font-medium">External or member</p>
-                        <p className="text-xs text-mute">Select a member or enter external beneficiary.</p>
+                        <p className="text-xs text-mute">Select a member or enter external immigrant.</p>
                       </Card>
                     </div>
 
@@ -2972,16 +2967,16 @@ export default function SponsorshipWorkspace() {
                           </div>
                         )}
                         <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "external" }))}>
-                          Use external beneficiary instead
+                          Use external immigrant instead
                         </Button>
                       </div>
                     )}
 
                     {wizardForm.beneficiary_mode === "external" && (
                       <div className="space-y-3">
-                        <label className="text-xs uppercase text-mute block">External beneficiary name</label>
+                        <label className="text-xs uppercase text-mute block">External immigrant name</label>
                         <Input
-                          placeholder="Beneficiary name"
+                          placeholder="Immigrant name"
                           value={wizardForm.beneficiary_name}
                           onChange={(event) =>
                             setWizardForm((prev) => ({ ...prev, beneficiary_name: event.target.value }))
@@ -3267,9 +3262,9 @@ export default function SponsorshipWorkspace() {
                 {wizardStep === 3 && (
                   <div className="space-y-4">
                     <Card className="p-4 space-y-2">
-                      <p className="text-xs uppercase text-mute">Sponsor</p>
+                      <p className="text-xs uppercase text-mute">Co-sponsor</p>
                       <p className="font-medium">{wizardForm.sponsor_name || "—"}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Beneficiary</p>
+                      <p className="text-xs uppercase text-mute mt-3">Immigrant</p>
                       <p className="font-medium">{wizardForm.beneficiary_name || "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Last sponsored date</p>
                       <p className="font-medium">{formatDate(wizardForm.last_sponsored_date)}</p>

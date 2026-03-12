@@ -649,12 +649,12 @@ def render_sponsorship_reminder_email(
     next_due_text = next_due or "To be scheduled"
     body_html = f"""
       <p style="margin:0 0 12px 0;">Hi {sponsor_name},</p>
-      <p style="margin:0 0 16px 0;">This is a gentle reminder about your sponsorship pledge.</p>
+      <p style="margin:0 0 16px 0;">This is a gentle reminder about your co-sponsorship pledge.</p>
       <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
-        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Sponsorship details</div>
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Co-sponsorship details</div>
         <div style="color:{TEXT}; line-height:1.6;">
           <strong>Case:</strong> {case_label}<br>
-          <strong>Beneficiary:</strong> {beneficiary_name}<br>
+          <strong>Immigrant:</strong> {beneficiary_name}<br>
           <strong>Program:</strong> {program_text}<br>
           <strong>Pledge:</strong> {amount_text} ({frequency})<br>
           <strong>Preferred channel:</strong> {channel_text}<br>
@@ -672,9 +672,9 @@ def render_sponsorship_reminder_email(
     )
     text = (
         f"Hi {sponsor_name},\n\n"
-        f"This is a reminder about your sponsorship pledge.\n\n"
+        f"This is a reminder about your co-sponsorship pledge.\n\n"
         f"Case: {case_label}\n"
-        f"Beneficiary: {beneficiary_name}\n"
+        f"Immigrant: {beneficiary_name}\n"
         f"Program: {program_text}\n"
         f"Pledge: {amount_text} ({frequency})\n"
         f"Preferred channel: {channel_text}\n"
@@ -715,7 +715,7 @@ def render_sponsorship_admin_reminder_email(
         <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Case summary</div>
         <div style="color:{TEXT}; line-height:1.6;">
           <strong>Case:</strong> {case_label}<br>
-          <strong>Beneficiary:</strong> {beneficiary_name}<br>
+          <strong>Immigrant:</strong> {beneficiary_name}<br>
           <strong>Program:</strong> {program_text}<br>
           <strong>Pledge:</strong> {amount_text} ({frequency})<br>
           <strong>Preferred channel:</strong> {channel_text}<br>
@@ -724,7 +724,7 @@ def render_sponsorship_admin_reminder_email(
         </div>
       </div>
       <div style="margin-top:16px; padding:14px 16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
-        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Sponsor contact</div>
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Co-sponsor contact</div>
         <div style="color:{TEXT}; line-height:1.6;">
           <strong>Name:</strong> {sponsor_name}<br>
           <strong>Email:</strong> {sponsor_email_text}<br>
@@ -748,13 +748,13 @@ def render_sponsorship_admin_reminder_email(
     text = (
         "Sponsorship reminder sent.\n\n"
         f"Case: {case_label}\n"
-        f"Beneficiary: {beneficiary_name}\n"
+        f"Immigrant: {beneficiary_name}\n"
         f"Program: {program_text}\n"
         f"Pledge: {amount_text} ({frequency})\n"
         f"Preferred channel: {channel_text}\n"
         f"Last reminder: {last_sent_text}\n"
         f"Next reminder: {next_due_text}\n\n"
-        f"Sponsor: {sponsor_name}\n"
+        f"Co-sponsor: {sponsor_name}\n"
         f"Email: {sponsor_email_text}\n"
         f"Phone: {sponsor_phone_text}\n\n"
         "WhatsApp message:\n"

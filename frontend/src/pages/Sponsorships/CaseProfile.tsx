@@ -91,7 +91,7 @@ function buildWhatsAppMessage(record: Sponsorship, sponsorName: string) {
   const frequency = record.frequency || "Monthly";
   return [
     `Hello ${sponsorName},`,
-    `This is a reminder about your sponsorship pledge for ${beneficiary}.`,
+    `This is a reminder about your co-sponsorship pledge for ${beneficiary}.`,
     `Pledge: ${pledge} (${frequency}).`,
     `Case: SP-${String(record.id).padStart(4, "0")}`,
     "Thank you for your support.",
@@ -375,7 +375,7 @@ export default function SponsorshipCaseProfile() {
           <div className="lg:col-span-4 space-y-4">
             <Card className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm uppercase text-mute">Sponsor</h2>
+                <h2 className="text-sm uppercase text-mute">Co-sponsor</h2>
                 <Button variant="ghost" size="sm" onClick={() => navigate(`/members/${sponsorship.sponsor.id}/edit`)}>
                   View member profile
                 </Button>
@@ -389,7 +389,7 @@ export default function SponsorshipCaseProfile() {
                 </Badge>
               </div>
               <div className="text-sm text-mute space-y-1">
-                <div>Last sponsorship: {formatDate(sponsorContext?.last_sponsorship_date)}</div>
+                <div>Last co-sponsorship: {formatDate(sponsorContext?.last_sponsorship_date)}</div>
                 <div>Last status: {sponsorContext?.last_sponsorship_status || "-"}</div>
                 <div>12-mo history: {sponsorContext?.history_count_last_12_months ?? 0}</div>
                 <div>Volunteer services: {sponsorContext?.volunteer_services?.join(", ") || "-"}</div>
@@ -405,7 +405,7 @@ export default function SponsorshipCaseProfile() {
             </Card>
 
             <Card className="p-4 space-y-2">
-              <h2 className="text-sm uppercase text-mute">Beneficiary</h2>
+              <h2 className="text-sm uppercase text-mute">Immigrant</h2>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-lg font-semibold">{beneficiary?.label}</p>
@@ -555,7 +555,7 @@ export default function SponsorshipCaseProfile() {
                 </Button>
               </div>
               <p className="text-sm text-mute">
-                Copy and send this message to the sponsor.
+                Copy and send this message to the co-sponsor.
               </p>
               <Textarea rows={6} value={whatsappMessage} readOnly />
               <div className="flex justify-end gap-2">

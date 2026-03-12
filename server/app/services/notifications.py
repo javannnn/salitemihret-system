@@ -156,7 +156,7 @@ def _resolve_beneficiary_label(sponsorship: Sponsorship) -> str:
         return f"{sponsorship.newcomer.first_name} {sponsorship.newcomer.last_name}".strip()
     if sponsorship.beneficiary_member:
         return f"{sponsorship.beneficiary_member.first_name} {sponsorship.beneficiary_member.last_name}".strip()
-    return sponsorship.beneficiary_name or "Unknown beneficiary"
+    return sponsorship.beneficiary_name or "Unknown immigrant"
 
 
 def _build_whatsapp_message(
@@ -170,7 +170,7 @@ def _build_whatsapp_message(
 ) -> str:
     return (
         f"Hello {sponsor_name},\n"
-        f"This is a reminder from {brand_name} about your sponsorship for {beneficiary_name}.\n"
+        f"This is a reminder from {brand_name} about your co-sponsorship for {beneficiary_name}.\n"
         f"Pledge: {amount_text} ({frequency}).\n"
         f"Case: {case_label}\n"
         "Thank you for your support."
@@ -356,7 +356,7 @@ def send_child_promotion_digest(db: Session, candidates: Sequence[Tuple[Child, d
 def send_sponsorship_reminder(db: Session, sponsorship: Sponsorship) -> None:
     sponsor = sponsorship.sponsor
     sponsor_name = (
-        f"{sponsor.first_name} {sponsor.last_name}".strip() if sponsor else "Sponsor"
+        f"{sponsor.first_name} {sponsor.last_name}".strip() if sponsor else "Co-sponsor"
     )
     beneficiary_name = _resolve_beneficiary_label(sponsorship)
     amount_value = sponsorship.monthly_amount
