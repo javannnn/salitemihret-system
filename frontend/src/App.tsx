@@ -24,6 +24,7 @@ const SchoolsWorkspace = lazy(() => import("@/pages/Schools"));
 const VolunteersWorkspace = lazy(() => import("@/pages/Volunteers"));
 const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
+const RolesManager = lazy(() => import("@/pages/Admin/Users/Roles"));
 const EmailClient = lazy(() => import("@/pages/Admin/Email/Client"));
 const ReportsClient = lazy(() => import("@/pages/Admin/Reports/Client"));
 const AccountProfile = lazy(() => import("@/pages/Account/Profile"));
@@ -68,6 +69,14 @@ export default function App() {
             element={
               <ProtectedRoute requireSuperAdmin>
                 <UserDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users/roles"
+            element={
+              <ProtectedRoute requireSuperAdmin>
+                <RolesManager />
               </ProtectedRoute>
             }
           />

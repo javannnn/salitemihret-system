@@ -4,7 +4,7 @@ from datetime import datetime
 
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, JSON, String, Table
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, JSON, String, Table, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -26,6 +26,9 @@ class User(Base):
     username = Column(String(150), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=True)
     hashed_password = Column(String(255), nullable=False)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+    temporary_password_encrypted = Column(Text, nullable=True)
+    temporary_password_issued_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_super_admin = Column(Boolean, default=False, nullable=False)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
@@ -112,6 +115,7 @@ class UserInvitation(Base):
 
     id = Column(Integer, primary_key=True)
     email = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
     username = Column(String(150), nullable=False)
     token_hash = Column(String(255), nullable=False, unique=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)

@@ -51,7 +51,7 @@ export default function Onboard() {
       } finally {
         clearTimeout(timeout);
       }
-      toast.push("Account ready. Sign in with your new credentials.");
+      toast.push("Password saved. Sign in with your new credentials.");
       navigate("/login", { replace: true });
     } catch (error) {
       console.error(error);
@@ -78,8 +78,8 @@ export default function Onboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex items-center justify-center p-6">
       <Card className="w-full max-w-md space-y-4 p-6 shadow-xl border border-slate-200">
         <div>
-          <h1 className="text-xl font-semibold text-slate-800">Finish setting up your account</h1>
-          <p className="text-sm text-slate-600">Create your password and confirm your details to access the console.</p>
+          <h1 className="text-xl font-semibold text-slate-800">Set your password</h1>
+          <p className="text-sm text-slate-600">Use the token you received to activate access or reset your password.</p>
         </div>
         {!urlToken && (
           <div>
@@ -119,7 +119,7 @@ export default function Onboard() {
             </div>
           )}
           <Button type="submit" className="w-full" disabled={submitting || passwordMismatch}>
-            {submitting ? "Saving…" : "Create account"}
+            {submitting ? "Saving…" : "Set password"}
           </Button>
         </form>
       </Card>

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import ipaddress
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Sequence, Tuple
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,40 @@ def _app_url(path: str = "") -> str:
     if not path.startswith("/"):
         path = f"/{path}"
     return f"{base}{path}"
+
+
+def frontend_url_is_public() -> bool:
+    base = settings.FRONTEND_BASE_URL.strip()
+    if not base:
+        return False
+    parsed = urlparse(base)
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host == "localhost":
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified)
+
+
+def frontend_url_warning() -> str | None:
+    if frontend_url_is_public():
+        return None
+    return (
+        "FRONTEND_BASE_URL points to a local or private address. Email recipients outside this machine will get an unusable login link until it is changed to the public app URL."
+    )
+
+
+def build_email_delivery_details(*, recipient: str, accepted: bool) -> dict[str, Any]:
+    return {
+        "accepted": accepted,
+        "recipient": recipient,
+        "sender": settings.EMAIL_FROM_ADDRESS,
+        "login_url": _app_url("/login"),
+        "login_url_public": frontend_url_is_public(),
+        "warning": frontend_url_warning(),
+    }
 
 
 def _format_date(value: date | datetime | None) -> str:
@@ -166,6 +201,35 @@ def send_user_invitation_email(invitation: UserInvitation, token: str, invited_b
     return sent
 
 
+def send_provisioned_account_email(
+    *,
+    user: User,
+    temporary_password: str,
+    created_by: User | None,
+    message: str | None = None,
+) -> bool:
+    creator_name = None
+    if created_by:
+        creator_name = created_by.full_name or created_by.email
+    html_body, text_body = email_templates.render_provisioned_account_email(
+        login_url=_app_url("/login"),
+        invitee_email=user.email,
+        username=user.username,
+        temporary_password=temporary_password,
+        roles=[role.name for role in user.roles],
+        created_by=creator_name,
+        message=message,
+    )
+    sender = get_email_sender()
+    sent, _ = sender.send(
+        subject=f"Your {BRAND_NAME} console account is ready",
+        html_body=html_body,
+        text_body=text_body,
+        to=[user.email],
+    )
+    return sent
+
+
 def send_password_reset_email(invitation: UserInvitation, token: str, requested_by: User | None) -> bool:
     reset_url = _app_url(f"/onboard?token={quote_plus(token)}")
     requester_name = None
@@ -184,6 +248,32 @@ def send_password_reset_email(invitation: UserInvitation, token: str, requested_
         html_body=html_body,
         text_body=text_body,
         to=[invitation.email],
+    )
+    return sent
+
+
+def send_admin_password_reset_email(
+    *,
+    user: User,
+    temporary_password: str,
+    requested_by: User | None,
+) -> bool:
+    requester_name = None
+    if requested_by:
+        requester_name = requested_by.full_name or requested_by.email
+    html_body, text_body = email_templates.render_admin_password_reset_email(
+        login_url=_app_url("/login"),
+        invitee_email=user.email,
+        username=user.username,
+        temporary_password=temporary_password,
+        requested_by=requester_name,
+    )
+    sender = get_email_sender()
+    sent, _ = sender.send(
+        subject=f"Your {BRAND_NAME} console password was reset",
+        html_body=html_body,
+        text_body=text_body,
+        to=[user.email],
     )
     return sent
 

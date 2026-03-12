@@ -1,6 +1,6 @@
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -8,11 +8,18 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.user import User
+from app.services.permissions import (
+    forbidden_write_fields,
+    has_any_custom_role,
+    has_module_permission,
+    infer_permission_target,
+)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -40,14 +47,51 @@ def get_current_user(
 
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+    if user.must_change_password:
+        allowed_paths = {"/auth/whoami", "/account/me", "/account/me/password", "/license/status"}
+        if request.url.path not in allowed_paths:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Password change required before accessing other features",
+            )
     return user
 
 
-def require_roles(*roles: str) -> Callable[[User], User]:
-    def checker(user: User = Depends(get_current_user)) -> User:
+def require_roles(*roles: str) -> Callable[..., User]:
+    async def checker(
+        request: Request,
+        user: User = Depends(get_current_user),
+    ) -> User:
+        if user.is_super_admin:
+            return user
+
         user_roles = {role.name for role in user.roles}
-        if not any(role in user_roles for role in roles):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        matched_requested_role = any(role in user_roles for role in roles)
+        module, action = infer_permission_target(request.method, request.url.path)
+
+        if matched_requested_role:
+            if module and not has_module_permission(user, module, action):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Module access denied")
+        else:
+            # Legacy built-in roles still require explicit allow-lists.
+            # Custom roles can pass by configured module permissions.
+            if not module or not has_any_custom_role(user) or not has_module_permission(user, module, action):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+        if module and action == "write":
+            content_type = (request.headers.get("content-type") or "").lower()
+            if "application/json" in content_type:
+                try:
+                    body = await request.json()
+                except Exception:
+                    body = None
+                if isinstance(body, dict):
+                    blocked = forbidden_write_fields(user, module, body.keys())
+                    if blocked:
+                        detail = f"Field write access denied for: {', '.join(blocked)}"
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
         return user
 
     return checker
@@ -60,10 +104,11 @@ def require_super_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def get_current_active_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     """
     Compatibility wrapper for routes that expect an "active" user dependency.
     """
-    return get_current_user(credentials=credentials, db=db)
+    return get_current_user(request=request, credentials=credentials, db=db)

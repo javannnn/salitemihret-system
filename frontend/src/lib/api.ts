@@ -335,11 +335,31 @@ export type AdminUserSummary = {
   full_name?: string | null;
   is_active: boolean;
   is_super_admin: boolean;
+  must_change_password: boolean;
   roles: string[];
   last_login_at?: string | null;
   created_at: string;
   updated_at: string;
   member?: AdminUserMemberSummary | null;
+};
+
+export type AdminUserTemporaryCredentials = {
+  password?: string | null;
+  issued_at?: string | null;
+  is_active: boolean;
+};
+
+export type AdminUserEmailDelivery = {
+  accepted: boolean;
+  recipient: string;
+  sender?: string | null;
+  login_url?: string | null;
+  login_url_public: boolean;
+  warning?: string | null;
+};
+
+export type AdminUserDetail = AdminUserSummary & {
+  temporary_credentials?: AdminUserTemporaryCredentials | null;
 };
 
 export type AdminUserListResponse = {
@@ -362,13 +382,82 @@ export type AdminUserAuditEntry = {
   created_at: string;
 };
 
-export type InvitationCreatePayload = {
+export type RolePermissionFlags = {
+  read: boolean;
+  write: boolean;
+};
+
+export type RoleFieldPermissionFlags = {
+  read: boolean;
+  write: boolean;
+};
+
+export type RoleFieldCatalogEntry = {
+  key: string;
+  label: string;
+  description: string;
+};
+
+export type RoleModuleCatalogEntry = {
+  key: string;
+  label: string;
+  description: string;
+  fields: RoleFieldCatalogEntry[];
+};
+
+export type RolePermissionCatalog = {
+  modules: RoleModuleCatalogEntry[];
+};
+
+export type AdminRoleSummary = {
+  id: number;
+  name: string;
+  description?: string | null;
+  is_system: boolean;
+  module_permissions: Record<string, RolePermissionFlags>;
+  field_permissions: Record<string, Record<string, RoleFieldPermissionFlags>>;
+};
+
+export type AdminRoleListResponse = {
+  items: AdminRoleSummary[];
+  total: number;
+};
+
+export type RoleCreatePayload = {
+  name: string;
+  description?: string;
+  module_permissions?: Record<string, RolePermissionFlags>;
+  field_permissions?: Record<string, Record<string, RoleFieldPermissionFlags>>;
+};
+
+export type RoleUpdatePayload = {
+  name?: string;
+  description?: string;
+  module_permissions?: Record<string, RolePermissionFlags>;
+  field_permissions?: Record<string, Record<string, RoleFieldPermissionFlags>>;
+};
+
+export type AdminUserProvisionPayload = {
   email: string;
   full_name?: string;
   username?: string;
   roles?: string[];
   member_id?: number;
   message?: string;
+};
+
+export type AdminUserProvisionResponse = {
+  user: AdminUserSummary;
+  temporary_password: string;
+  email_sent: boolean;
+  email_delivery: AdminUserEmailDelivery;
+};
+
+export type AdminUserPasswordResetResponse = {
+  user: AdminUserSummary;
+  temporary_password: string;
+  email_sent: boolean;
+  email_delivery: AdminUserEmailDelivery;
 };
 
 export type InvitationResponse = {
@@ -394,6 +483,12 @@ export type AccountProfile = {
   full_name?: string | null;
   roles: string[];
   is_super_admin: boolean;
+  must_change_password: boolean;
+  permissions: {
+    modules: Record<string, RolePermissionFlags>;
+    fields: Record<string, Record<string, RoleFieldPermissionFlags>>;
+    legacy: Record<string, boolean>;
+  };
   member?: AccountMemberSummary | null;
   can_change_username: boolean;
   next_username_change_at?: string | null;
@@ -1054,6 +1149,43 @@ export class ApiError extends Error {
     this.status = status;
     this.body = message;
   }
+}
+
+export function parseApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    if (error.body) {
+      try {
+        const payload = JSON.parse(error.body) as {
+          detail?: string | Array<{ msg?: string }>;
+          message?: string;
+        };
+        if (typeof payload.detail === "string" && payload.detail.trim()) {
+          return payload.detail;
+        }
+        if (Array.isArray(payload.detail)) {
+          const message = payload.detail
+            .map((item) => (typeof item?.msg === "string" ? item.msg.trim() : ""))
+            .filter(Boolean)
+            .join(" ");
+          if (message) {
+            return message;
+          }
+        }
+        if (typeof payload.message === "string" && payload.message.trim()) {
+          return payload.message;
+        }
+      } catch {
+        if (error.body.trim()) {
+          return error.body;
+        }
+      }
+    }
+    return fallback;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
 }
 
 export async function api<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
@@ -1944,8 +2076,34 @@ export async function listAdminUsers(params: ListAdminUsersParams = {}): Promise
   return api<AdminUserListResponse>(path);
 }
 
-export async function getAdminUser(userId: number): Promise<AdminUserSummary> {
-  return api<AdminUserSummary>(`/users/${userId}`);
+export async function listAdminRoles(): Promise<AdminRoleListResponse> {
+  return api<AdminRoleListResponse>("/roles");
+}
+
+export async function getRolePermissionCatalog(): Promise<RolePermissionCatalog> {
+  return api<RolePermissionCatalog>("/roles/catalog");
+}
+
+export async function createAdminRole(payload: RoleCreatePayload): Promise<AdminRoleSummary> {
+  return api<AdminRoleSummary>("/roles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminRole(roleId: number, payload: RoleUpdatePayload): Promise<AdminRoleSummary> {
+  return api<AdminRoleSummary>(`/roles/${roleId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminRole(roleId: number): Promise<void> {
+  await api(`/roles/${roleId}`, { method: "DELETE" });
+}
+
+export async function getAdminUser(userId: number): Promise<AdminUserDetail> {
+  return api<AdminUserDetail>(`/users/${userId}`);
 }
 
 export async function updateAdminUser(userId: number, payload: Partial<Pick<AdminUserSummary, "full_name" | "username" | "is_active" | "is_super_admin">>): Promise<AdminUserSummary> {
@@ -1969,16 +2127,16 @@ export async function updateAdminUserMemberLink(userId: number, memberId: number
   });
 }
 
-export async function createUserInvitation(payload: InvitationCreatePayload): Promise<InvitationResponse> {
+export async function provisionAdminUser(payload: AdminUserProvisionPayload): Promise<AdminUserProvisionResponse> {
   const normalizedRoles = payload.roles ?? [];
-  return api<InvitationResponse>("/users/invitations", {
+  return api<AdminUserProvisionResponse>("/users", {
     method: "POST",
     body: JSON.stringify({ ...payload, roles: normalizedRoles }),
   });
 }
 
-export async function resetAdminUserPassword(userId: number): Promise<InvitationResponse> {
-  return api<InvitationResponse>(`/users/${userId}/reset-password`, { method: "POST" });
+export async function resetAdminUserPassword(userId: number): Promise<AdminUserPasswordResetResponse> {
+  return api<AdminUserPasswordResetResponse>(`/users/${userId}/reset-password`, { method: "POST" });
 }
 
 export async function searchAdminMembers(query: string, limit = 8): Promise<AdminUserMemberSummary[]> {
@@ -2097,7 +2255,7 @@ export async function updateAccountProfile(payload: { full_name?: string; userna
   });
 }
 
-export async function updateAccountPassword(payload: { current_password: string; new_password: string }): Promise<void> {
+export async function updateAccountPassword(payload: { current_password?: string; new_password: string }): Promise<void> {
   await api<void>("/account/me/password", {
     method: "PATCH",
     body: JSON.stringify(payload),

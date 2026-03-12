@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, useDragControls, DragControls } from 'framer-motion';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, X, Send, Paperclip, Image as ImageIcon, Smile, MoreVertical, Phone, Video, Search, ChevronLeft, Check, CheckCheck, Trash2 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
 
@@ -8,7 +9,6 @@ export function ChatWidget() {
     const unreadTotal = conversations.reduce((acc, curr) => acc + curr.unreadCount, 0);
     const [isBouncing, setIsBouncing] = useState(false);
     const prevUnreadRef = useRef(unreadTotal);
-    const dragControls = useDragControls();
 
     // Cute dance on new unread messages
     useEffect(() => {
@@ -20,28 +20,19 @@ export function ChatWidget() {
         prevUnreadRef.current = unreadTotal;
     }, [unreadTotal]);
 
-    const handleDragStart = (event: React.PointerEvent) => {
-        dragControls.start(event);
-    };
-
     return (
         <motion.div
-            drag
-            dragControls={dragControls}
-            dragMomentum={false}
-            dragElastic={0.1}
-            className="fixed bottom-6 left-6 z-[1000]"
+            className="fixed bottom-6 right-6 z-[1000]"
         >
             <AnimatePresence>
                 {isOpen && (
-                    <ChatWindow dragControls={dragControls} />
+                    <ChatWindow />
                 )}
             </AnimatePresence>
 
             <motion.button
-                className={`absolute bottom-0 left-0 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
+                className={`absolute bottom-0 right-0 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
                     }`}
-                onPointerDown={handleDragStart}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 onClick={chatAvailable ? toggleChat : undefined}
@@ -89,7 +80,14 @@ export function ChatWidget() {
     );
 }
 
-function ChatWindow({ dragControls }: { dragControls: DragControls }) {
+function ChatOverlayPortal({ children }: { children: ReactNode }) {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+    return createPortal(children, document.body);
+}
+
+function ChatWindow() {
     const { activeConversationId, setActiveConversationId, conversations, messages, sendMessage, sendAttachment, deleteMessage, currentUser, setIsOpen, allUsers, startConversation, refreshUsers, chatAvailable } = useChat();
     const [inputValue, setInputValue] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -227,7 +225,7 @@ function ChatWindow({ dragControls }: { dragControls: DragControls }) {
 
     return (
         <motion.div
-            className="absolute bottom-16 left-0 z-40 flex h-[600px] w-[380px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900"
+            className="absolute bottom-16 right-0 z-40 flex h-[600px] max-h-[calc(100vh-6rem)] w-[380px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900"
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -235,8 +233,7 @@ function ChatWindow({ dragControls }: { dragControls: DragControls }) {
         >
             {/* Header */}
             <div
-                className="flex h-16 items-center justify-between border-b border-gray-100 bg-white px-4 dark:border-gray-800 dark:bg-gray-900 cursor-grab active:cursor-grabbing"
-                onPointerDown={(e) => dragControls.start(e)}
+                className="flex h-16 items-center justify-between border-b border-gray-100 bg-white px-4 dark:border-gray-800 dark:bg-gray-900"
             >
                 {activeConversationId ? (
                     <div className="flex items-center gap-3">
@@ -601,101 +598,116 @@ function ChatWindow({ dragControls }: { dragControls: DragControls }) {
             {/* Delete confirmation */}
             <AnimatePresence>
                 {confirmDeleteId && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onPointerDown={(e) => e.stopPropagation()}>
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="w-80 rounded-2xl bg-white p-4 shadow-2xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5"
+                    <ChatOverlayPortal>
+                        <div
+                            className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+                            onPointerDown={() => setConfirmDeleteId(null)}
                         >
-                            <div className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-                                Delete this message? This will remove it for everyone and show a deleted marker.
-                            </div>
-                            <div className="flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteId(null)}
-                                    className="rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        deleteMessage(confirmDeleteId);
-                                        setConfirmDeleteId(null);
-                                    }}
-                                    className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                className="w-80 max-w-full rounded-2xl bg-white p-4 shadow-2xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5"
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
+                                <div className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+                                    Delete this message? This will remove it for everyone and show a deleted marker.
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteId(null)}
+                                        className="rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            deleteMessage(confirmDeleteId);
+                                            setConfirmDeleteId(null);
+                                        }}
+                                        className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    </ChatOverlayPortal>
                 )}
 
                 {isNewChatOpen && (
-                    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm" onPointerDown={(e) => e.stopPropagation()}>
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="w-96 max-w-full rounded-2xl bg-white p-4 shadow-2xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5"
+                    <ChatOverlayPortal>
+                        <div
+                            className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+                            onPointerDown={() => {
+                                setIsNewChatOpen(false);
+                                setNewChatQuery('');
+                            }}
                         >
-                            <div className="mb-3">
-                                <input
-                                    autoFocus
-                                    type="text"
-                                    value={newChatQuery}
-                                    onChange={(e) => setNewChatQuery(e.target.value)}
-                                    placeholder="Search people to message..."
-                                    className="w-full rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:bg-gray-800 dark:text-white"
-                                />
-                            </div>
-                            <div className="max-h-64 overflow-y-auto space-y-1">
-                                {allUsers
-                                    .filter(u => u.id !== currentUser?.id)
-                                    .filter(u => u.name.toLowerCase().includes(newChatQuery.toLowerCase()))
-                                    .slice(0, 12)
-                                    .map(u => (
-                                        <button
-                                            key={u.id}
-                                            onClick={() => {
-                                                startConversation(u.id);
-                                                setIsNewChatOpen(false);
-                                                setNewChatQuery('');
-                                            }}
-                                            className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
-                                        >
-                                            <img
-                                                src={u.avatar}
-                                                alt={u.name}
-                                                className="h-9 w-9 rounded-full object-cover"
-                                            />
-                                            <div className="flex-1">
-                                                <div className="text-sm font-medium text-gray-900 dark:text-white">{u.name}</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Tap to start a chat</div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                {allUsers.filter(u => u.name.toLowerCase().includes(newChatQuery.toLowerCase())).length === 0 && (
-                                    <div className="py-3 text-center text-xs text-gray-500 dark:text-gray-400">No matches</div>
-                                )}
-                            </div>
-                            <div className="mt-3 flex justify-end">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setIsNewChatOpen(false);
-                                        setNewChatQuery('');
-                                    }}
-                                    className="rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-                                >
-                                    Close
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5"
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
+                                <div className="mb-3">
+                                    <input
+                                        autoFocus
+                                        type="text"
+                                        value={newChatQuery}
+                                        onChange={(e) => setNewChatQuery(e.target.value)}
+                                        placeholder="Search people to message..."
+                                        className="w-full rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:bg-gray-800 dark:text-white"
+                                    />
+                                </div>
+                                <div className="max-h-64 overflow-y-auto space-y-1">
+                                    {allUsers
+                                        .filter(u => u.id !== currentUser?.id)
+                                        .filter(u => u.name.toLowerCase().includes(newChatQuery.toLowerCase()))
+                                        .slice(0, 12)
+                                        .map(u => (
+                                            <button
+                                                key={u.id}
+                                                onClick={() => {
+                                                    startConversation(u.id);
+                                                    setIsNewChatOpen(false);
+                                                    setNewChatQuery('');
+                                                }}
+                                                className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            >
+                                                <img
+                                                    src={u.avatar}
+                                                    alt={u.name}
+                                                    className="h-9 w-9 rounded-full object-cover"
+                                                />
+                                                <div className="flex-1 overflow-hidden">
+                                                    <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{u.name}</div>
+                                                    <div className="text-xs text-gray-500 dark:text-gray-400">Tap to start a chat</div>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    {allUsers.filter(u => u.id !== currentUser?.id).filter(u => u.name.toLowerCase().includes(newChatQuery.toLowerCase())).length === 0 && (
+                                        <div className="py-3 text-center text-xs text-gray-500 dark:text-gray-400">No matches</div>
+                                    )}
+                                </div>
+                                <div className="mt-3 flex justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsNewChatOpen(false);
+                                            setNewChatQuery('');
+                                        }}
+                                        className="rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    </ChatOverlayPortal>
                 )}
             </AnimatePresence>
         </motion.div>

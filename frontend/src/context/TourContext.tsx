@@ -72,6 +72,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
     return `${TOUR_STORAGE_VERSION}_${username}`;
   }, [user]);
 
+  const tourBlocked = Boolean(user?.must_change_password);
+
   const sessionSkipKey = useMemo(() => {
     if (!user) return null;
     const username = (user.username || user.user || "user").toLowerCase();
@@ -355,6 +357,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
 
   const startTour = useCallback(
     (options?: { force?: boolean; reset?: boolean }) => {
+      if (tourBlocked) return;
       const force = options?.force ?? false;
       const reset = options?.reset ?? false;
       if (!storageKey || !user) return;
@@ -377,7 +380,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
         lastStepId: mainSteps[safeIndex]?.id,
       });
     },
-    [filteredSteps, readSessionSkip, readStatus, storageKey, toast, user, writeStatus]
+    [filteredSteps, readSessionSkip, readStatus, storageKey, toast, tourBlocked, user, writeStatus]
   );
 
   const previousStep = useCallback(() => {
@@ -398,6 +401,12 @@ export function TourProvider({ children }: { children: ReactNode }) {
   }, [writeSessionSkip]);
 
   useEffect(() => {
+    if (tourBlocked) {
+      setActive(false);
+      setTargetRect(null);
+      setCurrentIndex(0);
+      return;
+    }
     if (!active) return;
     const current = steps[currentIndex];
     if (!current) {
@@ -442,7 +451,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("scroll", handleResize, true);
     };
-  }, [active, currentIndex, finishTour, location.pathname, navigate, steps, writeStatus]);
+  }, [active, currentIndex, finishTour, location.pathname, navigate, steps, tourBlocked, writeStatus]);
 
   useEffect(() => {
     if (!active) return;
@@ -455,7 +464,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
   }, [active, currentIndex, steps, writeStatus]);
 
   useEffect(() => {
-    if (!user || !storageKey || !steps.length) return;
+    if (!user || !storageKey || !steps.length || tourBlocked) return;
     const params = new URLSearchParams(location.search);
     if (params.get("tour") === "start") {
       autoTriggered.current = true;
@@ -468,7 +477,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       autoTriggered.current = true;
       startTour({ reset: false });
     }
-  }, [location.search, readStatus, readSessionSkip, startTour, storageKey, user]);
+  }, [location.search, readStatus, readSessionSkip, startTour, storageKey, steps.length, tourBlocked, user]);
 
   const contextValue: TourContextValue = {
     active,

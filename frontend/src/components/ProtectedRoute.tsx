@@ -28,6 +28,10 @@ export default function ProtectedRoute({
     return <SplashScreen />;
   }
 
+  if (user.must_change_password && !location.pathname.startsWith("/account")) {
+    return <Navigate to="/account" replace state={{ forcedPasswordChange: true }} />;
+  }
+
   if (requireSuperAdmin && !user.is_super_admin) {
     return <div className="p-6 text-sm text-mute">Not authorized for this section.</div>;
   }

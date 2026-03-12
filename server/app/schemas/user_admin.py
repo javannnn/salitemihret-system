@@ -28,6 +28,7 @@ class UserAdminSummary(BaseModel):
     full_name: str | None = None
     is_active: bool
     is_super_admin: bool
+    must_change_password: bool = False
     roles: list[str]
     last_login_at: datetime | None = None
     created_at: datetime
@@ -36,6 +37,25 @@ class UserAdminSummary(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserTemporaryCredentials(BaseModel):
+    password: str | None = None
+    issued_at: datetime | None = None
+    is_active: bool
+
+
+class EmailDeliveryDetails(BaseModel):
+    accepted: bool
+    recipient: EmailStr
+    sender: EmailStr | None = None
+    login_url: str | None = None
+    login_url_public: bool = False
+    warning: str | None = None
+
+
+class UserAdminDetailResponse(UserAdminSummary):
+    temporary_credentials: UserTemporaryCredentials | None = None
 
 
 class UserListResponse(BaseModel):
@@ -47,6 +67,29 @@ class UserListResponse(BaseModel):
     total_inactive: int
     total_linked: int
     total_unlinked: int
+
+
+class UserProvisionRequest(BaseModel):
+    email: EmailStr
+    full_name: str | None = None
+    username: str | None = None
+    roles: list[str] = Field(default_factory=list)
+    member_id: int | None = None
+    message: str | None = Field(default=None, max_length=500)
+
+
+class UserProvisionResponse(BaseModel):
+    user: UserAdminSummary
+    temporary_password: str
+    email_sent: bool
+    email_delivery: EmailDeliveryDetails
+
+
+class UserPasswordResetResponse(BaseModel):
+    user: UserAdminSummary
+    temporary_password: str
+    email_sent: bool
+    email_delivery: EmailDeliveryDetails
 
 
 class InvitationCreateRequest(BaseModel):

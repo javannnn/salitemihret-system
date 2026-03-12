@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { login } from "@/lib/auth";
+import { login, whoami } from "@/lib/auth";
 import { Input } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useTheme } from "@/context/ThemeContext";
@@ -25,9 +25,12 @@ export default function LoginPage() {
   const toast = useToast();
   const { theme, toggleTheme } = useTheme();
   const siteKey = (import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined) || "";
+  const isLocalHost =
+    typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  const shouldUseRecaptcha = Boolean(siteKey) && !isLocalHost;
 
   const loadRecaptcha = useCallback(() => {
-    if (!siteKey) {
+    if (!shouldUseRecaptcha) {
       setRecaptchaReady(false);
       return;
     }
@@ -44,7 +47,7 @@ export default function LoginPage() {
     script.onload = () => setRecaptchaReady(true);
     script.onerror = () => setRecaptchaError("reCAPTCHA failed to load. Check your network.");
     document.body.appendChild(script);
-  }, [siteKey]);
+  }, [shouldUseRecaptcha, siteKey]);
 
   useEffect(() => {
     loadRecaptcha();
@@ -56,7 +59,7 @@ export default function LoginPage() {
     setError("");
     setRecaptchaError("");
     let token: string | undefined;
-    if (siteKey) {
+    if (shouldUseRecaptcha) {
       if (!recaptchaReady || !(window as any).grecaptcha) {
         setError("reCAPTCHA is not ready. Please wait and try again.");
         setLoading(false);
@@ -74,10 +77,11 @@ export default function LoginPage() {
     try {
       await login(email, password, token);
       toast.push("Logged in successfully");
-      window.location.href = "/dashboard";
+      const session = await whoami();
+      window.location.href = session.must_change_password ? "/account" : "/dashboard";
     } catch (err) {
       console.error(err);
-      setError("Login failed. Check the credentials.");
+      setError(err instanceof Error && err.message ? err.message : "Login failed. Check the credentials.");
     } finally {
       setLoading(false);
     }
@@ -195,18 +199,20 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 ml-1">Email</label>
+                <label className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 ml-1">Email or username</label>
                 <div className="relative group">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-black dark:group-focus-within:text-white transition-colors" size={18} />
                   <Input
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    type="email"
+                    type="text"
                     required
+                    autoComplete="username"
                     className="pl-10 h-12 bg-white/50 dark:bg-black/20 border-gray-200 dark:border-white/10 focus:border-black dark:focus:border-white focus:ring-4 focus:ring-black/5 dark:focus:ring-white/5 rounded-xl transition-all"
-                    placeholder="name@example.com"
+                    placeholder="name@example.com or username"
                   />
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 ml-1">Enter either the email or the username, not both.</p>
               </div>
 
               <div className="space-y-1.5">
@@ -218,6 +224,7 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     type={showPassword ? "text" : "password"}
                     required
+                    autoComplete="current-password"
                     className="pl-10 pr-10 h-12 bg-white/50 dark:bg-black/20 border-gray-200 dark:border-white/10 focus:border-black dark:focus:border-white focus:ring-4 focus:ring-black/5 dark:focus:ring-white/5 rounded-xl transition-all"
                     placeholder="••••••••"
                   />
@@ -260,7 +267,7 @@ export default function LoginPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 type="submit"
-                disabled={loading || (siteKey ? !recaptchaReady : false)}
+                disabled={loading || (shouldUseRecaptcha ? !recaptchaReady : false)}
                 className="w-full h-12 bg-black hover:bg-gray-900 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-medium rounded-xl shadow-lg shadow-black/10 dark:shadow-white/5 flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed mt-2"
               >
                 {loading ? (
@@ -272,7 +279,7 @@ export default function LoginPage() {
                 )}
               </motion.button>
               <p className="text-[11px] text-center text-gray-500 dark:text-gray-400">
-                {siteKey ? "Protected by Google reCAPTCHA v3" : "reCAPTCHA not configured (contact admin)."}
+                {shouldUseRecaptcha ? "Protected by Google reCAPTCHA v3" : "Local login does not require reCAPTCHA."}
               </p>
             </form>
 

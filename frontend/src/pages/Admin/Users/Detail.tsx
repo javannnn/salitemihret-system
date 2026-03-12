@@ -5,7 +5,8 @@ import { Button, Card, Input, Textarea, Select, Badge } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import {
   getAdminUser,
-  AdminUserSummary,
+  AdminUserDetail,
+  AdminRoleSummary,
   updateAdminUser,
   updateAdminUserRoles,
   updateAdminUserMemberLink,
@@ -14,15 +15,19 @@ import {
   AdminUserAuditEntry,
   searchAdminMembers,
   AdminUserMemberSummary,
+  AdminUserPasswordResetResponse,
+  listAdminRoles,
+  parseApiErrorMessage,
 } from "@/lib/api";
+import { subscribeAdminRolesUpdated } from "@/lib/adminRolesSync";
 import { useToast } from "@/components/Toast";
-import { ROLE_OPTIONS, ROLE_LABELS } from "@/lib/roles";
+import { ROLE_LABELS } from "@/lib/roles";
 
 export default function UserDetail() {
   const SUPER_ROLE = "SuperAdmin";
   const { id } = useParams();
   const userId = Number(id);
-  const [user, setUser] = useState<AdminUserSummary | null>(null);
+  const [user, setUser] = useState<AdminUserDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [fullName, setFullName] = useState("");
@@ -40,11 +45,19 @@ export default function UserDetail() {
   const [savingRoles, setSavingRoles] = useState(false);
   const [savingMemberLink, setSavingMemberLink] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  const [passwordResetResult, setPasswordResetResult] = useState<AdminUserPasswordResetResponse | null>(null);
   const [roleSelection, setRoleSelection] = useState<string[]>([]);
+  const [roles, setRoles] = useState<AdminRoleSummary[]>([]);
   const toast = useToast();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.is_super_admin ?? false;
+
+  const assignableRoles = useMemo(() => {
+    const roleNames = roles.map((roleItem) => roleItem.name);
+    const withCurrent = [...roleNames, ...roleSelection.filter((role) => role !== SUPER_ROLE)];
+    return Array.from(new Set(withCurrent)).sort((a, b) => (ROLE_LABELS[a] || a).localeCompare(ROLE_LABELS[b] || b));
+  }, [roles, roleSelection]);
 
   useEffect(() => {
     if (!userId || !isSuperAdmin) {
@@ -55,6 +68,9 @@ export default function UserDetail() {
     getAdminUser(userId)
       .then((data) => {
         setUser(data);
+        if (!data.temporary_credentials?.is_active) {
+          setPasswordResetResult(null);
+        }
         setFullName(data.full_name ?? "");
         setUsername(data.username);
         setStatusValue(data.is_active ? "Active" : "Inactive");
@@ -64,10 +80,36 @@ export default function UserDetail() {
       })
       .catch((error) => {
         console.error(error);
-        toast.push("Unable to load user");
+        toast.push(parseApiErrorMessage(error, "Unable to load user"));
       })
       .finally(() => setLoading(false));
   }, [isSuperAdmin, userId, toast, reloadKey]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    listAdminRoles()
+      .then((response) => setRoles(response.items))
+      .catch((error) => {
+        console.error(error);
+        toast.push(parseApiErrorMessage(error, "Failed to load roles"));
+      });
+  }, [isSuperAdmin, toast, reloadKey]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    return subscribeAdminRolesUpdated(() => {
+      listAdminRoles()
+        .then((response) => setRoles(response.items))
+        .catch((error) => {
+          console.error(error);
+          toast.push(parseApiErrorMessage(error, "Failed to load roles"));
+        });
+    });
+  }, [isSuperAdmin, toast]);
 
   useEffect(() => {
     if (!userId || !isSuperAdmin) {
@@ -78,7 +120,7 @@ export default function UserDetail() {
       .then((entries) => setAudit(entries))
       .catch((error) => {
         console.error(error);
-        toast.push("Failed to load audit log");
+        toast.push(parseApiErrorMessage(error, "Failed to load audit log"));
       })
       .finally(() => setAuditLoading(false));
   }, [userId, toast, reloadKey]);
@@ -104,7 +146,7 @@ export default function UserDetail() {
       setReloadKey((key) => key + 1);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to update user");
+      toast.push(parseApiErrorMessage(error, "Failed to update user"));
     } finally {
       setSavingIdentity(false);
     }
@@ -117,6 +159,10 @@ export default function UserDetail() {
   }, [user]);
 
   useEffect(() => {
+    setPasswordResetResult(null);
+  }, [userId]);
+
+  useEffect(() => {
     const hasSuper = roleSelection.includes(SUPER_ROLE);
     setSuperAdmin(hasSuper);
   }, [roleSelection]);
@@ -125,7 +171,7 @@ export default function UserDetail() {
     setRoleSelection((prev) => {
       const hasSuper = prev.includes(SUPER_ROLE);
       if (superAdmin && !hasSuper) {
-        return [...prev, SUPER_ROLE];
+        return [SUPER_ROLE];
       }
       if (!superAdmin && hasSuper) {
         return prev.filter((role) => role !== SUPER_ROLE);
@@ -147,7 +193,7 @@ export default function UserDetail() {
         .then((results) => setMemberResults(results))
         .catch((error) => {
           console.error(error);
-          toast.push("Failed to search members");
+          toast.push(parseApiErrorMessage(error, "Failed to search members"));
         })
         .finally(() => setMemberSearching(false));
     }, 250);
@@ -163,7 +209,7 @@ export default function UserDetail() {
       setReloadKey((key) => key + 1);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to update roles");
+      toast.push(parseApiErrorMessage(error, "Failed to update roles"));
     } finally {
       setSavingRoles(false);
     }
@@ -172,10 +218,14 @@ export default function UserDetail() {
   const toggleRole = (roleName: string) => {
     setRoleSelection((prev) => {
       const exists = prev.includes(roleName);
-      const next = exists ? prev.filter((role) => role !== roleName) : [...prev, roleName];
       if (roleName === SUPER_ROLE) {
+        const next = exists ? [] : [SUPER_ROLE];
         setSuperAdmin(!exists);
+        return next;
       }
+      const current = prev.filter((role) => role !== SUPER_ROLE);
+      const next = exists ? current.filter((role) => role !== roleName) : [...current, roleName];
+      setSuperAdmin(false);
       return next;
     });
   };
@@ -200,7 +250,7 @@ export default function UserDetail() {
       setReloadKey((key) => key + 1);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to update member link");
+      toast.push(parseApiErrorMessage(error, "Failed to update member link"));
     } finally {
       setSavingMemberLink(false);
     }
@@ -224,11 +274,20 @@ export default function UserDetail() {
     if (!user) return;
     setResettingPassword(true);
     try {
-      await resetAdminUserPassword(user.id);
-      toast.push("Password reset invite sent");
+      const response = await resetAdminUserPassword(user.id);
+      setPasswordResetResult(response);
+      setReloadKey((key) => key + 1);
+      toast.push(
+        response.email_sent
+          ? "Temporary password generated. Mail server accepted the email."
+          : "Temporary password generated. Email delivery was not accepted."
+      );
+      if (response.email_delivery.warning) {
+        toast.push(response.email_delivery.warning);
+      }
     } catch (error) {
       console.error(error);
-      toast.push("Unable to send reset invite");
+      toast.push(parseApiErrorMessage(error, "Unable to reset password"));
     } finally {
       setResettingPassword(false);
     }
@@ -247,6 +306,10 @@ export default function UserDetail() {
     }
     return pieces.join(" • ");
   }, [user]);
+
+  const activeTemporaryPassword = passwordResetResult?.temporary_password ?? user?.temporary_credentials?.password ?? null;
+  const activeTemporaryIssuedAt = user?.temporary_credentials?.issued_at ?? null;
+  const hasActiveTemporaryPassword = Boolean(passwordResetResult || user?.temporary_credentials?.is_active);
 
   if (!userId) {
     return <div className="text-sm text-mute">Invalid user id.</div>;
@@ -278,6 +341,7 @@ export default function UserDetail() {
               {user.is_active ? "Active" : "Inactive"}
             </Badge>
             {user.is_super_admin && <Badge className="bg-slate-100 text-ink border border-white/40 dark:bg-slate-800 dark:text-white">Super Admin</Badge>}
+            {user.must_change_password && <Badge className="bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-100">Password change required</Badge>}
             <Button variant="outline" className="border-slate-200 bg-white/80 text-ink hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white" onClick={() => navigate(-1)}>
               Back
             </Button>
@@ -305,16 +369,11 @@ export default function UserDetail() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold">Identity & Access</h2>
-                <p className="text-sm text-mute">Update core identity fields, activation status, or reset credentials.</p>
+                <p className="text-sm text-mute">Update core identity fields and activation status.</p>
               </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" onClick={handleResetPassword} disabled={resettingPassword}>
-                  {resettingPassword ? "Sending…" : "Send reset invite"}
-                </Button>
-                <Button onClick={handleIdentitySave} disabled={savingIdentity}>
-                  {savingIdentity ? "Saving…" : "Save changes"}
-                </Button>
-              </div>
+              <Button onClick={handleIdentitySave} disabled={savingIdentity}>
+                {savingIdentity ? "Saving…" : "Save changes"}
+              </Button>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -343,17 +402,89 @@ export default function UserDetail() {
           </Card>
 
           <Card className="p-6 space-y-5 rounded-2xl shadow-soft">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">Temporary access</h2>
+                <p className="text-sm text-mute">Only the active system-generated password is shown here. Use either the email or the username below when helping the user sign in. Once the user changes the password, it disappears permanently.</p>
+              </div>
+              <Button variant="ghost" onClick={handleResetPassword} disabled={resettingPassword}>
+                {resettingPassword ? "Generating…" : "Generate temporary password"}
+              </Button>
+            </div>
+            {passwordResetResult && (
+              <div className={`rounded-2xl border p-4 ${passwordResetResult.email_sent ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10" : "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10"}`}>
+                <p className="text-sm font-medium">
+                  {passwordResetResult.email_sent ? "The email server accepted the new temporary password for delivery." : "A new temporary password was generated, but the email server did not accept it."}
+                </p>
+                <p className="mt-1 text-sm text-mute">
+                  Use the credentials below to help the user sign in. The system will force a password change on first login.
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-border/70 bg-card/80 p-3">
+                    <p className="text-xs uppercase tracking-wide text-mute">Login URL in email</p>
+                    <p className="mt-2 text-sm break-all">{passwordResetResult.email_delivery.login_url || "Not available"}</p>
+                  </div>
+                  <div className={`rounded-xl border p-3 ${passwordResetResult.email_delivery.login_url_public ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/20 dark:bg-emerald-500/10" : "border-amber-200 bg-amber-50/70 dark:border-amber-500/20 dark:bg-amber-500/10"}`}>
+                    <p className="text-xs uppercase tracking-wide text-mute">Link status</p>
+                    <p className="mt-2 text-sm font-medium">
+                      {passwordResetResult.email_delivery.login_url_public ? "Publicly reachable" : "Local or private URL"}
+                    </p>
+                    {passwordResetResult.email_delivery.warning && (
+                      <p className="mt-1 text-sm text-mute">{passwordResetResult.email_delivery.warning}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {hasActiveTemporaryPassword ? (
+              user.temporary_credentials?.is_active && !activeTemporaryPassword ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  A temporary password is active, but it cannot be displayed with the current server secret. Generate a new temporary password to replace it.
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-border/70 bg-card/80 p-4">
+                    <p className="text-xs uppercase tracking-wide text-mute">Sign-in email</p>
+                    <p className="mt-2 text-sm font-medium break-all">{user.email}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-card/80 p-4">
+                    <p className="text-xs uppercase tracking-wide text-mute">Username</p>
+                    <p className="mt-2 text-sm font-medium">{user.username}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-card/80 p-4 md:col-span-2">
+                    <p className="text-xs uppercase tracking-wide text-mute">Temporary password</p>
+                    <p className="mt-2 font-mono text-sm break-all">{activeTemporaryPassword}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-mute">
+                      <span>Active until the user changes it.</span>
+                      {activeTemporaryIssuedAt && <span>Issued {new Date(activeTemporaryIssuedAt).toLocaleString()}</span>}
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="rounded-2xl border border-border bg-muted/40 p-4 text-sm text-mute">
+                No active temporary password is available. The user may already have changed to a personal password, or this account's current password predates temporary-credential tracking. Generate a new temporary password if support is needed.
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-6 space-y-5 rounded-2xl shadow-soft">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold">Role assignments</h2>
                 <p className="text-sm text-mute">Toggle module access. Changes apply immediately.</p>
               </div>
-              <Button onClick={handleRolesSave} disabled={savingRoles}>
-                {savingRoles ? "Saving…" : "Save roles"}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => navigate("/admin/users/roles")}>
+                  Manage roles
+                </Button>
+                <Button onClick={handleRolesSave} disabled={savingRoles}>
+                  {savingRoles ? "Saving…" : "Save roles"}
+                </Button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {ROLE_OPTIONS.map((role) => (
+              {assignableRoles.map((role) => (
                 <label key={role} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${roleSelection.includes(role) ? "border-accent bg-accent/10" : "border-border"}`}>
                   <input
                     type="checkbox"

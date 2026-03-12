@@ -7,8 +7,8 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.auth.security import hash_password
-from app.services.user_accounts import generate_username_from_email
+from app.auth.security import hash_password, verify_password
+from app.services.user_accounts import clear_temporary_password, generate_username_from_email
 from app.config import UPLOAD_DIR
 from app.core.config import settings
 from app.core.db import Base, SessionLocal, engine
@@ -32,6 +32,7 @@ from app.models.user import User
 from app.services.members_utils import apply_children, apply_spouse
 from app.schemas.payment import PaymentCreate
 from app.services import payments as payments_service
+from app.services.permissions import is_system_role_name
 from app.services.schools import ABENET_SERVICE_CODE
 
 ROLE_NAMES = [
@@ -418,8 +419,12 @@ def _write_avatar(filename: str) -> str:
 def ensure_role(db: Session, name: str) -> Role:
     role = db.query(Role).filter_by(name=name).first()
     if role is None:
-        role = Role(name=name)
+        role = Role(name=name, is_system=is_system_role_name(name))
         db.add(role)
+        db.commit()
+        db.refresh(role)
+    elif role.is_system != is_system_role_name(name):
+        role.is_system = is_system_role_name(name)
         db.commit()
         db.refresh(role)
     return role
@@ -439,6 +444,14 @@ def ensure_user(db: Session, email: str, full_name: str, password: str, roles: l
         db.add(user)
         db.commit()
         db.refresh(user)
+    else:
+        user.full_name = full_name
+        user.is_active = True
+        # Keep demo credentials deterministic across reseeds.
+        if not verify_password(password, user.hashed_password):
+            user.hashed_password = hash_password(password)
+    user.must_change_password = False
+    clear_temporary_password(user)
 
     user.roles.clear()
     for role_name in roles:

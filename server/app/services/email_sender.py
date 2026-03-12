@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import smtplib
+from urllib.parse import urlparse
 from email.message import EmailMessage
 from email.utils import formataddr, format_datetime, make_msgid
 import imaplib
@@ -28,6 +29,19 @@ def _clean_recipients(recipients: Iterable[str]) -> list[str]:
             continue
         cleaned.append(normalized)
     return list(dict.fromkeys(cleaned))
+
+
+def _smtp_local_hostname() -> str | None:
+    if settings.EMAIL_HELO_HOST:
+        return settings.EMAIL_HELO_HOST.strip() or None
+    if settings.EMAIL_FROM_ADDRESS and "@" in settings.EMAIL_FROM_ADDRESS:
+        return settings.EMAIL_FROM_ADDRESS.split("@", 1)[1].strip().lower()
+    frontend = settings.FRONTEND_BASE_URL.strip()
+    if frontend:
+        parsed = urlparse(frontend)
+        if parsed.hostname:
+            return parsed.hostname
+    return None
 
 
 class EmailSender:
@@ -104,6 +118,7 @@ class EmailSender:
                     settings.EMAIL_SMTP_HOST,
                     settings.EMAIL_SMTP_PORT,
                     timeout=settings.EMAIL_TIMEOUT_SECONDS,
+                    local_hostname=_smtp_local_hostname(),
                 ) as smtp:
                     smtp.ehlo()
                     smtp.login(settings.EMAIL_SMTP_USERNAME, settings.EMAIL_SMTP_PASSWORD)
@@ -113,6 +128,7 @@ class EmailSender:
                     settings.EMAIL_SMTP_HOST,
                     settings.EMAIL_SMTP_PORT,
                     timeout=settings.EMAIL_TIMEOUT_SECONDS,
+                    local_hostname=_smtp_local_hostname(),
                 ) as smtp:
                     smtp.ehlo()
                     if settings.EMAIL_SMTP_USE_TLS:

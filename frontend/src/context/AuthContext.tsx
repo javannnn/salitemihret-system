@@ -28,9 +28,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     setLoading(true);
-    const minLoadTime = new Promise((resolve) => setTimeout(resolve, 3500)); // 3.5s minimum delay
     try {
-      const [data] = await Promise.all([whoami(), minLoadTime]);
+      const data = await whoami();
       setUser(data);
       setTokenState(getToken());
       resetSessionExpiryNotice();

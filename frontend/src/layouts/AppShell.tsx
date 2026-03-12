@@ -33,6 +33,7 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   "/schools": () => import("@/pages/Schools"),
   "/volunteers": () => import("@/pages/Volunteers"),
   "/admin/users": () => import("@/pages/Admin/Users/List"),
+  "/admin/users/roles": () => import("@/pages/Admin/Users/Roles"),
   "/admin/email": () => import("@/pages/Admin/Email/Client"),
   "/admin/reports": () => import("@/pages/Admin/Reports/Client"),
   "/account": () => import("@/pages/Account/Profile"),
@@ -175,7 +176,8 @@ export default function AppShell() {
   }, [toast]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || user.must_change_password) {
+      setLicenseLoading(false);
       return;
     }
     let active = true;
@@ -791,9 +793,11 @@ export default function AppShell() {
         </nav>
       )}
       <TourOverlay />
-      <ChatProvider>
-        <ChatWidget />
-      </ChatProvider>
+      {!user.must_change_password && (
+        <ChatProvider>
+          <ChatWidget />
+        </ChatProvider>
+      )}
     </div>
   );
 }

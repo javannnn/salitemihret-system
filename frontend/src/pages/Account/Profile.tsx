@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, X } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
-import { Card, Input, Button, Textarea, Badge } from "@/components/ui";
+import { Card, Input, Button, Textarea } from "@/components/ui";
 import {
   AccountProfile as AccountProfileType,
   AccountMemberSummary,
@@ -11,12 +11,12 @@ import {
   updateAccountPassword,
   requestAccountMemberLink,
   searchAccountMembers,
-  ApiError,
+  parseApiErrorMessage,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 
 export default function AccountProfile() {
-  const { refresh, user } = useAuth();
+  const { refresh } = useAuth();
   const toast = useToast();
   const [profile, setProfile] = useState<AccountProfileType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,28 +37,6 @@ export default function AccountProfile() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
-  const parseErrorMessage = useCallback((error: unknown, fallback: string) => {
-    if (error instanceof ApiError) {
-      if (error.body) {
-        try {
-          const parsed = JSON.parse(error.body);
-          if (typeof parsed?.detail === "string") {
-            return parsed.detail;
-          }
-        } catch {
-          if (error.body.trim()) {
-            return error.body;
-          }
-        }
-      }
-      return fallback;
-    }
-    if (error instanceof Error) {
-      return error.message || fallback;
-    }
-    return fallback;
-  }, []);
 
   const loadProfile = useCallback(() => {
     setLoading(true);
@@ -143,7 +121,7 @@ export default function AccountProfile() {
       loadProfile();
     } catch (error) {
       console.error(error);
-      setProfileError(parseErrorMessage(error, "Failed to update profile"));
+      setProfileError(parseApiErrorMessage(error, "Failed to update profile"));
     } finally {
       setSavingProfile(false);
     }
@@ -179,14 +157,20 @@ export default function AccountProfile() {
     }
     setSavingPassword(true);
     try {
-      await updateAccountPassword({ current_password: currentPassword, new_password: newPassword });
-      toast.push("Password updated");
+      await updateAccountPassword(
+        profile.must_change_password
+          ? { new_password: newPassword }
+          : { current_password: currentPassword, new_password: newPassword }
+      );
+      toast.push(profile.must_change_password ? "Password updated. Access fully unlocked." : "Password updated");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      await refresh();
+      loadProfile();
     } catch (error) {
       console.error(error);
-      setPasswordError(parseErrorMessage(error, "Unable to update password"));
+      setPasswordError(parseApiErrorMessage(error, "Unable to update password"));
     } finally {
       setSavingPassword(false);
     }
@@ -219,7 +203,7 @@ export default function AccountProfile() {
       loadProfile();
     } catch (error) {
       console.error(error);
-      setMemberError(parseErrorMessage(error, "Unable to submit request"));
+      setMemberError(parseApiErrorMessage(error, "Unable to submit request"));
     } finally {
       setSavingMemberLink(false);
     }
@@ -235,54 +219,70 @@ export default function AccountProfile() {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+      {profile.must_change_password && (
+        <Card className="p-6 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <h2 className="text-base font-semibold">Password update required</h2>
+          <p className="mt-2 text-sm">
+            This account was created with a temporary password. Change it now to unlock the rest of the system.
+          </p>
+        </Card>
+      )}
+      <div className={`grid gap-6 ${profile.must_change_password ? "" : "xl:grid-cols-[1.15fr_0.85fr]"}`}>
         <div className="space-y-6">
+          {!profile.must_change_password && (
+            <Card className="p-6 space-y-5 rounded-2xl shadow-soft bg-slate-50 text-slate-900 border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
+              <div className="flex flex-col gap-1">
+                <h2 className="text-base font-semibold">Profile</h2>
+                <p className="text-sm text-mute">Your name and username appear on approvals, audit logs, and invitations.</p>
+              </div>
+              <form className="grid gap-4 md:grid-cols-2" onSubmit={handleProfileSave}>
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-mute">Full name</label>
+                  <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-mute">Username</label>
+                  <Input
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                    disabled={!profile.can_change_username}
+                  />
+                  {!profile.can_change_username && profile.next_username_change_at && (
+                    <p className="text-xs text-amber-600">
+                      Next change window opens {new Date(profile.next_username_change_at).toLocaleDateString()}.
+                    </p>
+                  )}
+                </div>
+                <div className="md:col-span-2 flex justify-end">
+                  <Button type="submit" disabled={savingProfile}>
+                    {savingProfile ? "Saving…" : "Save changes"}
+                  </Button>
+                </div>
+                {profileError && (
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-red-500">{profileError}</p>
+                  </div>
+                )}
+              </form>
+            </Card>
+          )}
+
           <Card className="p-6 space-y-5 rounded-2xl shadow-soft bg-slate-50 text-slate-900 border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
             <div className="flex flex-col gap-1">
-              <h2 className="text-base font-semibold">Profile</h2>
-              <p className="text-sm text-mute">Your name and username appear on approvals, audit logs, and invitations.</p>
-            </div>
-            <form className="grid gap-4 md:grid-cols-2" onSubmit={handleProfileSave}>
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-wide text-mute">Full name</label>
-                <Input value={fullName} onChange={(event) => setFullName(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-wide text-mute">Username</label>
-                <Input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value.toLowerCase())}
-                  disabled={!profile.can_change_username}
-                />
-                {!profile.can_change_username && profile.next_username_change_at && (
-                  <p className="text-xs text-amber-600">
-                    Next change window opens {new Date(profile.next_username_change_at).toLocaleDateString()}.
-                  </p>
-                )}
-              </div>
-              <div className="md:col-span-2 flex justify-end">
-                <Button type="submit" disabled={savingProfile}>
-                  {savingProfile ? "Saving…" : "Save changes"}
-                </Button>
-              </div>
-              {profileError && (
-                <div className="md:col-span-2">
-                  <p className="text-xs text-red-500">{profileError}</p>
-                </div>
-              )}
-            </form>
-          </Card>
-
-      <Card className="p-6 space-y-5 rounded-2xl shadow-soft bg-slate-50 text-slate-900 border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800">
-            <div className="flex flex-col gap-1">
               <h2 className="text-base font-semibold">Password</h2>
-              <p className="text-sm text-mute">Use at least 12 characters with upper/lowercase, a number, and a symbol.</p>
+              <p className="text-sm text-mute">
+                {profile.must_change_password
+                  ? "Set a permanent password to finish activating this account."
+                  : "Use at least 12 characters with upper/lowercase, a number, and a symbol."}
+              </p>
             </div>
             <form className="grid gap-4 md:grid-cols-2" onSubmit={handlePasswordSave}>
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-xs uppercase tracking-wide text-mute">Current password</label>
-                <Input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required />
-              </div>
+              {!profile.must_change_password && (
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-xs uppercase tracking-wide text-mute">Current password</label>
+                  <Input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required />
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-xs uppercase tracking-wide text-mute">New password</label>
                 <Input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
@@ -322,98 +322,100 @@ export default function AccountProfile() {
           </Card>
         </div>
 
-        <Card className="p-6 rounded-2xl shadow-soft bg-slate-50 text-slate-900 border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800 space-y-5">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-base font-semibold">Member link</h2>
-            <p className="text-sm text-mute">
-              Linking ensures your user activity ties back to a specific parish record. Leave the field empty to request unlinking.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-1 dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-sm font-medium">{linkedMemberLabel}</p>
-            {profile.member?.status && <p className="text-xs text-mute">Status: {profile.member.status}</p>}
-            {linkedMemberContact && <p className="text-xs text-mute">{linkedMemberContact}</p>}
-          </div>
-          <form className="space-y-4" onSubmit={handleMemberLinkRequest}>
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wide text-mute">Find your record</label>
-              <Input
-                value={memberSearchTerm}
-                onChange={(event) => setMemberSearchTerm(event.target.value)}
-                placeholder="Start typing a name, email, or phone number"
-              />
-              {memberSearchTerm && (
-                <div className="rounded-2xl border border-slate-200 bg-white text-sm max-h-56 overflow-y-auto dark:border-slate-700 dark:bg-slate-900">
-                  {memberSearching ? (
-                    <p className="px-3 py-2 text-mute">Searching…</p>
-                  ) : memberResults.length ? (
-                    memberResults.map((member) => (
-                      <button
-                        type="button"
-                        key={member.id}
-                        onClick={() => handleSelectMemberSuggestion(member)}
-                        className={`w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 ${memberInput === String(member.id) ? "bg-emerald-50 dark:bg-emerald-500/10" : ""
-                          }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{member.first_name} {member.last_name}</span>
-                          <span className="text-xs text-mute">ID {member.id}</span>
-                        </div>
-                        <div className="text-xs text-mute">
-                          {member.status && <span>{member.status}</span>}
-                          {member.email && <span> • {member.email}</span>}
-                          {member.phone && <span> • {member.phone}</span>}
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-3 py-2 text-mute">No matches yet.</p>
+        {!profile.must_change_password && (
+          <Card className="p-6 rounded-2xl shadow-soft bg-slate-50 text-slate-900 border border-slate-200 dark:bg-black dark:text-slate-100 dark:border-slate-800 space-y-5">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-base font-semibold">Member link</h2>
+              <p className="text-sm text-mute">
+                Linking ensures your user activity ties back to a specific parish record. Leave the field empty to request unlinking.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-1 dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-sm font-medium">{linkedMemberLabel}</p>
+              {profile.member?.status && <p className="text-xs text-mute">Status: {profile.member.status}</p>}
+              {linkedMemberContact && <p className="text-xs text-mute">{linkedMemberContact}</p>}
+            </div>
+            <form className="space-y-4" onSubmit={handleMemberLinkRequest}>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide text-mute">Find your record</label>
+                <Input
+                  value={memberSearchTerm}
+                  onChange={(event) => setMemberSearchTerm(event.target.value)}
+                  placeholder="Start typing a name, email, or phone number"
+                />
+                {memberSearchTerm && (
+                  <div className="rounded-2xl border border-slate-200 bg-white text-sm max-h-56 overflow-y-auto dark:border-slate-700 dark:bg-slate-900">
+                    {memberSearching ? (
+                      <p className="px-3 py-2 text-mute">Searching…</p>
+                    ) : memberResults.length ? (
+                      memberResults.map((member) => (
+                        <button
+                          type="button"
+                          key={member.id}
+                          onClick={() => handleSelectMemberSuggestion(member)}
+                          className={`w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 ${memberInput === String(member.id) ? "bg-emerald-50 dark:bg-emerald-500/10" : ""
+                            }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{member.first_name} {member.last_name}</span>
+                            <span className="text-xs text-mute">ID {member.id}</span>
+                          </div>
+                          <div className="text-xs text-mute">
+                            {member.status && <span>{member.status}</span>}
+                            {member.email && <span> • {member.email}</span>}
+                            {member.phone && <span> • {member.phone}</span>}
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2 text-mute">No matches yet.</p>
+                    )}
+                  </div>
+                )}
+                <p className="text-xs text-mute">Selecting a record fills the member ID below. Super Admins review every request.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide text-mute">Selected member ID</label>
+                <div className="flex items-center gap-2">
+                  <Input value={memberInput} onChange={(event) => setMemberInput(event.target.value)} placeholder="e.g., 42" />
+                  {memberInput && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setMemberInput("");
+                        setMemberSearchTerm("");
+                        setMemberResults([]);
+                        setMemberIdWarning(null);
+                      }}
+                    >
+                      Clear
+                    </Button>
                   )}
                 </div>
-              )}
-              <p className="text-xs text-mute">Selecting a record fills the member ID below. Super Admins review every request.</p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wide text-mute">Selected member ID</label>
-              <div className="flex items-center gap-2">
-                <Input value={memberInput} onChange={(event) => setMemberInput(event.target.value)} placeholder="e.g., 42" />
-                {memberInput && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setMemberInput("");
-                      setMemberSearchTerm("");
-                      setMemberResults([]);
-                      setMemberIdWarning(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )}
+                {memberIdWarning && <p className="text-xs text-red-500">{memberIdWarning}</p>}
               </div>
-              {memberIdWarning && <p className="text-xs text-red-500">{memberIdWarning}</p>}
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wide text-mute">Notes</label>
-              <Textarea
-                value={memberNotes}
-                onChange={(event) => setMemberNotes(event.target.value)}
-                placeholder="Add context (e.g., “I am PR Admin assigned to Bekele Desta”)"
-                maxLength={255}
-                rows={3}
-              />
-              <p className="text-[11px] text-mute text-right">{memberNotes.length}/255</p>
-            </div>
-            <div className="flex justify-end">
-              <Button type="submit" disabled={savingMemberLink}>
-                {savingMemberLink ? "Submitting…" : profile.member ? "Request update" : "Request link"}
-              </Button>
-            </div>
-            {(memberError || memberIdWarning) && <p className="text-xs text-red-500">{memberError || memberIdWarning}</p>}
-          </form>
-        </Card>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide text-mute">Notes</label>
+                <Textarea
+                  value={memberNotes}
+                  onChange={(event) => setMemberNotes(event.target.value)}
+                  placeholder="Add context (e.g., “I am PR Admin assigned to Bekele Desta”)"
+                  maxLength={255}
+                  rows={3}
+                />
+                <p className="text-[11px] text-mute text-right">{memberNotes.length}/255</p>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={savingMemberLink}>
+                  {savingMemberLink ? "Submitting…" : profile.member ? "Request update" : "Request link"}
+                </Button>
+              </div>
+              {(memberError || memberIdWarning) && <p className="text-xs text-red-500">{memberError || memberIdWarning}</p>}
+            </form>
+          </Card>
+        )}
       </div>
     </div>
   );

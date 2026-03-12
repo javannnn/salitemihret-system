@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/saliteone"
     JWT_SECRET: str = "change-me"
+    TEMP_CREDENTIALS_SECRET: str | None = None
     JWT_ALG: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ENVIRONMENT: str = "local"
@@ -47,6 +48,7 @@ class Settings(BaseSettings):
     EMAIL_SMTP_PORT: int = 465
     EMAIL_SMTP_USERNAME: str | None = None
     EMAIL_SMTP_PASSWORD: str | None = None
+    EMAIL_HELO_HOST: str | None = None
     EMAIL_SMTP_USE_SSL: bool = True
     EMAIL_SMTP_USE_TLS: bool = False
     EMAIL_TIMEOUT_SECONDS: int = 20

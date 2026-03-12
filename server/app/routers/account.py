@@ -20,7 +20,8 @@ from app.schemas.account import (
     PasswordChangeRequest,
     ProfileUpdateRequest,
 )
-from app.services.user_accounts import ensure_unique_username, validate_password_strength, now_utc
+from app.services.permissions import compute_effective_permissions
+from app.services.user_accounts import clear_temporary_password, ensure_unique_username, validate_password_strength, now_utc
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -48,6 +49,7 @@ def _serialize_account_user(user: User) -> AccountProfileResponse:
     member_summary = None
     if user.member_link and user.member_link.member:
         member_summary = _serialize_account_member(user.member_link.member, status=user.member_link.status)
+    permissions = compute_effective_permissions(user.roles, is_super_admin=user.is_super_admin)
     cooldown = timedelta(days=settings.USERNAME_CHANGE_COOLDOWN_DAYS)
     next_change_at = None
     can_change_username = True
@@ -60,6 +62,8 @@ def _serialize_account_user(user: User) -> AccountProfileResponse:
         full_name=user.full_name,
         roles=[role.name for role in user.roles],
         is_super_admin=user.is_super_admin,
+        must_change_password=user.must_change_password,
+        permissions=permissions,
         member=member_summary,
         can_change_username=can_change_username,
         next_username_change_at=next_change_at,
@@ -113,13 +117,21 @@ def update_my_profile(payload: ProfileUpdateRequest, user: User = Depends(get_cu
 
 @router.patch("/me/password")
 def change_my_password(payload: PasswordChangeRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict[str, str]:
-    if not verify_password(payload.current_password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if user.must_change_password:
+        if payload.current_password and not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    else:
+        if not payload.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is required")
+        if not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     try:
         validate_password_strength(payload.new_password)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     user.hashed_password = hash_password(payload.new_password)
+    user.must_change_password = False
+    clear_temporary_password(user)
     user.updated_at = now_utc()
     db.commit()
     return {"status": "ok"}

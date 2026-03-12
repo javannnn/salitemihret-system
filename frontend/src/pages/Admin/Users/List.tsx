@@ -5,19 +5,24 @@ import { Button, Card, Input, Select, Textarea, Badge } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import {
   listAdminUsers,
+  listAdminRoles,
   AdminUserListResponse,
-  createUserInvitation,
-  InvitationCreatePayload,
+  AdminRoleSummary,
+  provisionAdminUser,
+  AdminUserProvisionPayload,
+  AdminUserProvisionResponse,
   searchAdminMembers,
   AdminUserMemberSummary,
+  parseApiErrorMessage,
 } from "@/lib/api";
+import { subscribeAdminRolesUpdated } from "@/lib/adminRolesSync";
 import { useToast } from "@/components/Toast";
-import { ROLE_OPTIONS, ROLE_LABELS } from "@/lib/roles";
+import { ROLE_LABELS } from "@/lib/roles";
 
 type StatusFilter = "any" | "active" | "inactive";
 type LinkedFilter = "any" | "linked" | "unlinked";
 
-const roleOptions = [...ROLE_OPTIONS].sort((a, b) => (ROLE_LABELS[a] || a).localeCompare(ROLE_LABELS[b] || b));
+const SUPER_ROLE = "SuperAdmin";
 
 export default function UsersList() {
   const [data, setData] = useState<AdminUserListResponse | null>(null);
@@ -28,16 +33,29 @@ export default function UsersList() {
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [invitePayload, setInvitePayload] = useState<InvitationCreatePayload>({ email: "", full_name: "", username: "", roles: [] });
+  const [roles, setRoles] = useState<AdminRoleSummary[]>([]);
+  const [invitePayload, setInvitePayload] = useState<AdminUserProvisionPayload>({ email: "", username: "", roles: [] });
+  const [inviteFirstName, setInviteFirstName] = useState("");
+  const [inviteLastName, setInviteLastName] = useState("");
   const [inviteMemberId, setInviteMemberId] = useState("");
   const [memberSearchTerm, setMemberSearchTerm] = useState("");
   const [memberResults, setMemberResults] = useState<AdminUserMemberSummary[]>([]);
   const [memberSearching, setMemberSearching] = useState(false);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [provisionResult, setProvisionResult] = useState<AdminUserProvisionResponse | null>(null);
   const toast = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
   const isSuperAdmin = user?.is_super_admin ?? false;
+
+  const roleOptions = useMemo(
+    () => roles.map((roleItem) => roleItem.name).sort((a, b) => (ROLE_LABELS[a] || a).localeCompare(ROLE_LABELS[b] || b)),
+    [roles]
+  );
+  const inviteRoleOptions = useMemo(() => {
+    const withoutSuper = roleOptions.filter((option) => option !== SUPER_ROLE);
+    return [SUPER_ROLE, ...withoutSuper];
+  }, [roleOptions]);
 
   const summaryCards = useMemo(
     () => [
@@ -72,6 +90,31 @@ export default function UsersList() {
     loadUsers();
   }, [loadUsers, refreshKey]);
 
+  const loadRoles = useCallback(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    listAdminRoles()
+      .then((response) => setRoles(response.items))
+      .catch((error) => {
+        console.error(error);
+        toast.push("Failed to load roles");
+      });
+  }, [isSuperAdmin, toast]);
+
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    return subscribeAdminRolesUpdated(() => {
+      loadRoles();
+    });
+  }, [isSuperAdmin, loadRoles]);
+
   useEffect(() => {
     if (!inviteOpen) {
       setMemberResults([]);
@@ -98,10 +141,13 @@ export default function UsersList() {
   }, [inviteOpen, memberSearchTerm, toast]);
 
   const resetInviteForm = () => {
-    setInvitePayload({ email: "", full_name: "", username: "", roles: [] });
+    setInvitePayload({ email: "", username: "", roles: [] });
+    setInviteFirstName("");
+    setInviteLastName("");
     setInviteMemberId("");
     setMemberSearchTerm("");
     setMemberResults([]);
+    setProvisionResult(null);
   };
 
   const handleInviteSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -110,6 +156,13 @@ export default function UsersList() {
       toast.push("Email is required");
       return;
     }
+    const firstName = inviteFirstName.trim();
+    const lastName = inviteLastName.trim();
+    if ((firstName || lastName) && (!firstName || !lastName)) {
+      toast.push("Enter both first name and last name.");
+      return;
+    }
+    const fullName = [firstName, lastName].filter(Boolean).join(" ").trim() || undefined;
     const trimmedMemberId = inviteMemberId.trim();
     let memberId: number | undefined;
     if (trimmedMemberId) {
@@ -122,18 +175,25 @@ export default function UsersList() {
     }
     setInviteSubmitting(true);
     try {
-      const response = await createUserInvitation({
+      const response = await provisionAdminUser({
         ...invitePayload,
+        full_name: fullName,
         member_id: memberId,
         roles: invitePayload.roles,
       });
-      toast.push(`Invite created for ${response.email}`);
-      setInviteOpen(false);
-      resetInviteForm();
+      setProvisionResult(response);
+      toast.push(
+        response.email_sent
+          ? `Account created for ${response.user.email}. Mail server accepted the email.`
+          : `Account created for ${response.user.email}. Email delivery was not accepted.`
+      );
+      if (response.email_delivery.warning) {
+        toast.push(response.email_delivery.warning);
+      }
       setRefreshKey((key) => key + 1);
     } catch (error) {
       console.error(error);
-      toast.push("Failed to create invitation");
+      toast.push(parseApiErrorMessage(error, "Failed to create user"));
     } finally {
       setInviteSubmitting(false);
     }
@@ -142,9 +202,16 @@ export default function UsersList() {
   const toggleRole = (roleName: string) => {
     setInvitePayload((prev) => {
       const exists = prev.roles?.includes(roleName);
+      if (roleName === SUPER_ROLE) {
+        return {
+          ...prev,
+          roles: exists ? [] : [SUPER_ROLE],
+        };
+      }
+      const current = (prev.roles ?? []).filter((role) => role !== SUPER_ROLE);
       return {
         ...prev,
-        roles: exists ? prev.roles?.filter((role) => role !== roleName) ?? [] : [...(prev.roles ?? []), roleName],
+        roles: exists ? current.filter((role) => role !== roleName) : [...current, roleName],
       };
     });
   };
@@ -171,16 +238,29 @@ export default function UsersList() {
             <p className="text-xs uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">Security Console</p>
             <h1 className="text-3xl font-semibold text-ink dark:text-white">User Management</h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-              Provision identities, invite new administrators, and keep role assignments and member links disciplined. Every change is audited.
+              Create accounts instantly, assign roles, and keep member links disciplined. Every change is audited.
             </p>
           </div>
           <div className="ms-auto flex flex-wrap gap-3">
             <Button variant="outline" className="border-slate-200 bg-white/90 text-ink hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white" onClick={() => loadUsers()}>
               Refresh
             </Button>
-            <Button className="bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900" onClick={() => setInviteOpen(true)}>
+            <Button
+              variant="outline"
+              className="border-slate-200 bg-white/90 text-ink hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              onClick={() => navigate("/admin/users/roles")}
+            >
+              Roles & permissions
+            </Button>
+            <Button
+              className="bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
+              onClick={() => {
+                resetInviteForm();
+                setInviteOpen(true);
+              }}
+            >
               <Plus size={16} className="mr-2" />
-              Invite user
+              Create user
             </Button>
           </div>
         </div>
@@ -305,6 +385,7 @@ export default function UsersList() {
                           {user.is_active ? "Active" : "Inactive"}
                         </Badge>
                         {user.is_super_admin && <p className="text-[11px] text-mute mt-1">Super Admin</p>}
+                        {user.must_change_password && <p className="text-[11px] text-amber-600 mt-1">Password change required</p>}
                       </td>
                       <td className="px-5 py-4 text-right">
                         <Button variant="ghost" size="sm" onClick={() => navigate(`/admin/users/${user.id}`)}>
@@ -328,139 +409,214 @@ export default function UsersList() {
             <Card className="w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl bg-white/95 dark:bg-slate-900/95 border border-border/70">
               <div className="flex items-center justify-between px-6 py-4 border-b border-border/60">
                 <div>
-                  <h2 className="text-lg font-semibold">Invite user</h2>
-                  <p className="text-sm text-mute">Send an email invite to create an account.</p>
+                  <h2 className="text-lg font-semibold">{provisionResult ? "Account created" : "Create user"}</h2>
+                  <p className="text-sm text-mute">
+                    {provisionResult
+                      ? "Share the temporary password only if email delivery failed."
+                      : "Create the account now and email the user their temporary credentials."}
+                  </p>
                 </div>
                 <Button variant="ghost" onClick={() => { setInviteOpen(false); resetInviteForm(); }}>
                   Close
                 </Button>
               </div>
-              <form className="space-y-4 overflow-y-auto px-6 py-4 max-h-[70vh]" onSubmit={handleInviteSubmit}>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="text-xs uppercase text-mute">Email</label>
-                    <Input
-                      type="email"
-                      required
-                      value={invitePayload.email}
-                      onChange={(event) => setInvitePayload((prev) => ({ ...prev, email: event.target.value }))}
-                    />
+              {provisionResult ? (
+                <div className="space-y-5 overflow-y-auto px-6 py-4 max-h-[70vh]">
+                  <div className={`rounded-2xl border p-4 ${provisionResult.email_sent ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10" : "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10"}`}>
+                    <p className="text-sm font-medium">
+                      {provisionResult.email_sent ? "The email server accepted the welcome email." : "Account created, but the email server did not accept the message."}
+                    </p>
+                    <p className="mt-1 text-sm text-mute">
+                      {provisionResult.email_sent
+                        ? "The user can sign in immediately with the temporary password below."
+                        : "Use the temporary password below to deliver access manually."}
+                    </p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-border/70 bg-card/80 p-3">
+                        <p className="text-xs uppercase tracking-wide text-mute">Login URL in email</p>
+                        <p className="mt-2 text-sm break-all">{provisionResult.email_delivery.login_url || "Not available"}</p>
+                      </div>
+                      <div className={`rounded-xl border p-3 ${provisionResult.email_delivery.login_url_public ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/20 dark:bg-emerald-500/10" : "border-amber-200 bg-amber-50/70 dark:border-amber-500/20 dark:bg-amber-500/10"}`}>
+                        <p className="text-xs uppercase tracking-wide text-mute">Link status</p>
+                        <p className="mt-2 text-sm font-medium">
+                          {provisionResult.email_delivery.login_url_public ? "Publicly reachable" : "Local or private URL"}
+                        </p>
+                        {provisionResult.email_delivery.warning && (
+                          <p className="mt-1 text-sm text-mute">{provisionResult.email_delivery.warning}</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Full name</label>
-                    <Input
-                      value={invitePayload.full_name ?? ""}
-                      onChange={(event) => setInvitePayload((prev) => ({ ...prev, full_name: event.target.value }))}
-                      placeholder="Optional"
-                    />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-border/70 bg-card/80 p-4">
+                      <p className="text-xs uppercase tracking-wide text-mute">Email</p>
+                      <p className="mt-2 text-sm font-medium">{provisionResult.user.email}</p>
+                    </div>
+                    <div className="rounded-2xl border border-border/70 bg-card/80 p-4">
+                      <p className="text-xs uppercase tracking-wide text-mute">Username</p>
+                      <p className="mt-2 text-sm font-medium">{provisionResult.user.username}</p>
+                    </div>
+                    <div className="rounded-2xl border border-border/70 bg-card/80 p-4 md:col-span-2">
+                      <p className="text-xs uppercase tracking-wide text-mute">Temporary password</p>
+                      <p className="mt-2 font-mono text-sm">{provisionResult.temporary_password}</p>
+                      <p className="mt-2 text-xs text-mute">The system will force a password change on the first successful login.</p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Username</label>
-                    <Input
-                      value={invitePayload.username ?? ""}
-                      onChange={(event) => setInvitePayload((prev) => ({ ...prev, username: event.target.value.toLowerCase() }))}
-                      placeholder="Auto-generate if empty"
-                    />
-                    <p className="text-xs text-mute mt-1">Only lowercase letters, numbers, dots, underscores.</p>
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute">Message</label>
-                    <Textarea
-                      value={invitePayload.message ?? ""}
-                      onChange={(event) => setInvitePayload((prev) => ({ ...prev, message: event.target.value }))}
-                      placeholder="Optional note to include"
-                    />
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" onClick={resetInviteForm}>
+                      Create another
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setInviteOpen(false);
+                        const userId = provisionResult.user.id;
+                        resetInviteForm();
+                        navigate(`/admin/users/${userId}`);
+                      }}
+                    >
+                      View profile
+                    </Button>
                   </div>
                 </div>
-              <div>
-                <label className="text-xs uppercase text-mute">Roles</label>
-                <div className="flex flex-wrap gap-2">
-                  {ROLE_OPTIONS.map((option) => (
-                    <label key={option} className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="accent-accent"
-                        checked={invitePayload.roles?.includes(option) ?? false}
-                        onChange={() => toggleRole(option)}
+              ) : (
+                <form className="space-y-4 overflow-y-auto px-6 py-4 max-h-[70vh]" onSubmit={handleInviteSubmit}>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs uppercase text-mute">Email</label>
+                      <Input
+                        type="email"
+                        required
+                        autoComplete="email"
+                        value={invitePayload.email}
+                        onChange={(event) => setInvitePayload((prev) => ({ ...prev, email: event.target.value }))}
                       />
-                      {ROLE_LABELS[option] || option}
-                    </label>
-                  ))}
-                </div>
-              </div>
-                <div className="space-y-2">
-                  <label className="text-xs uppercase text-mute">Link to member</label>
-                  <Input
-                    value={memberSearchTerm}
-                    onChange={(event) => setMemberSearchTerm(event.target.value)}
-                    placeholder="Search by name, email, or phone"
-                  />
-                  {memberSearchTerm && (
-                    <div className="rounded-xl border border-border bg-card/80 text-left text-sm">
-                      {memberSearching ? (
-                        <p className="px-3 py-2 text-mute">Searching…</p>
-                      ) : memberResults.length ? (
-                        memberResults.map((member) => {
-                          const disabled = Boolean(member.linked_user_id);
-                          return (
-                            <button
-                              type="button"
-                              key={member.id}
-                              onClick={() => handleSelectInviteMember(member)}
-                              disabled={disabled}
-                              className={`w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 ${disabled ? "text-mute cursor-not-allowed" : ""}`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="font-medium">{member.first_name} {member.last_name}</div>
-                                <span className="text-xs text-mute">ID {member.id}</span>
-                              </div>
-                              <div className="text-xs text-mute">
-                                {member.status && <span>{member.status}</span>}
-                                {member.email && <span> • {member.email}</span>}
-                                {member.phone && <span> • {member.phone}</span>}
-                              </div>
-                              {disabled && (
-                                <div className="text-xs text-amber-500">Linked to {member.linked_username ?? "another user"}</div>
-                              )}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <p className="px-3 py-2 text-mute">No matches</p>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">First name</label>
+                      <Input
+                        value={inviteFirstName}
+                        onChange={(event) => setInviteFirstName(event.target.value)}
+                        autoComplete="given-name"
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Last name</label>
+                      <Input
+                        value={inviteLastName}
+                        onChange={(event) => setInviteLastName(event.target.value)}
+                        autoComplete="family-name"
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute">Username</label>
+                      <Input
+                        value={invitePayload.username ?? ""}
+                        onChange={(event) => setInvitePayload((prev) => ({ ...prev, username: event.target.value.toLowerCase() }))}
+                        placeholder="Auto-generate if empty"
+                      />
+                      <p className="text-xs text-mute mt-1">Only lowercase letters, numbers, dots, underscores.</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-xs uppercase text-mute">Welcome note</label>
+                      <Textarea
+                        value={invitePayload.message ?? ""}
+                        onChange={(event) => setInvitePayload((prev) => ({ ...prev, message: event.target.value }))}
+                        placeholder="Optional note to include in the welcome email"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute">Roles</label>
+                    <div className="flex flex-wrap gap-2">
+                      {inviteRoleOptions.map((option) => (
+                        <label key={option} className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="accent-accent"
+                            checked={invitePayload.roles?.includes(option) ?? false}
+                            onChange={() => toggleRole(option)}
+                          />
+                          {ROLE_LABELS[option] || option}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase text-mute">Link to member</label>
+                    <Input
+                      value={memberSearchTerm}
+                      onChange={(event) => setMemberSearchTerm(event.target.value)}
+                      placeholder="Search by name, email, or phone"
+                    />
+                    {memberSearchTerm && (
+                      <div className="rounded-xl border border-border bg-card/80 text-left text-sm">
+                        {memberSearching ? (
+                          <p className="px-3 py-2 text-mute">Searching…</p>
+                        ) : memberResults.length ? (
+                          memberResults.map((member) => {
+                            const disabled = Boolean(member.linked_user_id);
+                            return (
+                              <button
+                                type="button"
+                                key={member.id}
+                                onClick={() => handleSelectInviteMember(member)}
+                                disabled={disabled}
+                                className={`w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 ${disabled ? "text-mute cursor-not-allowed" : ""}`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="font-medium">{member.first_name} {member.last_name}</div>
+                                  <span className="text-xs text-mute">ID {member.id}</span>
+                                </div>
+                                <div className="text-xs text-mute">
+                                  {member.status && <span>{member.status}</span>}
+                                  {member.email && <span> • {member.email}</span>}
+                                  {member.phone && <span> • {member.phone}</span>}
+                                </div>
+                                {disabled && (
+                                  <div className="text-xs text-amber-500">Linked to {member.linked_username ?? "another user"}</div>
+                                )}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <p className="px-3 py-2 text-mute">No matches</p>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={inviteMemberId}
+                        onChange={(event) => setInviteMemberId(event.target.value)}
+                        placeholder="Or paste member ID"
+                      />
+                      {inviteMemberId && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-xs"
+                          onClick={() => {
+                            setInviteMemberId("");
+                            setMemberSearchTerm("");
+                          }}
+                        >
+                          Clear
+                        </Button>
                       )}
                     </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={inviteMemberId}
-                      onChange={(event) => setInviteMemberId(event.target.value)}
-                      placeholder="Or paste member ID"
-                    />
-                    {inviteMemberId && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="text-xs"
-                        onClick={() => {
-                          setInviteMemberId("");
-                          setMemberSearchTerm("");
-                        }}
-                      >
-                        Clear
-                      </Button>
-                    )}
+                    <p className="text-xs text-mute">Selected member ID: {inviteMemberId || "None"}</p>
                   </div>
-                  <p className="text-xs text-mute">Selected member ID: {inviteMemberId || "None"}</p>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" onClick={() => { setInviteOpen(false); resetInviteForm(); }}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={inviteSubmitting}>
-                    {inviteSubmitting ? "Sending…" : "Send invite"}
-                  </Button>
-                </div>
-              </form>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" onClick={() => { setInviteOpen(false); resetInviteForm(); }}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={inviteSubmitting}>
+                      {inviteSubmitting ? "Creating…" : "Create account"}
+                    </Button>
+                  </div>
+                </form>
+              )}
             </Card>
           </div>
         </Fragment>

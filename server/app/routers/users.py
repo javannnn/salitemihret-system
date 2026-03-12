@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import require_super_admin
@@ -22,8 +24,13 @@ from app.models.user import (
     UserAuditActionEnum,
 )
 from app.schemas.user_admin import (
+    EmailDeliveryDetails,
     InvitationCreateRequest,
     InvitationResponse,
+    UserAdminDetailResponse,
+    UserProvisionRequest,
+    UserProvisionResponse,
+    UserPasswordResetResponse,
     UserAdminSummary,
     UserAuditEntry,
     UserListResponse,
@@ -31,19 +38,29 @@ from app.schemas.user_admin import (
     UserRolesUpdateRequest,
     UserUpdateRequest,
     UserMemberSummary,
+    UserTemporaryCredentials,
 )
 from app.services.user_accounts import (
     ensure_unique_username,
+    generate_temporary_password,
     generate_username_from_email,
+    get_temporary_password,
     hash_token,
+    has_active_temporary_password,
     load_roles,
     now_utc,
-    sanitize_username,
+    store_temporary_password,
 )
-from app.services.notifications import send_password_reset_email, send_user_invitation_email
+from app.services.notifications import (
+    build_email_delivery_details,
+    send_admin_password_reset_email,
+    send_provisioned_account_email,
+    send_user_invitation_email,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 SUPER_ADMIN_ROLE_NAME = "SuperAdmin"
+logger = logging.getLogger(__name__)
 
 
 def _enum_value(value: Any) -> Any:
@@ -73,8 +90,8 @@ def _serialize_member(link: UserMemberLink | None, owning_user: User | None = No
 
 def _serialize_user(user: User) -> UserAdminSummary:
     role_names = [role.name for role in user.roles]
-    if user.is_super_admin and SUPER_ADMIN_ROLE_NAME not in role_names:
-        role_names.append(SUPER_ADMIN_ROLE_NAME)
+    if user.is_super_admin:
+        role_names = [SUPER_ADMIN_ROLE_NAME]
     return UserAdminSummary(
         id=user.id,
         email=user.email,
@@ -82,11 +99,27 @@ def _serialize_user(user: User) -> UserAdminSummary:
         full_name=user.full_name,
         is_active=user.is_active,
         is_super_admin=user.is_super_admin,
+        must_change_password=user.must_change_password,
         roles=role_names,
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
         member=_serialize_member(user.member_link, owning_user=user),
+    )
+
+
+def _serialize_user_detail(user: User) -> UserAdminDetailResponse:
+    summary = _serialize_user(user)
+    temporary_credentials = None
+    if has_active_temporary_password(user):
+        temporary_credentials = UserTemporaryCredentials(
+            password=get_temporary_password(user),
+            issued_at=user.temporary_password_issued_at,
+            is_active=True,
+        )
+    return UserAdminDetailResponse(
+        **summary.model_dump(),
+        temporary_credentials=temporary_credentials,
     )
 
 
@@ -246,14 +279,124 @@ def search_members(
     return results
 
 
-@router.get("/{user_id}", response_model=UserAdminSummary)
+@router.post("", response_model=UserProvisionResponse, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: UserProvisionRequest,
+    actor: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UserProvisionResponse:
+    email = payload.email.lower()
+    existing_user = db.query(User).filter(func.lower(User.email) == email).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User with that email already exists")
+
+    username = payload.username
+    if username:
+        try:
+            clean_username = ensure_unique_username(db, username)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    else:
+        try:
+            clean_username = generate_username_from_email(email, db)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    member: Member | None = None
+    if payload.member_id is not None:
+        member = _ensure_member_available(db, payload.member_id)
+
+    try:
+        super_requested = SUPER_ADMIN_ROLE_NAME in payload.roles
+        filtered_roles = [] if super_requested else [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
+        roles = load_roles(db, filtered_roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    temporary_password = generate_temporary_password()
+    user = User(
+        email=email,
+        username=clean_username,
+        full_name=payload.full_name.strip() if payload.full_name else None,
+        hashed_password=hash_password(temporary_password),
+        is_active=True,
+        is_super_admin=super_requested,
+        created_at=now_utc(),
+        updated_at=now_utc(),
+    )
+    store_temporary_password(user, temporary_password)
+    user.roles = roles
+    db.add(user)
+    try:
+        db.flush()
+        if member is not None:
+            user.member_link = UserMemberLink(
+                member_id=member.id,
+                linked_by_user_id=actor.id,
+                linked_at=now_utc(),
+                notes="Linked during account provisioning",
+            )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Unable to create user. Check email, username, and member link uniqueness.",
+        ) from exc
+    db.refresh(user)
+
+    email_sent = False
+    try:
+        email_sent = send_provisioned_account_email(
+            user=user,
+            temporary_password=temporary_password,
+            created_by=actor,
+            message=payload.message,
+        )
+    except Exception:
+        logger.exception(
+            "provisioned_account_email_failed",
+            extra={"user_id": user.id, "email": user.email, "actor_id": actor.id},
+        )
+    email_delivery_payload = build_email_delivery_details(recipient=user.email, accepted=email_sent)
+    _log_audit(
+        db,
+        actor=actor,
+        target=user,
+        action=UserAuditActionEnum.USER_CREATED,
+        payload={
+            "direct_provision": True,
+            "email_sent": email_sent,
+            "email_delivery": email_delivery_payload,
+            "must_change_password": True,
+        },
+    )
+    if member is not None:
+        _log_audit(
+            db,
+            actor=actor,
+            target=user,
+            action=UserAuditActionEnum.MEMBER_LINKED,
+            payload={"member_id": member.id},
+        )
+    db.commit()
+
+    return UserProvisionResponse(
+        user=_serialize_user(_load_user(db, user.id)),
+        temporary_password=temporary_password,
+        email_sent=email_sent,
+        email_delivery=EmailDeliveryDetails(**email_delivery_payload),
+    )
+
+
+@router.get("/{user_id}", response_model=UserAdminDetailResponse)
 def get_user_detail(
     user_id: int,
     _: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
-) -> UserAdminSummary:
+) -> UserAdminDetailResponse:
     user = _load_user(db, user_id)
-    return _serialize_user(user)
+    return _serialize_user_detail(user)
 
 
 @router.patch("/{user_id}", response_model=UserAdminSummary)
@@ -273,6 +416,8 @@ def update_user(
         changes["is_active"] = payload.is_active
     if payload.is_super_admin is not None:
         user.is_super_admin = payload.is_super_admin
+        if payload.is_super_admin:
+            user.roles = []
         changes["is_super_admin"] = payload.is_super_admin
     if payload.username is not None:
         desired = payload.username
@@ -285,7 +430,11 @@ def update_user(
             user.username_changed_at = now_utc()
             changes["username"] = new_username
     if changes:
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to update user") from exc
         db.refresh(user)
         audit_payload = changes.copy()
         if "username" in audit_payload:
@@ -319,13 +468,17 @@ def update_user_roles(
     user = _load_user(db, user_id)
     try:
         super_requested = SUPER_ADMIN_ROLE_NAME in payload.roles
-        filtered_roles = [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
+        filtered_roles = [] if super_requested else [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
         roles = load_roles(db, filtered_roles)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     user.roles = roles
     user.is_super_admin = super_requested
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to update member link") from exc
     db.refresh(user)
     _log_audit(
         db,
@@ -348,8 +501,12 @@ def link_member(
     user = _load_user(db, user_id)
     if payload.member_id is None:
         if user.member_link:
-            db.delete(user.member_link)
-            db.commit()
+            user.member_link = None
+            try:
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to update member link") from exc
             _log_audit(
                 db,
                 actor=actor,
@@ -357,7 +514,7 @@ def link_member(
                 action=UserAuditActionEnum.MEMBER_UNLINKED,
             )
             db.commit()
-        return _serialize_user(user)
+        return _serialize_user(_load_user(db, user_id))
 
     member = _ensure_member_available(db, payload.member_id, current_user_id=user.id)
     if user.member_link is None:
@@ -389,6 +546,7 @@ def _create_invitation_record(
     db: Session,
     *,
     email: str,
+    full_name: str | None,
     username: str,
     invited_by: User,
     roles: list[str],
@@ -399,6 +557,7 @@ def _create_invitation_record(
     token_hash = hash_token(token)
     invitation = UserInvitation(
         email=email,
+        full_name=full_name,
         username=username,
         token_hash=token_hash,
         expires_at=now_utc() + timedelta(hours=settings.USER_INVITE_EXPIRY_HOURS),
@@ -429,7 +588,10 @@ def create_invitation(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     else:
-        clean_username = generate_username_from_email(payload.email, db)
+        try:
+            clean_username = generate_username_from_email(payload.email, db)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     member_id = None
     if payload.member_id is not None:
         _ensure_member_available(db, payload.member_id)
@@ -444,6 +606,7 @@ def create_invitation(
     invitation, raw_token = _create_invitation_record(
         db,
         email=payload.email,
+        full_name=payload.full_name.strip() if payload.full_name else None,
         username=clean_username,
         invited_by=actor,
         roles=payload.roles,
@@ -460,39 +623,50 @@ def create_invitation(
     )
 
 
-@router.post("/{user_id}/reset-password", response_model=InvitationResponse)
+@router.post("/{user_id}/reset-password", response_model=UserPasswordResetResponse)
 def reset_user_password(
     user_id: int,
     actor: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
-) -> InvitationResponse:
+) -> UserPasswordResetResponse:
     user = _load_user(db, user_id)
-    roles = [role.name for role in user.roles]
-    member_id = user.member_link.member_id if user.member_link else None
-    invitation, raw_token = _create_invitation_record(
-        db,
-        email=user.email,
-        username=user.username,
-        invited_by=actor,
-        roles=roles,
-        member_id=member_id,
-        message="Password reset",
-    )
-    email_sent = send_password_reset_email(invitation, raw_token, actor)
+    temporary_password = generate_temporary_password()
+    user.hashed_password = hash_password(temporary_password)
+    store_temporary_password(user, temporary_password)
+    user.updated_at = now_utc()
+    db.commit()
+    db.refresh(user)
+
+    email_sent = False
+    try:
+        email_sent = send_admin_password_reset_email(
+            user=user,
+            temporary_password=temporary_password,
+            requested_by=actor,
+        )
+    except Exception:
+        logger.exception(
+            "admin_password_reset_email_failed",
+            extra={"user_id": user.id, "email": user.email, "actor_id": actor.id},
+        )
+    email_delivery_payload = build_email_delivery_details(recipient=user.email, accepted=email_sent)
     _log_audit(
         db,
         actor=actor,
         target=user,
         action=UserAuditActionEnum.PASSWORD_RESET_SENT,
-        payload={"invitation_id": invitation.id, "email_sent": email_sent},
+        payload={
+            "email_sent": email_sent,
+            "email_delivery": email_delivery_payload,
+            "must_change_password": True,
+        },
     )
     db.commit()
-    return InvitationResponse(
-        id=invitation.id,
-        email=invitation.email,
-        username=invitation.username,
-        expires_at=invitation.expires_at,
-        token=raw_token,
+    return UserPasswordResetResponse(
+        user=_serialize_user(_load_user(db, user.id)),
+        temporary_password=temporary_password,
+        email_sent=email_sent,
+        email_delivery=EmailDeliveryDetails(**email_delivery_payload),
     )
 
 

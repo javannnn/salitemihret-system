@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth.security import create_access_token, hash_password, verify_password
@@ -8,6 +9,7 @@ from app.models.user import User, UserInvitation, UserMemberLink, UserAuditLog, 
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.schemas.user_admin import InvitationAcceptRequest
 from app.services.user_accounts import (
+    clear_temporary_password,
     ensure_unique_username,
     hash_token,
     load_roles,
@@ -35,11 +37,25 @@ async def login(request: Request, payload: LoginRequest, db: Session = Depends(g
         except RecaptchaError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    user = db.query(User).filter(User.email == payload.email).first()
+    identifier = payload.email.strip().lower()
+    user = (
+        db.query(User)
+        .filter(
+            or_(
+                func.lower(User.email) == identifier,
+                func.lower(User.username) == identifier,
+            )
+        )
+        .first()
+    )
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    user.last_login_at = now_utc()
+    user.last_seen = user.last_login_at
+    db.commit()
 
     roles = [role.name for role in user.roles]
     token = create_access_token(subject=str(user.id), roles=roles)
@@ -56,13 +72,25 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation already used")
     if invitation.expires_at < now_utc():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation expired")
-    existing_user = db.query(User).filter(User.email == invitation.email).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists")
     try:
         validate_password_strength(payload.password)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    existing_user = db.query(User).filter(User.email == invitation.email).first()
+    if existing_user:
+        existing_user.hashed_password = hash_password(payload.password)
+        existing_user.must_change_password = False
+        clear_temporary_password(existing_user)
+        existing_user.updated_at = now_utc()
+        invitation.accepted_at = now_utc()
+        invitation.accepted_user_id = existing_user.id
+        db.commit()
+        roles_names = [role.name for role in existing_user.roles]
+        if existing_user.is_super_admin and "SuperAdmin" not in roles_names:
+            roles_names.append("SuperAdmin")
+        token_response = create_access_token(subject=str(existing_user.id), roles=roles_names)
+        return TokenResponse(access_token=token_response)
 
     username_source = payload.username or invitation.username
     try:
@@ -81,7 +109,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
     user = User(
         email=invitation.email,
         username=username,
-        full_name=payload.full_name or invitation.username,
+        full_name=payload.full_name or invitation.full_name or invitation.username,
         hashed_password=hash_password(payload.password),
         is_active=True,
         is_super_admin=is_super_admin_invite,

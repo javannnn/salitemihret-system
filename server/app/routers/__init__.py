@@ -20,5 +20,6 @@ from app.routers import (  # noqa: F401
     staff,
     whoami,
     users,
+    roles,
     emails,
 )

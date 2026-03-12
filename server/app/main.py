@@ -31,6 +31,7 @@ from app.routers import priests as priests_router
 from app.routers import payments as payments_router
 from app.routers import whoami as whoami_router
 from app.routers import users as users_router
+from app.routers import roles as roles_router
 from app.routers import sponsorships as sponsorships_router
 from app.routers import sunday_school as sunday_school_router
 from app.routers import reports as reports_router
@@ -40,7 +41,11 @@ from app.routers import newcomers as newcomers_router
 from app.routers import chat as chat_router
 from app.routers import volunteers as volunteers_router
 from app.services.child_promotion import get_children_ready_for_promotion
-from app.services.notifications import send_child_promotion_digest, notify_membership_status_change
+from app.services.notifications import (
+    frontend_url_warning,
+    notify_membership_status_change,
+    send_child_promotion_digest,
+)
 from app.services import payments as payments_service
 from app.services.members_utils import cleanup_archived_members
 from app.services.membership import MembershipHealthData, refresh_membership_state
@@ -88,6 +93,7 @@ app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
 app.include_router(users_router.router)
+app.include_router(roles_router.router)
 app.include_router(staff_router.router)
 app.include_router(households_router.router)
 app.include_router(payments_router.router)
@@ -127,6 +133,10 @@ async def enforce_license(request: Request, call_next):
 @app.on_event("startup")
 def ensure_optional_columns() -> None:
     """Guard optional columns so legacy databases don't error."""
+
+    email_url_warning = frontend_url_warning()
+    if email_url_warning:
+        logger.warning(email_url_warning)
 
     if engine.dialect.name != "postgresql":
         # SQLite-based test runs skip Postgres-specific guards.

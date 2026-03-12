@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.auth import EffectivePermissionSnapshot
+
 
 class AccountMemberSummary(BaseModel):
     id: int
@@ -23,6 +25,8 @@ class AccountProfileResponse(BaseModel):
     full_name: str | None = None
     roles: list[str]
     is_super_admin: bool
+    must_change_password: bool = False
+    permissions: EffectivePermissionSnapshot
     member: AccountMemberSummary | None = None
     can_change_username: bool
     next_username_change_at: datetime | None = None
@@ -37,7 +41,7 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str
+    current_password: str | None = None
     new_password: str
 
 

@@ -7,7 +7,29 @@ export type WhoAmI = {
   roles: string[];
   is_super_admin: boolean;
   full_name: string | null;
+  must_change_password: boolean;
+  permissions: {
+    modules: Record<string, { read: boolean; write: boolean }>;
+    fields: Record<string, Record<string, { read: boolean; write: boolean }>>;
+    legacy: Record<string, boolean>;
+  };
 };
+
+async function readLoginErrorMessage(res: Response): Promise<string> {
+  const text = await res.text();
+  if (!text) {
+    return "Invalid credentials";
+  }
+  try {
+    const payload = JSON.parse(text) as { detail?: string };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Fall back to the raw response body.
+  }
+  return text;
+}
 
 export async function login(email: string, password: string, recaptchaToken?: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {
@@ -17,8 +39,7 @@ export async function login(email: string, password: string, recaptchaToken?: st
   });
 
   if (!res.ok) {
-    const message = await res.text();
-    throw new Error(message || "Invalid credentials");
+    throw new Error(await readLoginErrorMessage(res));
   }
 
   const data = (await res.json()) as { access_token: string; token_type: string };

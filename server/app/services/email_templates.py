@@ -130,6 +130,65 @@ def render_invitation_email(
     return html, text
 
 
+def render_provisioned_account_email(
+    *,
+    login_url: str,
+    invitee_email: str,
+    username: str,
+    temporary_password: str,
+    roles: Sequence[str],
+    created_by: str | None,
+    message: str | None,
+) -> tuple[str, str]:
+    roles_text = ", ".join(roles) if roles else "No roles assigned yet"
+    personal_note = (
+        f'<div style="margin-top:14px; padding:14px 16px; border-radius:12px; background:#fff7ed; border:1px solid #fed7aa; color:{TEXT};">'
+        f"<strong>Note from {created_by}:</strong><br>{message}</div>"
+        if message
+        else ""
+    )
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">Hi there,</p>
+      <p style="margin:0 0 16px 0;">Your {BRAND_NAME} console account is ready. Sign in with the temporary password below. You will be required to change it immediately after your first login.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Account credentials</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Email:</strong> {invitee_email}<br>
+          <strong>Username:</strong> {username}<br>
+          <strong>Temporary password:</strong> <code style="background:#0b111a; color:#f8fafc; padding:3px 6px; border-radius:8px; font-size:12px;">{temporary_password}</code><br>
+          <strong>Roles:</strong> {roles_text}
+        </div>
+        {personal_note}
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">After you sign in, the system will take you directly to the password change screen before any other work can continue.</p>
+    """
+    html = _wrap_brand_email(
+        headline=f"Your {BRAND_NAME} account is ready",
+        body_html=body_html,
+        preview_text=f"Your {BRAND_NAME} account has been created",
+        cta_label="Open the console",
+        cta_url=login_url,
+        footer_lines=[
+            f"Created by: {created_by or 'System administrator'}.",
+            f"Sent automatically by the {BRAND_NAME} system.",
+        ],
+    )
+    text = (
+        f"Your {BRAND_NAME} account is ready.\n\n"
+        f"Sign in: {login_url}\n"
+        f"Email: {invitee_email}\n"
+        f"Username: {username}\n"
+        f"Temporary password: {temporary_password}\n"
+        f"Roles: {roles_text}\n"
+        "You will be required to change this password immediately after your first login.\n"
+    )
+    if created_by:
+        text += f"Created by: {created_by}\n"
+    if message:
+        text += f"\nNote: {message}\n"
+    return html, text
+
+
 def render_password_reset_email(
     *,
     reset_url: str,
@@ -171,6 +230,51 @@ def render_password_reset_email(
     if requested_by:
         text += f"Requested by: {requested_by}\n"
     text += "If you did not request this, you can ignore this email.\n"
+    return html, text
+
+
+def render_admin_password_reset_email(
+    *,
+    login_url: str,
+    invitee_email: str,
+    username: str,
+    temporary_password: str,
+    requested_by: str | None,
+) -> tuple[str, str]:
+    body_html = f"""
+      <p style="margin:0 0 12px 0;">Your {BRAND_NAME} console password has been reset.</p>
+      <p style="margin:0 0 16px 0;">Use the temporary password below to sign in. The system will require an immediate password change before any other work can continue.</p>
+      <div style="margin-top:8px; padding:14px 16px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb;">
+        <div style="font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:{MUTED}; margin-bottom:6px;">Temporary access</div>
+        <div style="color:{TEXT}; line-height:1.6;">
+          <strong>Email:</strong> {invitee_email}<br>
+          <strong>Username:</strong> {username}<br>
+          <strong>Temporary password:</strong> <code style="background:#0b111a; color:#f8fafc; padding:3px 6px; border-radius:8px; font-size:12px;">{temporary_password}</code>
+        </div>
+      </div>
+      <p style="margin:16px 0 0 0; color:{MUTED};">If you were not expecting this change, contact your administrator immediately.</p>
+    """
+    html = _wrap_brand_email(
+        headline=f"Your {BRAND_NAME} password was reset",
+        body_html=body_html,
+        preview_text=f"Use your new temporary password for {BRAND_NAME}",
+        cta_label="Open the console",
+        cta_url=login_url,
+        footer_lines=[
+            f"Requested by: {requested_by or 'System administrator'}.",
+            f"Sent automatically by the {BRAND_NAME} system.",
+        ],
+    )
+    text = (
+        f"Your {BRAND_NAME} console password has been reset.\n\n"
+        f"Sign in: {login_url}\n"
+        f"Email: {invitee_email}\n"
+        f"Username: {username}\n"
+        f"Temporary password: {temporary_password}\n"
+        "You will be required to change this password immediately after signing in.\n"
+    )
+    if requested_by:
+        text += f"Requested by: {requested_by}\n"
     return html, text
 
 

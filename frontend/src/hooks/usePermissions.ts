@@ -153,38 +153,75 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
   },
 };
 
-export function usePermissions(): PermissionMap & { hasRole: (role: string) => boolean; isSuperAdmin: boolean } {
+export function usePermissions(): PermissionMap & {
+  hasRole: (role: string) => boolean;
+  isSuperAdmin: boolean;
+  modules: Record<string, { read: boolean; write: boolean }>;
+  canReadField: (module: string, field: string) => boolean;
+  canWriteField: (module: string, field: string) => boolean;
+} {
   const { user } = useAuth();
 
   return useMemo(() => {
     const roles = user?.roles ?? [];
     const isSuperAdmin = Boolean(user?.is_super_admin);
+    const modules = user?.permissions?.modules ?? {};
+    const fields = user?.permissions?.fields ?? {};
+    const legacy = user?.permissions?.legacy;
     const merged: PermissionMap = { ...BASE_PERMISSIONS };
+
     if (isSuperAdmin) {
       Object.keys(merged).forEach((key) => {
         (merged as Record<string, boolean>)[key] = true;
       });
-    }
-    roles.forEach((role) => {
-      const overrides = ROLE_RULES[role];
-      if (!overrides) {
-        return;
-      }
-      for (const [key, value] of Object.entries(overrides)) {
-        if (value) {
-          (merged as Record<string, boolean>)[key] = true;
+    } else if (legacy) {
+      for (const key of Object.keys(BASE_PERMISSIONS)) {
+        if (typeof legacy[key] === "boolean") {
+          (merged as Record<string, boolean>)[key] = legacy[key];
         }
       }
-    });
+    } else {
+      // Backward-compatible fallback if backend snapshot is missing.
+      roles.forEach((role) => {
+        const overrides = ROLE_RULES[role];
+        if (!overrides) {
+          return;
+        }
+        for (const [key, value] of Object.entries(overrides)) {
+          if (value) {
+            (merged as Record<string, boolean>)[key] = true;
+          }
+        }
+      });
 
-    // Viewing members is allowed if any recognized capability toggled
-    if (!merged.viewMembers && roles.length > 0) {
-      merged.viewMembers = roles.some((role) => ROLE_RULES[role]?.viewMembers);
+      // Viewing members is allowed if any recognized capability toggled
+      if (!merged.viewMembers && roles.length > 0) {
+        merged.viewMembers = roles.some((role) => ROLE_RULES[role]?.viewMembers);
+      }
     }
+
+    const canReadField = (module: string, field: string) => {
+      if (isSuperAdmin) return true;
+      if (!modules[module]?.read) return false;
+      const entry = fields[module]?.[field];
+      if (!entry) return true;
+      return Boolean(entry.read);
+    };
+
+    const canWriteField = (module: string, field: string) => {
+      if (isSuperAdmin) return true;
+      if (!modules[module]?.write) return false;
+      const entry = fields[module]?.[field];
+      if (!entry) return true;
+      return Boolean(entry.write);
+    };
 
     return {
       ...merged,
       isSuperAdmin,
+      modules,
+      canReadField,
+      canWriteField,
       hasRole: (role: string) => roles.includes(role) || isSuperAdmin,
     };
   }, [user]);
