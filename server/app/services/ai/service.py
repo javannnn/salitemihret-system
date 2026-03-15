@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
-from app.schemas.ai import AICapabilityRead, AIDraftResponse, AIStatusRead, NewcomerFollowUpDraftRequest
+from app.models.user import User
+from app.schemas.ai import (
+    AICapabilityRead,
+    AIDraftResponse,
+    AIReportAnswerResponse,
+    AIReportQARequest,
+    AIStatusRead,
+    NewcomerFollowUpDraftRequest,
+)
 from app.services.ai.catalog import get_ai_operator_roles, list_capabilities
 from app.services.ai.models import AIProviderKind
-from app.services.ai.prompts import build_newcomer_follow_up_messages
+from app.services.ai.prompts import build_broader_report_qa_messages, build_newcomer_follow_up_messages, build_report_qa_messages
 from app.services.ai.providers import AIProvider, AIProviderError, build_provider
+from app.services.ai.reporting import (
+    build_grounded_report_answer,
+    build_report_scope_confirmation_response,
+    build_mock_report_answer,
+    build_report_qa_context,
+    normalize_report_qa_dates,
+    _requires_broader_system_context,
+)
+from app.services.ai.system_context import build_broader_system_context, build_broader_system_direct_answer
 
 
 class AITaskDisabledError(RuntimeError):
@@ -77,6 +96,107 @@ class AIService:
             subject=subject,
             content=content,
             warnings=warnings,
+        )
+
+    def answer_report_question(
+        self,
+        db: Session,
+        *,
+        user: User,
+        payload: AIReportQARequest,
+    ) -> AIReportAnswerResponse:
+        if not settings.AI_ENABLED or not settings.AI_REPORT_QA_ENABLED:
+            raise AITaskDisabledError(
+                "AI report Q&A is not enabled. Set AI_ENABLED=true and AI_REPORT_QA_ENABLED=true."
+            )
+
+        start_date, end_date = normalize_report_qa_dates(payload.start_date, payload.end_date)
+        normalized_payload = payload.model_copy(update={"start_date": start_date, "end_date": end_date})
+        context = build_report_qa_context(db, user=user, payload=normalized_payload)
+
+        grounded_response = build_grounded_report_answer(normalized_payload, context=context)
+        if grounded_response is not None:
+            return grounded_response
+
+        if _requires_broader_system_context(
+            normalized_payload.question,
+            modules=context.applied_modules,
+            history=normalized_payload.history,
+        ):
+            if not normalized_payload.allow_broader_system_context:
+                return build_report_scope_confirmation_response(normalized_payload, context=context)
+
+            direct_system_answer = build_broader_system_direct_answer(normalized_payload.question)
+            if direct_system_answer is not None:
+                return AIReportAnswerResponse(
+                    task="report_qa",
+                    provider="system_guide",
+                    model="product-metadata",
+                    answer=direct_system_answer.answer,
+                    warnings=context.warnings,
+                    sources=[],
+                    chart=None,
+                    applied_modules=context.applied_modules,
+                    start_date=start_date,
+                    end_date=end_date,
+                    requires_human_review=False,
+                )
+
+            system_context = build_broader_system_context(
+                question=normalized_payload.question,
+                report_modules=context.applied_modules,
+            )
+            generation = self.provider.generate_text(
+                model=settings.AI_DEFAULT_CHAT_MODEL,
+                messages=build_broader_report_qa_messages(
+                    normalized_payload,
+                    report_context=context.prompt_context,
+                    system_context=system_context,
+                ),
+                temperature=0.1,
+                max_tokens=700,
+            )
+            warnings = [
+                "Broader system answer uses approved API/schema metadata and may be incomplete or inferred.",
+                *list(generation.warnings),
+                *context.warnings,
+            ]
+            return AIReportAnswerResponse(
+                task="report_qa",
+                provider=generation.provider.value,
+                model=generation.model,
+                answer=generation.content.strip(),
+                warnings=warnings,
+                sources=[],
+                chart=None,
+                applied_modules=context.applied_modules,
+                start_date=start_date,
+                end_date=end_date,
+                requires_human_review=True,
+            )
+
+        if self.provider.kind == AIProviderKind.MOCK:
+            response = build_mock_report_answer(normalized_payload, context=context)
+            return response.model_copy(update={"model": settings.AI_DEFAULT_CHAT_MODEL or response.model})
+
+        generation = self.provider.generate_text(
+            model=settings.AI_DEFAULT_CHAT_MODEL,
+            messages=build_report_qa_messages(normalized_payload, prompt_context=context.prompt_context),
+            temperature=0.1,
+            max_tokens=700,
+        )
+        warnings = list(generation.warnings) + context.warnings
+        return AIReportAnswerResponse(
+            task="report_qa",
+            provider=generation.provider.value,
+            model=generation.model,
+            answer=generation.content.strip(),
+            warnings=warnings,
+            sources=context.sources,
+            chart=context.chart,
+            applied_modules=context.applied_modules,
+            start_date=start_date,
+            end_date=end_date,
         )
 
 

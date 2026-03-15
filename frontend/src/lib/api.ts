@@ -316,6 +316,88 @@ export type ReportActivityItem = {
   entity_id?: number | null;
 };
 
+export type AICapability = {
+  slug: string;
+  label: string;
+  module: string;
+  description: string;
+  status: "planned" | "pilot" | "enabled";
+  enabled: boolean;
+  requires_human_review: boolean;
+  allowed_roles: string[];
+  recommended_model?: string | null;
+};
+
+export type AIReportQAModule = "members" | "payments" | "sponsorships" | "newcomers" | "schools" | "activity";
+
+export type AIReportQAHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AIReportSourceMetric = {
+  label: string;
+  value: string;
+};
+
+export type AIReportSource = {
+  id: string;
+  module: AIReportQAModule;
+  title: string;
+  summary: string;
+  metrics: AIReportSourceMetric[];
+};
+
+export type AIReportChartDatum = {
+  label: string;
+  value: number;
+};
+
+export type AIReportChart = {
+  type: "bar" | "pie";
+  title: string;
+  description?: string | null;
+  unit: "count" | "currency" | "percent";
+  data: AIReportChartDatum[];
+};
+
+export type AIReportConfirmation = {
+  mode: "broader_system_context";
+  title: string;
+  message: string;
+  original_question: string;
+  confirm_label: string;
+  cancel_label: string;
+  estimated_wait_seconds?: number | null;
+};
+
+export type AIReportAnswer = {
+  task: string;
+  provider: string;
+  model: string;
+  status: "answered" | "confirmation_required";
+  answer: string;
+  warnings: string[];
+  sources: AIReportSource[];
+  chart?: AIReportChart | null;
+  confirmation?: AIReportConfirmation | null;
+  applied_modules: AIReportQAModule[];
+  start_date?: string | null;
+  end_date?: string | null;
+  requires_human_review: boolean;
+  preview_only: boolean;
+};
+
+export type AIReportQARequest = {
+  question: string;
+  start_date?: string;
+  end_date?: string;
+  modules?: AIReportQAModule[];
+  history?: AIReportQAHistoryMessage[];
+  include_visualization?: boolean;
+  allow_broader_system_context?: boolean;
+};
+
 export type AdminUserMemberSummary = {
   id: number;
   first_name: string;
@@ -2203,6 +2285,17 @@ export async function getReportActivity(filters: { start_date?: string; end_date
   });
   const query = search.toString();
   return api<ReportActivityItem[]>(`/reports/activity${query ? `?${query}` : ""}`);
+}
+
+export async function getAICapabilities(): Promise<AICapability[]> {
+  return api<AICapability[]>("/ai/capabilities");
+}
+
+export async function askAIReportQuestion(payload: AIReportQARequest): Promise<AIReportAnswer> {
+  return api<AIReportAnswer>("/ai/report-qa", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getPaymentServiceTypes(includeInactive = false): Promise<PaymentServiceType[]> {

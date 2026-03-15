@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import Iterable, List
 
 from sqlalchemy.orm import Session, selectinload
@@ -23,11 +23,24 @@ def _actor_name(actor) -> str | None:
     return actor.full_name or actor.username or actor.email
 
 
+def _normalize_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _member_name(member) -> str | None:
+    if not member:
+        return None
+    name = " ".join(part.strip() for part in [member.first_name, member.last_name] if part and part.strip())
+    return name or member.username or member.email
+
+
 def _member_activity(entries: Iterable[MemberAudit]) -> List[ReportActivityItem]:
     items: List[ReportActivityItem] = []
     for entry in entries:
         actor = _actor_name(entry.actor)
-        member_name = entry.member.full_name if entry.member else None
+        member_name = _member_name(entry.member)
         if entry.field == "child_promoted":
             items.append(
                 ReportActivityItem(
@@ -37,7 +50,7 @@ def _member_activity(entries: Iterable[MemberAudit]) -> List[ReportActivityItem]
                     actor=actor,
                     target=entry.old_value or member_name,
                     detail=entry.new_value,
-                    occurred_at=entry.changed_at,
+                    occurred_at=_normalize_timestamp(entry.changed_at),
                     entity_type="member",
                     entity_id=entry.member_id,
                 )
@@ -52,7 +65,7 @@ def _member_activity(entries: Iterable[MemberAudit]) -> List[ReportActivityItem]
                     actor=actor,
                     target=member_name,
                     detail=entry.new_value,
-                    occurred_at=entry.changed_at,
+                    occurred_at=_normalize_timestamp(entry.changed_at),
                     entity_type="member",
                     entity_id=entry.member_id,
                 )
@@ -67,7 +80,7 @@ def _member_activity(entries: Iterable[MemberAudit]) -> List[ReportActivityItem]
                     actor=actor,
                     target=member_name,
                     detail=f"{entry.old_value or '—'} → {entry.new_value or '—'}",
-                    occurred_at=entry.changed_at,
+                    occurred_at=_normalize_timestamp(entry.changed_at),
                     entity_type="member",
                     entity_id=entry.member_id,
                 )
@@ -82,7 +95,7 @@ def _member_activity(entries: Iterable[MemberAudit]) -> List[ReportActivityItem]
                     actor=actor,
                     target=member_name,
                     detail=None,
-                    occurred_at=entry.changed_at,
+                    occurred_at=_normalize_timestamp(entry.changed_at),
                     entity_type="member",
                     entity_id=entry.member_id,
                 )
@@ -108,7 +121,7 @@ def _sponsorship_activity(entries: Iterable[SponsorshipStatusAudit]) -> List[Rep
                 actor=actor,
                 target=target,
                 detail=detail,
-                occurred_at=entry.changed_at,
+                occurred_at=_normalize_timestamp(entry.changed_at),
                 entity_type="sponsorship",
                 entity_id=entry.sponsorship_id,
             )
@@ -120,7 +133,7 @@ def _user_activity(entries: Iterable[UserAuditLog]) -> List[ReportActivityItem]:
     items: List[ReportActivityItem] = []
     for entry in entries:
         actor = _actor_name(entry.actor)
-        target = entry.target_user.full_name or entry.target_user.username or entry.target_user.email
+        target = _actor_name(entry.target_user)
         items.append(
             ReportActivityItem(
                 id=f"user:{entry.id}",
@@ -129,7 +142,7 @@ def _user_activity(entries: Iterable[UserAuditLog]) -> List[ReportActivityItem]:
                 actor=actor,
                 target=target,
                 detail=None,
-                occurred_at=entry.created_at,
+                occurred_at=_normalize_timestamp(entry.created_at),
                 entity_type="user",
                 entity_id=entry.target_user_id,
             )

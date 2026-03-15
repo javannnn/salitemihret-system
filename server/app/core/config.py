@@ -1,4 +1,5 @@
 from decimal import Decimal
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -72,7 +73,7 @@ class Settings(BaseSettings):
     MEMBERSHIP_STATUS_NOTIFY_ROLES: str | None = "Admin,PublicRelations"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parents[2] / ".env",
         extra="allow",
     )
 

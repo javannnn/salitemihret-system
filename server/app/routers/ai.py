@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_active_user
+from app.core.db import get_db
 from app.models.user import User
-from app.schemas.ai import AICapabilityRead, AIDraftResponse, AIStatusRead, NewcomerFollowUpDraftRequest
+from app.schemas.ai import (
+    AICapabilityRead,
+    AIDraftResponse,
+    AIReportAnswerResponse,
+    AIReportQARequest,
+    AIStatusRead,
+    NewcomerFollowUpDraftRequest,
+)
 from app.services.ai.catalog import get_ai_operator_roles
 from app.services.ai.providers import AIProviderError
 from app.services.ai.service import AITaskDisabledError, AIService, get_ai_service
@@ -46,6 +55,24 @@ def draft_newcomer_follow_up(
     _require_ai_operator(current_user)
     try:
         return ai_service.draft_newcomer_follow_up(payload)
+    except AITaskDisabledError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except AIProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.post("/report-qa", response_model=AIReportAnswerResponse)
+def answer_report_question(
+    payload: AIReportQARequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+) -> AIReportAnswerResponse:
+    _require_ai_operator(current_user)
+    try:
+        return ai_service.answer_report_question(db, user=current_user, payload=payload)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except AITaskDisabledError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except AIProviderError as exc:

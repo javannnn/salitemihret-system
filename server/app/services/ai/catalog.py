@@ -78,7 +78,7 @@ def list_capabilities() -> list[AICapabilityRead]:
             description="Answer natural-language questions over read-only reporting views and saved metrics.",
             status="pilot" if settings.AI_REPORT_QA_ENABLED else "planned",
             enabled=settings.AI_ENABLED and settings.AI_REPORT_QA_ENABLED,
-            requires_human_review=True,
+            requires_human_review=False,
             allowed_roles=operator_roles,
             recommended_model=settings.AI_DEFAULT_CHAT_MODEL,
         ),

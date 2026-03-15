@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -10,10 +10,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.auth.deps import get_current_user
+from app.auth.deps import get_current_active_user, get_current_user
+import app.main as app_main
+from app.core.license import LicenseStatus
 from app.core.db import Base, get_db
 from app.main import app
 from app.models.member import Member
+from app.models.member_audit import MemberAudit  # noqa: F401
 from app.models.newcomer import Newcomer  # noqa: F401
 from app.models.newcomer_tracking import (  # noqa: F401
     NewcomerAddressHistory,
@@ -69,24 +72,50 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture()
-def client(db_session: Session) -> Generator[TestClient, None, None]:
+def client(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
     def _override_get_db() -> Generator[Session, None, None]:
-        yield db_session
+        session = TestingSessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    def _license_status() -> LicenseStatus:
+        now = datetime.now(UTC)
+        return LicenseStatus(
+            state="active",
+            message="Test license active",
+            expires_at=now + timedelta(days=30),
+            trial_expires_at=now + timedelta(days=30),
+            days_remaining=30,
+            customer="tests",
+        )
 
     app.dependency_overrides.clear()
     app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
+    startup_handlers = list(app.router.on_startup)
+    shutdown_handlers = list(app.router.on_shutdown)
+    app.router.on_startup.clear()
+    app.router.on_shutdown.clear()
+    monkeypatch.setattr(app_main, "get_license_status", _license_status)
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.router.on_startup[:] = startup_handlers
+        app.router.on_shutdown[:] = shutdown_handlers
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture()
 def authorize(client: TestClient):
     def _apply(user: User):
         app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[get_current_active_user] = lambda: user
 
     yield _apply
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_active_user, None)
 
 
 def _ensure_role(session: Session, name: str) -> Role:

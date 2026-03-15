@@ -1,17 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Overview } from "./components/Overview";
 import { MembersReport } from "./components/MembersReport";
 import { PaymentsReport } from "./components/PaymentsReport";
 import { SponsorshipsReport } from "./components/SponsorshipsReport";
 import { SchoolsReport } from "./components/SchoolsReport";
-import { LayoutDashboard, Users, CreditCard, Heart, GraduationCap } from "lucide-react";
+import { ReportAssistantPanel } from "./components/ReportAssistantPanel";
+import { LayoutDashboard, Users, CreditCard, Heart, GraduationCap, Sparkles } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useNavigate } from "react-router-dom";
+import { AIReportQAModule } from "@/lib/api";
+import { Button } from "@/components/ui";
 
 type ReportTab = "overview" | "members" | "payments" | "sponsorships" | "schools";
 
 export default function ReportsClient() {
     const [activeTab, setActiveTab] = useState<ReportTab>("overview");
+    const [assistantOpen, setAssistantOpen] = useState(false);
     const permissions = usePermissions();
     const navigate = useNavigate();
 
@@ -24,6 +28,90 @@ export default function ReportsClient() {
     ] as const;
 
     const visibleTabs = tabs.filter(t => t.visible);
+
+    const assistantModules = useMemo(() => {
+        switch (activeTab) {
+            case "members":
+                return permissions.viewMembers ? ["members"] as AIReportQAModule[] : [];
+            case "payments":
+                return permissions.viewPayments ? ["payments"] as AIReportQAModule[] : [];
+            case "sponsorships":
+                return [
+                    ...(permissions.viewSponsorships ? ["sponsorships" as const] : []),
+                    ...(permissions.viewNewcomers ? ["newcomers" as const] : []),
+                ];
+            case "schools":
+                return permissions.viewSchools ? ["schools"] as AIReportQAModule[] : [];
+            case "overview":
+            default:
+                return [
+                    ...(permissions.viewMembers ? ["members" as const] : []),
+                    ...(permissions.viewPayments ? ["payments" as const] : []),
+                    ...(permissions.viewSponsorships ? ["sponsorships" as const] : []),
+                    ...(permissions.viewNewcomers ? ["newcomers" as const] : []),
+                    ...(permissions.viewSchools ? ["schools" as const] : []),
+                    "activity" as const,
+                ];
+        }
+    }, [
+        activeTab,
+        permissions.viewMembers,
+        permissions.viewPayments,
+        permissions.viewSponsorships,
+        permissions.viewNewcomers,
+        permissions.viewSchools,
+    ]);
+
+    const assistantConfig = useMemo(() => {
+        switch (activeTab) {
+            case "members":
+                return {
+                    scopeLabel: "Member reports",
+                    suggestions: [
+                        "How healthy is the member roster right now?",
+                        "What data quality issue stands out most in member records?",
+                        "Summarize the member status mix for me.",
+                    ],
+                };
+            case "payments":
+                return {
+                    scopeLabel: "Financial reports",
+                    suggestions: [
+                        "Which service type is leading revenue?",
+                        "Summarize payment performance for this period.",
+                        "What is the clearest finance takeaway right now?",
+                    ],
+                };
+            case "sponsorships":
+                return {
+                    scopeLabel: "Sponsorship reports",
+                    suggestions: [
+                        "How is sponsorship capacity performing?",
+                        "What stands out in the sponsorship and newcomer pipeline?",
+                        "Are there any sponsorship alerts I should act on?",
+                    ],
+                };
+            case "schools":
+                return {
+                    scopeLabel: "School reports",
+                    suggestions: [
+                        "Summarize school participation and contribution trends.",
+                        "What is the most important school metric right now?",
+                        "Is the content approval queue building up?",
+                    ],
+                };
+            case "overview":
+            default:
+                return {
+                    scopeLabel: "Overview reports",
+                    suggestions: [
+                        "Give me a quick operational summary.",
+                        "Which area needs the most attention?",
+                        "What changed recently across reports?",
+                    ],
+                };
+        }
+    }, [activeTab]);
 
     useEffect(() => {
         // Redirect if no permissions at all
@@ -58,13 +146,24 @@ export default function ReportsClient() {
 
     return (
         <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-bg">
-            {/* Header / Navigation */}
             <div className="border-b border-border bg-card px-6 py-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-ink">Reports & Analytics</h1>
-                        <p className="text-sm text-muted">Real-time insights for your organization</p>
+                        <p className="text-sm text-muted">Live operational reporting across members, finance, sponsorships, schools, and activity.</p>
                     </div>
+                    {assistantModules.length > 0 ? (
+                        <div className="flex items-center gap-3">
+                            <div className="hidden rounded-2xl border border-border bg-bg/70 px-4 py-3 text-right xl:block">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted">AI Assistant</div>
+                                <div className="mt-1 text-sm font-medium text-ink">{assistantConfig.scopeLabel}</div>
+                            </div>
+                            <Button variant="soft" className="h-11 px-4" onClick={() => setAssistantOpen(true)}>
+                                <Sparkles size={16} />
+                                Open AI Assistant
+                            </Button>
+                        </div>
+                    ) : null}
                 </div>
 
                 <div className="flex space-x-1 overflow-x-auto pb-1 scrollbar-hide">
@@ -95,6 +194,16 @@ export default function ReportsClient() {
                     {renderContent()}
                 </div>
             </div>
+
+            {assistantModules.length > 0 ? (
+                <ReportAssistantPanel
+                    open={assistantOpen}
+                    onClose={() => setAssistantOpen(false)}
+                    modules={assistantModules}
+                    scopeLabel={assistantConfig.scopeLabel}
+                    suggestions={assistantConfig.suggestions}
+                />
+            ) : null}
         </div>
     );
 }
