@@ -263,11 +263,11 @@ export function ReportAssistantPanel({ open, onClose, modules, scopeLabel, sugge
                                         </div>
                                         <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/60">Reports AI Assistant</p>
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/60">Assistant</p>
                                                 <PanelPill className={availabilityPillClass}>{availabilityLabel}</PanelPill>
                                             </div>
                                             <h2 id="report-assistant-title" className="mt-1 truncate font-serif text-[1.45rem] leading-none tracking-tight text-white">
-                                                {scopeLabel}
+                                                AI Assistant
                                             </h2>
                                             <p className="mt-2 text-xs leading-5 text-white/70">
                                                 Grounded to the reports in view. Charts appear only when they help.
@@ -276,11 +276,16 @@ export function ReportAssistantPanel({ open, onClose, modules, scopeLabel, sugge
                                     </div>
                                     <Button
                                         variant="ghost"
-                                        className="h-9 w-9 shrink-0 border-white/10 bg-white/[0.06] px-0 text-white hover:border-white/20 hover:bg-white/[0.14]"
+                                        className="group h-10 shrink-0 rounded-[18px] border border-white/12 bg-white/[0.08] px-3 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_14px_28px_rgba(15,23,42,0.16)] transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.14] dark:border-white/10 dark:bg-white/[0.06] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_30px_rgba(0,0,0,0.24)]"
                                         onClick={onClose}
                                         aria-label="Close"
                                     >
-                                        <X size={16} />
+                                        <span className="flex items-center gap-2">
+                                            <span className="flex h-6 w-6 items-center justify-center rounded-xl bg-white/[0.10] transition-transform duration-200 group-hover:rotate-90 group-hover:bg-white/[0.18]">
+                                                <X size={14} />
+                                            </span>
+                                            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/78">Close</span>
+                                        </span>
                                     </Button>
                                 </div>
 

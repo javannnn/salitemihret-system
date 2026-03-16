@@ -5,7 +5,7 @@ import { PaymentsReport } from "./components/PaymentsReport";
 import { SponsorshipsReport } from "./components/SponsorshipsReport";
 import { SchoolsReport } from "./components/SchoolsReport";
 import { ReportAssistantPanel } from "./components/ReportAssistantPanel";
-import { LayoutDashboard, Users, CreditCard, Heart, GraduationCap, Sparkles } from "lucide-react";
+import { LayoutDashboard, Users, CreditCard, Heart, GraduationCap, Sparkles, ArrowUpRight } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useNavigate } from "react-router-dom";
 import { AIReportQAModule } from "@/lib/api";
@@ -154,13 +154,22 @@ export default function ReportsClient() {
                     </div>
                     {assistantModules.length > 0 ? (
                         <div className="flex items-center gap-3">
-                            <div className="hidden rounded-2xl border border-border bg-bg/70 px-4 py-3 text-right xl:block">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted">AI Assistant</div>
-                                <div className="mt-1 text-sm font-medium text-ink">{assistantConfig.scopeLabel}</div>
-                            </div>
-                            <Button variant="soft" className="h-11 px-4" onClick={() => setAssistantOpen(true)}>
-                                <Sparkles size={16} />
-                                Open AI Assistant
+                            <Button
+                                variant="ghost"
+                                className="group relative h-12 overflow-hidden rounded-[20px] border border-accent/20 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(255,255,255,0.94),rgba(251,191,36,0.14))] px-4 text-ink shadow-[0_18px_42px_rgba(245,158,11,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-[0_22px_52px_rgba(245,158,11,0.16)] dark:border-amber-400/18 dark:bg-[linear-gradient(135deg,rgba(245,158,11,0.18),rgba(30,41,59,0.96),rgba(15,23,42,0.98))] dark:text-slate-50 dark:shadow-[0_20px_48px_rgba(0,0,0,0.34)] dark:hover:border-amber-300/24"
+                                onClick={() => setAssistantOpen(true)}
+                            >
+                                <span className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.52),transparent_38%),radial-gradient(circle_at_88%_18%,rgba(245,158,11,0.18),transparent_30%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(245,158,11,0.18),transparent_28%)]" />
+                                <span className="relative flex items-center gap-3">
+                                    <span className="flex h-8 w-8 items-center justify-center rounded-[14px] border border-white/60 bg-white/85 text-accent shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-amber-200">
+                                        <Sparkles size={16} />
+                                    </span>
+                                    <span className="text-left leading-none">
+                                        <span className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-muted dark:text-slate-300/80">Ask AI</span>
+                                        <span className="mt-1 block text-sm font-semibold text-ink dark:text-slate-50">Open assistant</span>
+                                    </span>
+                                    <ArrowUpRight size={16} className="ml-1 text-muted transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 dark:text-slate-300" />
+                                </span>
                             </Button>
                         </div>
                     ) : null}
