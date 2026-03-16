@@ -11,6 +11,10 @@
   --color-border: rgba(15, 23, 42, 0.08);
   --color-accent: #111827;
   --color-accent-foreground: #ffffff;
+  --logo-line-1: #111111;
+  --logo-line-2: #a61b29;
+  --logo-line-3: #ef4b8f;
+  --logo-line-4: #b45309;
 }
 
 .dark {
@@ -22,6 +26,10 @@
   --color-border: rgba(255, 255, 255, 0.08);
   --color-accent: #ffffff;
   --color-accent-foreground: #000000;
+  --logo-line-1: #f4efe7;
+  --logo-line-2: #d63649;
+  --logo-line-3: #ff76ab;
+  --logo-line-4: #d97706;
 }
 
 html,
@@ -60,4 +68,60 @@ body {
   background-clip: text;
   -webkit-background-clip: text;
   animation: shimmer 6s linear infinite;
+}
+
+.salite-wordmark-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 11rem;
+  width: 100%;
+}
+
+.salite-wordmark-svg {
+  width: min(100%, 34rem);
+  height: auto;
+  overflow: visible;
+}
+
+.salite-wordmark-mask,
+.salite-wordmark-solid {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 96px;
+  font-weight: 800;
+  letter-spacing: -7px;
+  text-rendering: geometricPrecision;
+}
+
+.salite-wordmark-mask {
+  fill: white;
+}
+
+.salite-wordmark-solid {
+  fill: var(--color-ink);
+  opacity: 0;
+  transform-origin: center;
+}
+
+.dark .salite-wordmark-solid {
+  filter: drop-shadow(0 14px 28px rgba(255, 255, 255, 0.08));
+}
+
+.salite-wordmark-solid {
+  filter: drop-shadow(0 14px 26px rgba(15, 23, 42, 0.12));
+}
+
+.salite-wordmark-backdrop {
+  filter: blur(26px);
+}
+
+@media (max-width: 1023px) {
+  .salite-wordmark-stage {
+    justify-content: center;
+    min-height: 8rem;
+  }
+
+  .salite-wordmark-svg {
+    width: min(100%, 28rem);
+  }
 }
