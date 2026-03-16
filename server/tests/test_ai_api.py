@@ -719,6 +719,63 @@ def test_report_qa_answers_user_management_features_in_plain_language(
     assert provider.captured_messages == []
 
 
+def test_report_qa_requires_confirmation_for_payments_gateway_system_question(
+    db_session,
+    admin_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "AI_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai_compatible")
+    monkeypatch.setattr(settings, "AI_REPORT_QA_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_DEFAULT_CHAT_MODEL", "qwen2.5-3b-instruct-q4_k_m")
+    provider = RecordingAIProvider()
+    service = AIService(provider=provider)
+
+    payload = service.answer_report_question(
+        db_session,
+        user=admin_user,
+        payload=AIReportQARequest(
+            question="List the features in the payments gateway",
+            modules=["payments"],
+        ),
+    )
+
+    assert payload.status == "confirmation_required"
+    assert payload.confirmation is not None
+    assert provider.captured_messages == []
+
+
+def test_report_qa_answers_payments_gateway_features_from_system_guide(
+    db_session,
+    admin_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "AI_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai_compatible")
+    monkeypatch.setattr(settings, "AI_REPORT_QA_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_DEFAULT_CHAT_MODEL", "qwen2.5-3b-instruct-q4_k_m")
+    provider = RecordingAIProvider(content="This should not be used for the curated payments answer.")
+    service = AIService(provider=provider)
+
+    payload = service.answer_report_question(
+        db_session,
+        user=admin_user,
+        payload=AIReportQARequest(
+            question="List the features in the payments gateway",
+            modules=["payments"],
+            allow_broader_system_context=True,
+        ),
+    )
+
+    assert payload.provider == "system_guide"
+    assert payload.model == "product-metadata"
+    assert "Payments is the finance workspace for reviewing the ledger and managing contribution records." in payload.answer
+    assert "record payments, post corrections, filter the ledger" in payload.answer
+    assert "member's payment timeline" in payload.answer
+    assert "Finance Admin or Admin can record, correct, and manage payment actions." in payload.answer
+    assert provider.captured_messages == []
+
+
 def test_report_qa_requires_confirmation_for_members_workflow_question(
     db_session,
     admin_user,

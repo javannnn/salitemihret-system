@@ -116,6 +116,37 @@ SYSTEM_MODULE_GUIDES: tuple[dict[str, Any], ...] = (
         ),
         "follow_through": "When the promotion is applied, the child is marked as promoted and a promotion notification is sent.",
     },
+    {
+        "key": "payments_gateway",
+        "label": "Payments",
+        "aliases": (
+            "payment gateway",
+            "payments gateway",
+            "payments module",
+            "payment module",
+            "payments ledger",
+            "payment ledger",
+            "record a payment",
+            "correct a payment",
+            "payment timeline",
+            "finance snapshot",
+        ),
+        "summary": "Handles the payment ledger, finance summaries, corrections, exports, and member payment history.",
+        "audience_note": "Explain this as a finance workflow, not as an API.",
+        "access": "Finance Admin or Admin can record, correct, and manage payment actions. Office Admin can view the ledger.",
+        "screens": ("Payments ledger", "Member payment timeline"),
+        "features": (
+            "Record contributions, school fees, donations, and other payment entries",
+            "Post corrections when a payment needs to be fixed",
+            "Filter the ledger by service type, member, date range, method, and status",
+            "See finance totals by service type and the grand total",
+            "Export the filtered payments report",
+            "Open a member-specific payment timeline for detailed history",
+            "Manage service types and payment statuses used in the ledger",
+            "Lock or unlock a payment day for daily close control",
+        ),
+        "clarification": "It is more of a payment ledger and finance workflow area than an external payment processor checkout screen.",
+    },
 )
 
 
@@ -152,6 +183,10 @@ def build_broader_system_direct_answer(question: str) -> BroaderSystemDirectAnsw
     member_promotions_guide = _get_system_module_guide("member_promotions")
     if member_promotions_guide and _question_matches_system_module(question_text, member_promotions_guide):
         return BroaderSystemDirectAnswer(answer=_build_member_promotions_answer(question_text, member_promotions_guide))
+
+    payments_gateway_guide = _get_system_module_guide("payments_gateway")
+    if payments_gateway_guide and _question_matches_system_module(question_text, payments_gateway_guide):
+        return BroaderSystemDirectAnswer(answer=_build_payments_gateway_answer(question_text, payments_gateway_guide))
 
     return None
 
@@ -398,6 +433,43 @@ def _build_member_promotions_answer(question_text: str, guide: dict[str, Any]) -
 
     if access:
         lines.append(access)
+
+    return " ".join(line.strip() for line in lines if line.strip())
+
+
+def _build_payments_gateway_answer(question_text: str, guide: dict[str, Any]) -> str:
+    features = list(guide.get("features") or [])
+    access = str(guide.get("access") or "").strip()
+    clarification = str(guide.get("clarification") or "").strip()
+
+    asks_for_features = any(
+        hint in question_text for hint in ("feature", "features", "what can", "what does", "used for", "gateway", "module")
+    )
+    asks_about_corrections = "correct" in question_text or "correction" in question_text
+    asks_about_export = "export" in question_text or "download" in question_text
+    asks_about_history = "timeline" in question_text or "history" in question_text or "ledger" in question_text
+
+    lines: list[str] = []
+    if asks_for_features or not (asks_about_corrections or asks_about_export or asks_about_history):
+        lines.append(
+            "Payments is the finance workspace for reviewing the ledger and managing contribution records. "
+            "You can record payments, post corrections, filter the ledger, review totals by service type, export reports, and open a member's payment timeline."
+        )
+
+    if asks_about_corrections:
+        lines.append("Yes. Payment corrections can be recorded from the ledger when an existing entry needs to be fixed.")
+    if asks_about_export:
+        lines.append("Yes. The payments report can be exported after applying the filters you want.")
+    if asks_about_history:
+        lines.append("Yes. You can review ledger rows in the main Payments area and open a member-specific payment timeline for detailed history.")
+
+    if clarification:
+        lines.append(clarification)
+    if access:
+        lines.append(access)
+
+    if asks_for_features and features:
+        lines.append("Main features include: " + "; ".join(features[:6]) + ".")
 
     return " ".join(line.strip() for line in lines if line.strip())
 

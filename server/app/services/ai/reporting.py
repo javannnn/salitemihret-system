@@ -97,7 +97,10 @@ SYSTEM_SCOPE_HINTS = (
 )
 SYSTEM_ACTION_PREFIX_HINTS = ("how do i", "how can i", "where do i", "which endpoint", "which route", "can the system", "does the system")
 SYSTEM_EXPLANATION_HINTS = (
+    "list the features",
+    "list features",
     "what are the features",
+    "features in",
     "what can",
     "what does",
     "used for",
@@ -154,6 +157,7 @@ SYSTEM_ENTITY_HINTS = (
     "newcomers",
     "school",
     "schools",
+    "gateway",
 )
 REPORT_SCOPE_HINTS = (
     "report",

@@ -1233,6 +1233,11 @@ export class ApiError extends Error {
   }
 }
 
+function looksLikeHtmlDocument(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("<!doctype html") || normalized.startsWith("<html") || normalized.includes("</html>");
+}
+
 export function parseApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.body) {
@@ -1257,6 +1262,12 @@ export function parseApiErrorMessage(error: unknown, fallback: string): string {
           return payload.message;
         }
       } catch {
+        if (looksLikeHtmlDocument(error.body)) {
+          if (error.status >= 500) {
+            return "The request timed out before the server replied. Please try again.";
+          }
+          return fallback;
+        }
         if (error.body.trim()) {
           return error.body;
         }
