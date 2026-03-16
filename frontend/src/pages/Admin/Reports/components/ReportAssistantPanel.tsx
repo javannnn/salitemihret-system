@@ -228,7 +228,7 @@ export function ReportAssistantPanel({ open, onClose, modules, scopeLabel, sugge
     return (
         <AnimatePresence>
             {open ? (
-                <div className="fixed inset-0 z-50">
+                <div className="fixed inset-0 z-[1200]">
                     <motion.button
                         key="assistant-overlay"
                         type="button"
