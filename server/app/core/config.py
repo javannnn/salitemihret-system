@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me"
     TEMP_CREDENTIALS_SECRET: str | None = None
     JWT_ALG: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 240
+    SESSION_IDLE_TIMEOUT_MINUTES: int = 30
+    SESSION_ACTIVITY_UPDATE_INTERVAL_SECONDS: int = 60
     ENVIRONMENT: str = "local"
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     ABENET_MONTHLY_AMOUNT: Decimal = Decimal("150.00")
@@ -29,7 +31,10 @@ class Settings(BaseSettings):
     AI_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-4B"
     AI_GUARD_MODEL: str | None = "Qwen/Qwen3Guard-4B"
     AI_OCR_MODEL: str = "PaddleOCR-VL"
-    AI_ALLOWED_ROLES: str | None = "Admin,OfficeAdmin,PublicRelations"
+    AI_ALLOWED_ROLES: str | None = (
+        "Admin,OfficeAdmin,PublicRelations,Registrar,SponsorshipCommittee,FinanceAdmin,SchoolAdmin,"
+        "SundaySchoolViewer,SundaySchoolAdmin"
+    )
     AI_NEWCOMER_FOLLOW_UP_ENABLED: bool = False
     AI_SEMANTIC_SEARCH_ENABLED: bool = False
     AI_EMAIL_DRAFTS_ENABLED: bool = False

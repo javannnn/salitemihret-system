@@ -79,10 +79,13 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
 
     existing_user = db.query(User).filter(User.email == invitation.email).first()
     if existing_user:
+        logged_in_at = now_utc()
         existing_user.hashed_password = hash_password(payload.password)
         existing_user.must_change_password = False
         clear_temporary_password(existing_user)
-        existing_user.updated_at = now_utc()
+        existing_user.updated_at = logged_in_at
+        existing_user.last_login_at = logged_in_at
+        existing_user.last_seen = logged_in_at
         invitation.accepted_at = now_utc()
         invitation.accepted_user_id = existing_user.id
         db.commit()
@@ -106,6 +109,7 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    created_at = now_utc()
     user = User(
         email=invitation.email,
         username=username,
@@ -113,8 +117,10 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
         hashed_password=hash_password(payload.password),
         is_active=True,
         is_super_admin=is_super_admin_invite,
-        created_at=now_utc(),
-        updated_at=now_utc(),
+        last_login_at=created_at,
+        last_seen=created_at,
+        created_at=created_at,
+        updated_at=created_at,
     )
     user.roles = roles
     db.add(user)

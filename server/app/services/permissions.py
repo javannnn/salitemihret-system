@@ -209,6 +209,7 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
         "promotions": {"read": True, "write": False},
         "newcomers": {"read": True, "write": True},
         "volunteers": {"read": True, "write": False},
+        "reports": {"read": True, "write": False},
         "users": {"read": True, "write": False},
     },
     "Clerk": {
@@ -234,6 +235,7 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
         "promotions": {"read": True, "write": False},
         "payments": {"read": True, "write": True},
         "sponsorships": {"read": True, "write": False},
+        "reports": {"read": True, "write": False},
         "volunteers": {"read": True, "write": False},
     },
     "SponsorshipCommittee": {
@@ -241,12 +243,14 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
         "members": {"read": True, "write": False},
         "sponsorships": {"read": True, "write": True},
         "newcomers": {"read": True, "write": True},
+        "reports": {"read": True, "write": False},
         "volunteers": {"read": True, "write": False},
         "users": {"read": True, "write": False},
     },
     "SchoolAdmin": {
         **_empty_modules(),
         "schools": {"read": True, "write": True},
+        "reports": {"read": True, "write": False},
     },
     "SundaySchoolViewer": {
         **_empty_modules(),

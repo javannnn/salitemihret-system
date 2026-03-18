@@ -2,19 +2,21 @@ import { useState, useEffect, useMemo } from "react";
 import {
     ApiError,
     Member,
+    NewcomerReportResponse,
     Page,
     PaymentSummaryResponse,
     ReportActivityItem,
     SponsorshipMetrics,
     SundaySchoolStats,
     api,
+    getNewcomerReport,
     getPaymentSummary,
     getReportActivity,
     getSponsorshipMetrics,
     getSundaySchoolStats,
 } from "@/lib/api";
 import { StatCard } from "./StatCard";
-import { Users, DollarSign, Heart, GraduationCap, ArrowRight } from "lucide-react";
+import { Users, UserPlus, DollarSign, Heart, GraduationCap, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -35,6 +37,7 @@ export function Overview({ onNavigate }: OverviewProps) {
     });
     const [paymentSummary, setPaymentSummary] = useState<PaymentSummaryResponse | null>(null);
     const [sponsorshipMetrics, setSponsorshipMetrics] = useState<SponsorshipMetrics | null>(null);
+    const [newcomerReport, setNewcomerReport] = useState<NewcomerReportResponse | null>(null);
     const [schoolStats, setSchoolStats] = useState<SundaySchoolStats | null>(null);
     const [memberHighlights, setMemberHighlights] = useState({ newThisMonth: 0, missingPhone: 0 });
     const [activity, setActivity] = useState<ReportActivityItem[]>([]);
@@ -93,6 +96,13 @@ export function Overview({ onNavigate }: OverviewProps) {
                     }));
                     keys.push("sponsorships");
                 }
+                if (permissions.viewNewcomers) {
+                    promises.push(getNewcomerReport({
+                        start_date: normalizedRange.start || undefined,
+                        end_date: normalizedRange.end || undefined,
+                    }));
+                    keys.push("newcomers");
+                }
                 if (permissions.viewSchools) {
                     promises.push(getSundaySchoolStats({
                         start_date: normalizedRange.start || undefined,
@@ -113,6 +123,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                 const next = { members: 0, revenue: 0, sponsorships: 0, students: 0 };
                 let nextPaymentSummary: PaymentSummaryResponse | null = null;
                 let nextSponsorshipMetrics: SponsorshipMetrics | null = null;
+                let nextNewcomerReport: NewcomerReportResponse | null = null;
                 let nextSchoolStats: SundaySchoolStats | null = null;
 
                 results.forEach((res, idx) => {
@@ -126,6 +137,9 @@ export function Overview({ onNavigate }: OverviewProps) {
                         if (key === "sponsorships") {
                             next.sponsorships = res.value.active_cases ?? 0;
                             nextSponsorshipMetrics = res.value;
+                        }
+                        if (key === "newcomers") {
+                            nextNewcomerReport = res.value;
                         }
                         if (key === "schools") {
                             next.students = res.value.total_participants ?? 0;
@@ -146,6 +160,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                 setStats(next);
                 setPaymentSummary(nextPaymentSummary);
                 setSponsorshipMetrics(nextSponsorshipMetrics);
+                setNewcomerReport(nextNewcomerReport);
                 setSchoolStats(nextSchoolStats);
 
                 if (permissions.viewMembers) {
@@ -230,11 +245,11 @@ export function Overview({ onNavigate }: OverviewProps) {
                             View Members
                         </Button>
                         <Button
-                            onClick={() => onNavigate("payments")}
+                            onClick={() => onNavigate(permissions.viewNewcomers ? "newcomers" : "payments")}
                             variant="outline"
                             className="bg-transparent text-white border-white hover:bg-white/10 hover:text-white"
                         >
-                            View Financials
+                            {permissions.viewNewcomers ? "View Newcomers" : "View Financials"}
                         </Button>
                     </div>
                 </div>
@@ -283,7 +298,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                 />
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 xl:grid-cols-3">
                 <div className="rounded-xl border border-border bg-card p-6">
                     <h3 className="mb-4 text-lg font-semibold text-ink">Operational Highlights</h3>
                     <div className="space-y-3 text-sm">
@@ -300,6 +315,18 @@ export function Overview({ onNavigate }: OverviewProps) {
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
+                            <span className="text-muted">Overdue newcomer follow-up</span>
+                            <span className="font-semibold text-ink">
+                                {permissions.viewNewcomers ? newcomerReport?.summary.followups_overdue ?? "—" : "—"}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-muted">Unassigned newcomer cases</span>
+                            <span className="font-semibold text-ink">
+                                {permissions.viewNewcomers ? newcomerReport?.summary.unassigned_cases ?? "—" : "—"}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between">
                             <span className="text-muted">Sponsorship alerts</span>
                             <span className="font-semibold text-ink">{sponsorshipMetrics?.alerts.length ?? "—"}</span>
                         </div>
@@ -312,6 +339,40 @@ export function Overview({ onNavigate }: OverviewProps) {
                             </span>
                         </div>
                     </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-card p-6">
+                    <h3 className="mb-4 text-lg font-semibold text-ink">Newcomer Watchlist</h3>
+                    {permissions.viewNewcomers && newcomerReport ? (
+                        <div className="space-y-3 text-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Open newcomer pipeline</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.open_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Follow-up due in 7 days</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.followups_due_next_7_days}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Stale cases</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.stale_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Interactions in last 30 days</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.interactions_last_30_days}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Active support cases</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.active_support_cases}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted">Interpreter required</span>
+                                <span className="font-semibold text-ink">{newcomerReport.summary.interpreter_required_cases}</span>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted">Newcomer reporting is restricted for this role.</div>
+                    )}
                 </div>
 
                 <div className="rounded-xl border border-border bg-card p-6">
@@ -370,42 +431,66 @@ export function Overview({ onNavigate }: OverviewProps) {
             </div>
 
             {/* Quick Links */}
-            <div className="grid gap-4 md:grid-cols-2">
-                <div
-                    onClick={() => onNavigate("sponsorships")}
-                    className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
-                >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 rounded-full bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400">
-                                <Heart size={24} />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {(permissions.viewSponsorships || permissions.viewNewcomers) ? (
+                    <div
+                        onClick={() => onNavigate("sponsorships")}
+                        className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
+                    >
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 rounded-full bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400">
+                                    <Heart size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-ink group-hover:text-accent transition-colors">Sponsorship Health</h3>
+                                    <p className="text-sm text-muted">View budget utilization and alerts</p>
+                                </div>
                             </div>
-                            <div>
-                                <h3 className="font-semibold text-ink group-hover:text-accent transition-colors">Sponsorship Health</h3>
-                                <p className="text-sm text-muted">View budget utilization and alerts</p>
-                            </div>
+                            <ArrowRight className="text-muted group-hover:text-accent transition-colors" />
                         </div>
-                        <ArrowRight className="text-muted group-hover:text-accent transition-colors" />
                     </div>
-                </div>
+                ) : null}
 
-                <div
-                    onClick={() => onNavigate("schools")}
-                    className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
-                >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
-                                <GraduationCap size={24} />
+                {permissions.viewNewcomers ? (
+                    <div
+                        onClick={() => onNavigate("newcomers")}
+                        className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
+                    >
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                                    <UserPlus size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-ink group-hover:text-accent transition-colors">Newcomer Care</h3>
+                                    <p className="text-sm text-muted">See follow-up pressure and settlement progress</p>
+                                </div>
                             </div>
-                            <div>
-                                <h3 className="font-semibold text-ink group-hover:text-accent transition-colors">School Performance</h3>
-                                <p className="text-sm text-muted">Track enrollment and revenue</p>
-                            </div>
+                            <ArrowRight className="text-muted group-hover:text-accent transition-colors" />
                         </div>
-                        <ArrowRight className="text-muted group-hover:text-accent transition-colors" />
                     </div>
-                </div>
+                ) : null}
+
+                {permissions.viewSchools ? (
+                    <div
+                        onClick={() => onNavigate("schools")}
+                        className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
+                    >
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+                                    <GraduationCap size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-ink group-hover:text-accent transition-colors">School Performance</h3>
+                                    <p className="text-sm text-muted">Track enrollment and revenue</p>
+                                </div>
+                            </div>
+                            <ArrowRight className="text-muted group-hover:text-accent transition-colors" />
+                        </div>
+                    </div>
+                ) : null}
             </div>
         </div>
     );

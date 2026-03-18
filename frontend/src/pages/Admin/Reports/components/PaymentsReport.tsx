@@ -137,10 +137,10 @@ export function PaymentsReport() {
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
-                <div className="rounded-xl border border-border bg-card p-6">
+                <div className="min-w-0 rounded-xl border border-border bg-card p-6">
                     <h3 className="mb-4 text-lg font-semibold text-ink">Revenue by Service Type</h3>
-                    <div className="h-[300px] w-full min-h-[300px]">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] w-full min-h-[300px] min-w-0">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <BarChart data={chartData} layout="vertical" margin={{ left: 40 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
                                 <XAxis type="number" stroke="var(--color-muted)" fontSize={12} tickLine={false} axisLine={false} />
@@ -172,10 +172,10 @@ export function PaymentsReport() {
                     )}
                 </div>
 
-                <div className="rounded-xl border border-border bg-card p-6">
+                <div className="min-w-0 rounded-xl border border-border bg-card p-6">
                     <h3 className="mb-4 text-lg font-semibold text-ink">Revenue Distribution</h3>
-                    <div className="h-[300px] w-full min-h-[300px]">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] w-full min-h-[300px] min-w-0">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <PieChart>
                                 <Pie
                                     data={chartData}

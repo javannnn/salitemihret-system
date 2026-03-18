@@ -1,17 +1,18 @@
 import { useState, useEffect, useMemo } from "react";
 import { Overview } from "./components/Overview";
 import { MembersReport } from "./components/MembersReport";
+import { NewcomersReport } from "./components/NewcomersReport";
 import { PaymentsReport } from "./components/PaymentsReport";
 import { SponsorshipsReport } from "./components/SponsorshipsReport";
 import { SchoolsReport } from "./components/SchoolsReport";
 import { ReportAssistantPanel } from "./components/ReportAssistantPanel";
-import { LayoutDashboard, Users, CreditCard, Heart, GraduationCap, Sparkles, ArrowUpRight } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, CreditCard, Heart, GraduationCap, Sparkles, ArrowUpRight } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useNavigate } from "react-router-dom";
 import { AIReportQAModule } from "@/lib/api";
 import { Button } from "@/components/ui";
 
-type ReportTab = "overview" | "members" | "payments" | "sponsorships" | "schools";
+type ReportTab = "overview" | "members" | "newcomers" | "payments" | "sponsorships" | "schools";
 
 export default function ReportsClient() {
     const [activeTab, setActiveTab] = useState<ReportTab>("overview");
@@ -22,6 +23,7 @@ export default function ReportsClient() {
     const tabs = [
         { id: "overview", label: "Overview", icon: LayoutDashboard, visible: true },
         { id: "members", label: "Members", icon: Users, visible: permissions.viewMembers },
+        { id: "newcomers", label: "Newcomers", icon: UserPlus, visible: permissions.viewNewcomers },
         { id: "payments", label: "Financials", icon: CreditCard, visible: permissions.viewPayments },
         { id: "sponsorships", label: "Sponsorships", icon: Heart, visible: permissions.viewSponsorships || permissions.viewNewcomers },
         { id: "schools", label: "Schools", icon: GraduationCap, visible: permissions.viewSchools },
@@ -35,6 +37,8 @@ export default function ReportsClient() {
                 return permissions.viewMembers ? ["members"] as AIReportQAModule[] : [];
             case "payments":
                 return permissions.viewPayments ? ["payments"] as AIReportQAModule[] : [];
+            case "newcomers":
+                return permissions.viewNewcomers ? ["newcomers", "activity"] as AIReportQAModule[] : [];
             case "sponsorships":
                 return [
                     ...(permissions.viewSponsorships ? ["sponsorships" as const] : []),
@@ -80,6 +84,15 @@ export default function ReportsClient() {
                         "Which service type is leading revenue?",
                         "Summarize payment performance for this period.",
                         "What is the clearest finance takeaway right now?",
+                    ],
+                };
+            case "newcomers":
+                return {
+                    scopeLabel: "Newcomer reports",
+                    suggestions: [
+                        "Which newcomer cases need attention first?",
+                        "Summarize the newcomer follow-up pressure right now.",
+                        "What stands out in newcomer ownership and settlement progress?",
                     ],
                 };
             case "sponsorships":
@@ -133,6 +146,8 @@ export default function ReportsClient() {
                 return <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} />;
             case "members":
                 return permissions.viewMembers ? <MembersReport /> : null;
+            case "newcomers":
+                return permissions.viewNewcomers ? <NewcomersReport /> : null;
             case "payments":
                 return permissions.viewPayments ? <PaymentsReport /> : null;
             case "sponsorships":
@@ -150,7 +165,7 @@ export default function ReportsClient() {
                 <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-ink">Reports & Analytics</h1>
-                        <p className="text-sm text-muted">Live operational reporting across members, finance, sponsorships, schools, and activity.</p>
+                        <p className="text-sm text-muted">Live operational reporting across members, newcomers, finance, sponsorships, schools, and activity.</p>
                     </div>
                     {assistantModules.length > 0 ? (
                         <div className="flex items-center gap-3">

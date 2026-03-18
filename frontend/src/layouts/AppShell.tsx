@@ -3,7 +3,7 @@ import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-route
 import { AnimatePresence, motion } from "framer-motion";
 import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus, HandHeart } from "lucide-react";
 
-import { isTokenExpired, login, logout } from "@/lib/auth";
+import { getTokenExpiry, isTokenExpired, login, logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -11,7 +11,14 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, getToken, LicenseStatusResponse } from "@/lib/api";
-import { notifySessionExpired, resetSessionExpiryNotice, subscribeSessionExpired } from "@/lib/session";
+import {
+  getSessionIdleRemainingMs,
+  isSessionIdleExpired,
+  notifySessionExpired,
+  recordSessionActivity,
+  SessionExpiryReason,
+  subscribeSessionExpired,
+} from "@/lib/session";
 import { attemptChunkReload } from "@/lib/recovery";
 import { useTour } from "@/context/TourContext";
 import { TourOverlay } from "@/components/Tour/TourOverlay";
@@ -68,6 +75,7 @@ export default function AppShell() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [reloginLoading, setReloginLoading] = useState(false);
+  const [sessionExpiredReason, setSessionExpiredReason] = useState<SessionExpiryReason>("expired");
   const tour = useTour();
   const recaptcha = useRecaptcha();
 
@@ -84,6 +92,7 @@ export default function AppShell() {
   const navItems = useMemo(() => {
     const canViewReports =
       permissions.viewMembers ||
+      permissions.viewNewcomers ||
       permissions.viewPayments ||
       permissions.viewSponsorships ||
       permissions.viewSchools;
@@ -129,12 +138,12 @@ export default function AppShell() {
   }, [
     isSuperAdmin,
     permissions.viewMembers,
+    permissions.viewNewcomers,
     permissions.viewPayments,
     permissions.viewSponsorships,
     permissions.manageSponsorships,
     permissions.viewVolunteers,
     permissions.manageVolunteers,
-    permissions.viewNewcomers,
     permissions.manageNewcomers,
     permissions.viewSchools,
   ]);
@@ -205,33 +214,110 @@ export default function AppShell() {
   }, [user, toast]);
 
   useEffect(() => {
-    const unsubscribe = subscribeSessionExpired(() => setSessionExpired(true));
+    const unsubscribe = subscribeSessionExpired((reason) => {
+      setSessionExpiredReason(reason);
+      setSessionExpired(true);
+    });
     return unsubscribe;
   }, []);
 
   useEffect(() => {
     setSessionExpired(false);
+    setSessionExpiredReason("expired");
   }, [user]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    let timeoutId: number | null = null;
+    const clearScheduledCheck = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
     const checkSession = () => {
+      if (sessionExpired) return false;
+      const token = getToken();
+      if (!token) {
+        notifySessionExpired("unauthorized");
+        return true;
+      }
+      if (isTokenExpired(token)) {
+        notifySessionExpired("expired");
+        return true;
+      }
+      if (isSessionIdleExpired()) {
+        notifySessionExpired("idle");
+        return true;
+      }
+      return false;
+    };
+
+    const scheduleSessionCheck = () => {
+      clearScheduledCheck();
       if (sessionExpired) return;
       const token = getToken();
-      if (!token || isTokenExpired(token)) {
-        notifySessionExpired();
+      if (!token) return;
+      const now = Date.now();
+      const tokenExpiry = getTokenExpiry(token);
+      const deadlines = [getSessionIdleRemainingMs(now)];
+      if (tokenExpiry) {
+        deadlines.push(Math.max(0, tokenExpiry - now));
       }
+      const nextCheckIn = Math.max(250, Math.min(...deadlines) + 100);
+      timeoutId = window.setTimeout(() => {
+        if (!checkSession()) {
+          scheduleSessionCheck();
+        }
+      }, nextCheckIn);
     };
+
+    const handleActivity = () => {
+      if (document.visibilityState === "hidden") return;
+      if (checkSession()) return;
+      recordSessionActivity();
+      scheduleSessionCheck();
+    };
+
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        checkSession();
+        handleActivity();
       }
     };
-    window.addEventListener("focus", checkSession);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "access_token" || event.key === "session_last_activity_at") {
+        if (!checkSession()) {
+          scheduleSessionCheck();
+        }
+      }
+    };
+
+    if (!checkSession()) {
+      recordSessionActivity(Date.now(), true);
+      scheduleSessionCheck();
+    }
+
+    window.addEventListener("focus", handleActivity);
+    window.addEventListener("pointerdown", handleActivity, { passive: true });
+    window.addEventListener("pointermove", handleActivity, { passive: true });
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("scroll", handleActivity, { passive: true });
+    window.addEventListener("touchstart", handleActivity, { passive: true });
+    window.addEventListener("storage", handleStorage);
     document.addEventListener("visibilitychange", handleVisibility);
-    checkSession();
+
     return () => {
-      window.removeEventListener("focus", checkSession);
+      clearScheduledCheck();
+      window.removeEventListener("focus", handleActivity);
+      window.removeEventListener("pointerdown", handleActivity);
+      window.removeEventListener("pointermove", handleActivity);
+      window.removeEventListener("keydown", handleActivity);
+      window.removeEventListener("scroll", handleActivity);
+      window.removeEventListener("touchstart", handleActivity);
+      window.removeEventListener("storage", handleStorage);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [sessionExpired]);
@@ -289,6 +375,12 @@ export default function AppShell() {
         : "border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-200";
   const isLicenseActive = licenseStatus?.state === "active";
   const licenseCustomerLabel = isLicenseActive ? "SaliteMihret EOTC" : licenseStatus?.customer;
+  const sessionExpiredMessage =
+    sessionExpiredReason === "idle"
+      ? "Your session was locked after 30 minutes of inactivity. Sign in again to continue."
+      : sessionExpiredReason === "expired"
+        ? "Your 4-hour session ended. Please sign in again to continue working."
+        : "Please sign in again to continue working.";
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -657,7 +749,7 @@ export default function AppShell() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-amber-900">Session Expired</h3>
-                    <p className="text-sm text-amber-800/80">Please sign in again to continue working.</p>
+                    <p className="text-sm text-amber-800/80">{sessionExpiredMessage}</p>
                   </div>
                 </div>
 
@@ -665,6 +757,11 @@ export default function AppShell() {
                   onSubmit={async (e) => {
                     e.preventDefault();
                     if (!password) return;
+                    const accountIdentifier = user?.user || user?.username || "";
+                    if (!accountIdentifier) {
+                      toast.push("Unable to determine which account to restore.", "error");
+                      return;
+                    }
                     setReloginLoading(true);
                     let token: string | undefined;
                     if (recaptcha.siteKey) {
@@ -679,14 +776,20 @@ export default function AppShell() {
                     }
 
                     try {
-                      await login(user?.user || "", password, token);
-                      resetSessionExpiryNotice();
+                      await login(accountIdentifier, password, token);
                       setSessionExpired(false);
+                      setSessionExpiredReason("expired");
                       setPassword("");
-                      toast.push("Session restored", "info");
+                      setShowPassword(false);
+                      window.location.reload();
+                      return;
                     } catch (error) {
                       console.error(error);
-                      toast.push("Invalid password", "error");
+                      if (error instanceof Error && error.message.trim()) {
+                        toast.push(error.message, "error");
+                      } else {
+                        toast.push("Unable to restore the session.", "error");
+                      }
                     } finally {
                       setReloginLoading(false);
                     }

@@ -9,7 +9,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.member import Member
-from app.models.newcomer import Newcomer
 from app.models.payment import Payment
 from app.schemas.ai import (
     AIReportAnswerResponse,
@@ -42,7 +41,20 @@ MODULE_KEYWORDS: dict[AIReportQAModule, tuple[str, ...]] = {
     "members": ("member", "members", "roster", "status", "archive", "archived", "phone"),
     "payments": ("payment", "payments", "revenue", "donation", "donations", "finance", "financial", "contribution", "tithe"),
     "sponsorships": ("sponsorship", "sponsorships", "budget", "capacity", "submitted", "suspended"),
-    "newcomers": ("newcomer", "newcomers", "intake", "settled", "contacted", "assigned"),
+    "newcomers": (
+        "newcomer",
+        "newcomers",
+        "intake",
+        "settled",
+        "contacted",
+        "assigned",
+        "follow-up",
+        "followup",
+        "interpreter",
+        "language",
+        "referral",
+        "owner",
+    ),
     "schools": ("school", "schools", "student", "students", "sunday school", "abenet", "participant", "participants"),
     "activity": ("activity", "audit", "recent", "changed", "changes", "timeline"),
 }
@@ -931,14 +943,16 @@ def _module_takeaway(module: AIReportQAModule, prompt_source: dict[str, Any]) ->
         return detail + "."
 
     if module == "newcomers":
-        new_count = _safe_int(metrics.get("new"))
-        assigned_count = _safe_int(metrics.get("assigned"))
-        in_progress = _safe_int(metrics.get("in_progress"))
-        settled = _safe_int(metrics.get("settled"))
-        inactive = _safe_int(metrics.get("inactive"))
+        open_cases = _safe_int(metrics.get("open_cases"))
+        overdue = _safe_int(metrics.get("followups_overdue"))
+        unassigned = _safe_int(metrics.get("unassigned_cases"))
+        settled = _safe_int(metrics.get("settled_cases"))
+        stale = _safe_int(metrics.get("stale_cases"))
+        active_support_cases = _safe_int(metrics.get("active_support_cases"))
         return (
-            f"Newcomer workflow has {new_count} new, {assigned_count} assigned, {in_progress} in progress, "
-            f"and {settled} settled cases, with {inactive} marked inactive."
+            f"Newcomer workflow has {open_cases} open cases, {overdue} overdue follow-ups, "
+            f"{unassigned} unassigned cases, {settled} settled, and {stale} stale cases. "
+            f"{active_support_cases} linked support cases are currently active."
         )
 
     if module == "schools":
@@ -1016,14 +1030,14 @@ def _attention_score(module: AIReportQAModule, prompt_source: dict[str, Any]) ->
         )
 
     if module == "newcomers":
-        new_count = _safe_int(metrics.get("new"))
-        assigned = _safe_int(metrics.get("assigned"))
-        in_progress = _safe_int(metrics.get("in_progress"))
-        settled = _safe_int(metrics.get("settled"))
-        inactive = _safe_int(metrics.get("inactive"))
-        score = new_count * 3 + assigned * 4 + max(0, in_progress - settled) * 2 + inactive * 2
+        overdue = _safe_int(metrics.get("followups_overdue"))
+        unassigned = _safe_int(metrics.get("unassigned_cases"))
+        stale = _safe_int(metrics.get("stale_cases"))
+        due_next = _safe_int(metrics.get("followups_due_next_7_days"))
+        interpreter_required = _safe_int(metrics.get("interpreter_required_cases"))
+        score = overdue * 6 + unassigned * 5 + stale * 4 + due_next * 2 + interpreter_required
         return score, (
-            f"Case follow-through is the pressure point: {new_count} new, {assigned} assigned, and {in_progress} in-progress cases are ahead of {settled} settled outcomes."
+            f"Case coordination needs attention: {overdue} follow-ups are overdue, {unassigned} cases still have no owner, and {stale} cases have gone quiet."
         )
 
     if module == "schools":
@@ -1755,41 +1769,21 @@ def _build_newcomers_context(
     start_date: date | None,
     end_date: date | None,
 ) -> ReportQAModuleContext:
-    base_query = db.query(Newcomer)
-    if start_date:
-        base_query = base_query.filter(Newcomer.created_at >= datetime(start_date.year, start_date.month, start_date.day))
-    if end_date:
-        base_query = base_query.filter(
-            Newcomer.created_at <= datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, 999999)
-        )
-    counts = dict(
-        base_query.with_entities(Newcomer.status, func.count(Newcomer.id)).group_by(Newcomer.status).all()
+    report = reporting_service.get_newcomer_report(db, start_date=start_date, end_date=end_date)
+    summary_metrics = report.summary
+    total = summary_metrics.total_cases
+    dominant_status = max(
+        report.status_breakdown,
+        key=lambda item: item.value,
+        default=AIReportChartDatum(label="New", value=0),
     )
-    inactive_count = base_query.filter(Newcomer.is_inactive.is_(True)).count()
-    new_count = int(counts.get("New", 0) or 0)
-    contacted_count = int(counts.get("Contacted", 0) or 0)
-    assigned_count = int(counts.get("Assigned", 0) or 0)
-    in_progress_count = int(counts.get("InProgress", 0) or 0) + int(counts.get("Sponsored", 0) or 0)
-    settled_count = int(counts.get("Settled", 0) or 0)
-    closed_count = int(counts.get("Closed", 0) or 0) + int(counts.get("Converted", 0) or 0)
-    total = new_count + contacted_count + assigned_count + in_progress_count + settled_count + closed_count
-    dominant_label, dominant_value = max(
-        (
-            ("New", new_count),
-            ("Contacted", contacted_count),
-            ("Assigned", assigned_count),
-            ("In progress", in_progress_count),
-            ("Settled", settled_count),
-            ("Closed", closed_count),
-        ),
-        key=lambda item: item[1],
-        default=("New", 0),
-    )
-
     summary = (
         "No newcomer records matched the selected filters."
-        if total == 0 and inactive_count == 0
-        else f"Newcomer pipeline is led by {dominant_label.lower()} cases ({dominant_value}), with {settled_count} settled."
+        if total == 0
+        else (
+            f"Newcomer operations have {summary_metrics.open_cases} open cases, "
+            f"{summary_metrics.followups_overdue} overdue follow-ups, and {summary_metrics.unassigned_cases} unassigned cases."
+        )
     )
     chart = AIReportChartRead(
         type="bar",
@@ -1797,49 +1791,70 @@ def _build_newcomers_context(
         description="Current newcomer status mix for the selected period.",
         unit="count",
         data=[
-            AIReportChartDatum(label="New", value=float(new_count)),
-            AIReportChartDatum(label="Contacted", value=float(contacted_count)),
-            AIReportChartDatum(label="Assigned", value=float(assigned_count)),
-            AIReportChartDatum(label="In progress", value=float(in_progress_count)),
-            AIReportChartDatum(label="Settled", value=float(settled_count)),
-            AIReportChartDatum(label="Closed", value=float(closed_count)),
+            AIReportChartDatum(label=item.label, value=float(item.value))
+            for item in report.status_breakdown
         ],
     )
 
     return ReportQAModuleContext(
         module="newcomers",
         source=AIReportSourceRead(
-            id="newcomers_pipeline",
+            id="newcomers_overview",
             module="newcomers",
-            title="Newcomer pipeline metrics",
+            title="Newcomer pipeline and follow-up metrics",
             summary=summary,
             metrics=[
-                AIReportSourceMetric(label="New", value=_format_count(new_count)),
-                AIReportSourceMetric(label="Contacted", value=_format_count(contacted_count)),
-                AIReportSourceMetric(label="Assigned", value=_format_count(assigned_count)),
-                AIReportSourceMetric(label="In progress", value=_format_count(in_progress_count)),
-                AIReportSourceMetric(label="Settled", value=_format_count(settled_count)),
-                AIReportSourceMetric(label="Inactive", value=_format_count(inactive_count)),
+                AIReportSourceMetric(label="Open cases", value=_format_count(summary_metrics.open_cases)),
+                AIReportSourceMetric(label="Overdue follow-ups", value=_format_count(summary_metrics.followups_overdue)),
+                AIReportSourceMetric(label="Unassigned", value=_format_count(summary_metrics.unassigned_cases)),
+                AIReportSourceMetric(label="Stale cases", value=_format_count(summary_metrics.stale_cases)),
+                AIReportSourceMetric(label="Settled", value=_format_count(summary_metrics.settled_cases)),
+                AIReportSourceMetric(label="Interpreter required", value=_format_count(summary_metrics.interpreter_required_cases)),
+                AIReportSourceMetric(label="Interactions (30d)", value=_format_count(summary_metrics.interactions_last_30_days)),
+                AIReportSourceMetric(label="Active support cases", value=_format_count(summary_metrics.active_support_cases)),
             ],
         ),
         prompt_data={
-            "id": "newcomers_pipeline",
+            "id": "newcomers_overview",
             "module": "newcomers",
             "headline": (
                 "No newcomer records matched the selected filters."
-                if total == 0 and inactive_count == 0
-                else f"Newcomers are concentrated in {dominant_label.lower()} cases, with {settled_count} settled and {inactive_count} inactive."
+                if total == 0
+                else (
+                    f"Newcomers are concentrated in {dominant_status.label.lower()} cases, with "
+                    f"{summary_metrics.followups_overdue} overdue follow-ups and {summary_metrics.settled_cases} settled cases."
+                )
             ),
             "summary": summary,
             "metrics": {
-                "new": new_count,
-                "contacted": contacted_count,
-                "assigned": assigned_count,
-                "in_progress": in_progress_count,
-                "settled": settled_count,
-                "closed": closed_count,
-                "inactive": inactive_count,
+                "total_cases": summary_metrics.total_cases,
+                "open_cases": summary_metrics.open_cases,
+                "inactive_cases": summary_metrics.inactive_cases,
+                "settled_cases": summary_metrics.settled_cases,
+                "closed_cases": summary_metrics.closed_cases,
+                "unassigned_cases": summary_metrics.unassigned_cases,
+                "sponsored_cases": summary_metrics.sponsored_cases,
+                "interpreter_required_cases": summary_metrics.interpreter_required_cases,
+                "family_households": summary_metrics.family_households,
+                "recent_intakes_30_days": summary_metrics.recent_intakes_30_days,
+                "followups_overdue": summary_metrics.followups_overdue,
+                "followups_due_next_7_days": summary_metrics.followups_due_next_7_days,
+                "stale_cases": summary_metrics.stale_cases,
+                "interactions_last_30_days": summary_metrics.interactions_last_30_days,
+                "submitted_support_cases": summary_metrics.submitted_support_cases,
+                "active_support_cases": summary_metrics.active_support_cases,
+                "suspended_support_cases": summary_metrics.suspended_support_cases,
             },
+            "status_breakdown": [item.model_dump() for item in report.status_breakdown],
+            "followup_breakdown": [item.model_dump() for item in report.followup_breakdown],
+            "owner_breakdown": [item.model_dump() for item in report.owner_breakdown[:5]],
+            "county_breakdown": [item.model_dump() for item in report.county_breakdown[:5]],
+            "language_breakdown": [item.model_dump() for item in report.language_breakdown[:5]],
+            "referral_breakdown": [item.model_dump() for item in report.referral_breakdown[:5]],
+            "interaction_breakdown": [item.model_dump() for item in report.interaction_breakdown[:5]],
+            "sponsorship_breakdown": [item.model_dump() for item in report.sponsorship_breakdown[:5]],
+            "attention_cases": [item.model_dump() for item in report.attention_cases[:5]],
+            "recent_cases": [item.model_dump() for item in report.recent_cases[:5]],
         },
         chart=chart,
     )
@@ -1921,7 +1936,7 @@ def _build_activity_context(
     end_date: date | None,
 ) -> ReportQAModuleContext:
     items = reporting_service.get_report_activity(db, limit=10, start_date=start_date, end_date=end_date)
-    categories = {"promotion": 0, "member": 0, "sponsorship": 0, "user": 0}
+    categories = {"promotion": 0, "member": 0, "sponsorship": 0, "newcomer": 0, "user": 0}
     for item in items:
         categories[item.category] = categories.get(item.category, 0) + 1
 
@@ -1942,6 +1957,7 @@ def _build_activity_context(
                 AIReportChartDatum(label="Promotions", value=float(categories["promotion"])),
                 AIReportChartDatum(label="Members", value=float(categories["member"])),
                 AIReportChartDatum(label="Sponsorships", value=float(categories["sponsorship"])),
+                AIReportChartDatum(label="Newcomers", value=float(categories["newcomer"])),
                 AIReportChartDatum(label="Users", value=float(categories["user"])),
             ],
         )
@@ -1957,6 +1973,7 @@ def _build_activity_context(
                 AIReportSourceMetric(label="Events returned", value=_format_count(len(items))),
                 AIReportSourceMetric(label="Member events", value=_format_count(categories["member"])),
                 AIReportSourceMetric(label="Sponsorship events", value=_format_count(categories["sponsorship"])),
+                AIReportSourceMetric(label="Newcomer events", value=_format_count(categories["newcomer"])),
             ],
         ),
         prompt_data={

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from app.core.config import settings
 from app.models.member import Member
+from app.models.newcomer import Newcomer
+from app.models.newcomer_tracking import NewcomerInteraction
 from app.models.payment import Payment, PaymentServiceType
+from app.models.sponsorship import Sponsorship
 from app.schemas.ai import AIReportQARequest, NewcomerFollowUpDraftRequest
 from app.services.ai.models import AIProviderKind, AITextGeneration
 from app.services.ai.providers import MockAIProvider
@@ -169,6 +172,79 @@ def test_report_qa_uses_mock_provider_and_returns_sources_and_chart(
     assert "Members:" in payload.answer
     assert "Priority:" in payload.answer
     assert any("Mock provider output" in warning for warning in payload.warnings)
+
+
+def test_report_qa_includes_richer_newcomer_report_context(
+    db_session,
+    registrar_user,
+    sample_member,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "AI_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "AI_REPORT_QA_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_DEFAULT_CHAT_MODEL", "Qwen/Qwen3-14B")
+    service = AIService(provider=MockAIProvider())
+
+    today = date.today()
+    newcomer = Newcomer(
+        newcomer_code="NC-AI1001",
+        first_name="Mimi",
+        last_name="Tadesse",
+        contact_phone="+16135550141",
+        contact_email="mimi@example.com",
+        arrival_date=today - timedelta(days=12),
+        created_at=datetime.utcnow() - timedelta(days=12),
+        status="Assigned",
+        assigned_owner_id=registrar_user.id,
+        followup_due_date=today - timedelta(days=1),
+        preferred_language="Amharic",
+        interpreter_required=True,
+    )
+    db_session.add(newcomer)
+    db_session.flush()
+    db_session.add(
+        NewcomerInteraction(
+            newcomer_id=newcomer.id,
+            interaction_type="Call",
+            note="Discussed next newcomer support steps.",
+            created_by_id=registrar_user.id,
+            occurred_at=datetime.utcnow() - timedelta(days=1),
+        )
+    )
+    db_session.add(
+        Sponsorship(
+            sponsor_member_id=sample_member.id,
+            newcomer_id=newcomer.id,
+            beneficiary_name=newcomer.full_name,
+            start_date=today - timedelta(days=7),
+            status="Submitted",
+            monthly_amount=Decimal("75.00"),
+        )
+    )
+    db_session.commit()
+
+    payload = service.answer_report_question(
+        db_session,
+        user=registrar_user,
+        payload=AIReportQARequest(
+            question="What stands out in newcomer follow-up and recent activity?",
+            modules=["newcomers", "activity"],
+        ),
+    )
+
+    assert payload.provider == "mock"
+    assert payload.applied_modules == ["newcomers", "activity"]
+    if payload.chart is not None:
+        assert payload.chart.title in {"Newcomer pipeline", "Recent activity by category"}
+    assert any(source.id == "newcomers_overview" for source in payload.sources)
+    assert any(source.id == "activity_feed" for source in payload.sources)
+    assert any(
+        source.id == "newcomers_overview"
+        and any(metric.label == "Overdue follow-ups" for metric in source.metrics)
+        for source in payload.sources
+    )
+    assert "follow-up" in payload.answer.lower() or "follow-ups" in payload.answer.lower()
 
 
 def test_report_qa_answers_top_categories_from_follow_up_history(

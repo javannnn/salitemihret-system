@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
@@ -16,6 +17,31 @@ from app.services.permissions import (
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _enforce_session_activity(db: Session, user: User) -> None:
+    now = datetime.now(timezone.utc)
+    last_seen = _as_utc(user.last_seen)
+    idle_timeout = timedelta(minutes=settings.SESSION_IDLE_TIMEOUT_MINUTES)
+
+    if last_seen is not None and now - last_seen >= idle_timeout:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired due to inactivity",
+        )
+
+    update_interval = timedelta(seconds=settings.SESSION_ACTIVITY_UPDATE_INTERVAL_SECONDS)
+    if last_seen is None or now - last_seen >= update_interval:
+        user.last_seen = now
+        db.commit()
 
 
 def get_current_user(
@@ -47,6 +73,8 @@ def get_current_user(
 
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+    _enforce_session_activity(db, user)
 
     if user.must_change_password:
         allowed_paths = {"/auth/whoami", "/account/me", "/account/me/password", "/license/status"}

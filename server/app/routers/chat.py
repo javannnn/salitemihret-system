@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -190,7 +190,7 @@ def heartbeat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    current_user.last_seen = datetime.utcnow()
+    current_user.last_seen = datetime.now(timezone.utc)
     db.commit()
 
 

@@ -1,4 +1,4 @@
-import { notifySessionExpired, waitForSessionRestored } from "@/lib/session";
+import { clearSessionActivity, notifySessionExpired, waitForSessionRestored } from "@/lib/session";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -306,7 +306,7 @@ export type PaymentSummaryResponse = {
 
 export type ReportActivityItem = {
   id: string;
-  category: "promotion" | "member" | "sponsorship" | "user";
+  category: "promotion" | "member" | "sponsorship" | "newcomer" | "user";
   action: string;
   actor?: string | null;
   target?: string | null;
@@ -314,6 +314,74 @@ export type ReportActivityItem = {
   occurred_at: string;
   entity_type?: string | null;
   entity_id?: number | null;
+};
+
+export type ReportBreakdownItem = {
+  label: string;
+  value: number;
+  share_percent?: number | null;
+};
+
+export type NewcomerReportSummary = {
+  total_cases: number;
+  open_cases: number;
+  inactive_cases: number;
+  settled_cases: number;
+  closed_cases: number;
+  unassigned_cases: number;
+  sponsored_cases: number;
+  interpreter_required_cases: number;
+  family_households: number;
+  recent_intakes_30_days: number;
+  followups_overdue: number;
+  followups_due_next_7_days: number;
+  stale_cases: number;
+  interactions_last_30_days: number;
+  submitted_support_cases: number;
+  active_support_cases: number;
+  suspended_support_cases: number;
+};
+
+export type NewcomerReportOwnerBreakdownItem = {
+  owner_id?: number | null;
+  owner_name: string;
+  total_cases: number;
+  overdue_followups: number;
+  stale_cases: number;
+};
+
+export type NewcomerReportCaseItem = {
+  id: number;
+  newcomer_code: string;
+  full_name: string;
+  status: string;
+  arrival_date: string;
+  created_at: string;
+  followup_due_date?: string | null;
+  assigned_owner_name?: string | null;
+  sponsored_by_member_name?: string | null;
+  last_interaction_at?: string | null;
+  county?: string | null;
+  preferred_language?: string | null;
+  interpreter_required: boolean;
+  household_type: string;
+  family_size?: number | null;
+  service_type?: string | null;
+  attention_reason?: string | null;
+};
+
+export type NewcomerReportResponse = {
+  summary: NewcomerReportSummary;
+  status_breakdown: ReportBreakdownItem[];
+  followup_breakdown: ReportBreakdownItem[];
+  county_breakdown: ReportBreakdownItem[];
+  language_breakdown: ReportBreakdownItem[];
+  referral_breakdown: ReportBreakdownItem[];
+  interaction_breakdown: ReportBreakdownItem[];
+  sponsorship_breakdown: ReportBreakdownItem[];
+  owner_breakdown: NewcomerReportOwnerBreakdownItem[];
+  recent_cases: NewcomerReportCaseItem[];
+  attention_cases: NewcomerReportCaseItem[];
 };
 
 export type AICapability = {
@@ -1154,8 +1222,27 @@ type ApiRequestInit = RequestInit & {
 
 let accessToken: string | null =
   typeof window === "undefined" ? null : window.localStorage.getItem("access_token");
+const SESSION_PRESERVED = Symbol("session-preserved");
+let sessionValidation:
+  | {
+      token: string;
+      promise: Promise<boolean>;
+    }
+  | null = null;
+
+function readStoredAccessToken(): string | null {
+  if (typeof window === "undefined") {
+    return accessToken;
+  }
+  try {
+    return window.localStorage.getItem("access_token");
+  } catch {
+    return accessToken;
+  }
+}
 
 export function getToken(): string | null {
+  accessToken = readStoredAccessToken();
   return accessToken;
 }
 
@@ -1164,10 +1251,14 @@ export function setToken(token: string | null): void {
   if (typeof window === "undefined") {
     return;
   }
-  if (token) {
-    window.localStorage.setItem("access_token", token);
-  } else {
-    window.localStorage.removeItem("access_token");
+  try {
+    if (token) {
+      window.localStorage.setItem("access_token", token);
+    } else {
+      window.localStorage.removeItem("access_token");
+    }
+  } catch {
+    // Ignore storage write failures and keep the in-memory token as a fallback.
   }
 }
 
@@ -1179,8 +1270,9 @@ function shouldSetJsonContentType(body: BodyInit | null | undefined): boolean {
 
 function buildHeaders(initHeaders?: HeadersInit, body?: BodyInit | null): Headers {
   const headers = new Headers(initHeaders ?? {});
-  if (accessToken && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
+  const token = getToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");
@@ -1191,8 +1283,41 @@ function buildHeaders(initHeaders?: HeadersInit, body?: BodyInit | null): Header
   return headers;
 }
 
+function markSessionPreserved<T extends Response>(response: T): T {
+  (response as T & { [SESSION_PRESERVED]?: true })[SESSION_PRESERVED] = true;
+  return response;
+}
+
+function shouldHandleUnauthorized(response: Response): boolean {
+  return !(response as Response & { [SESSION_PRESERVED]?: true })[SESSION_PRESERVED];
+}
+
+async function validateCurrentSession(token: string): Promise<boolean> {
+  if (sessionValidation && sessionValidation.token === token) {
+    return sessionValidation.promise;
+  }
+
+  const promise = fetch(`${API_BASE}/auth/whoami`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  })
+    .then((response) => response.ok)
+    .catch(() => false)
+    .finally(() => {
+      if (sessionValidation?.token === token) {
+        sessionValidation = null;
+      }
+    });
+
+  sessionValidation = { token, promise };
+  return promise;
+}
+
 async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, allowRetry = true) {
   const { skipSessionRestore, ...requestInit } = init;
+  const tokenAtRequestStart = getToken();
   const headers = buildHeaders(requestInit.headers, requestInit.body ?? null);
   const res = await fetch(input, { ...requestInit, headers });
 
@@ -1200,7 +1325,16 @@ async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, al
     return res;
   }
 
-  notifySessionExpired();
+  const tokenForValidation = tokenAtRequestStart || getToken();
+  if (tokenForValidation) {
+    const sessionStillValid = await validateCurrentSession(tokenForValidation);
+    if (sessionStillValid) {
+      return markSessionPreserved(res);
+    }
+  }
+
+  notifySessionExpired("unauthorized");
+  clearSessionActivity();
   setToken(null);
 
   if (!allowRetry) {
@@ -1208,7 +1342,7 @@ async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, al
   }
 
   await waitForSessionRestored();
-  if (!accessToken || requestInit.signal?.aborted) {
+  if (!getToken() || requestInit.signal?.aborted) {
     return res;
   }
 
@@ -1216,7 +1350,8 @@ async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, al
 }
 
 function handleUnauthorized(message?: string): never {
-  notifySessionExpired();
+  notifySessionExpired("unauthorized");
+  clearSessionActivity();
   setToken(null);
   throw new ApiError(401, message || "Unauthorized");
 }
@@ -1286,7 +1421,7 @@ export async function api<T>(path: string, init: ApiRequestInit = {}): Promise<T
 
   const text = await res.text();
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized(text || "Unauthorized");
   }
 
@@ -1322,7 +1457,7 @@ export async function exportMembers(params: Record<string, string | number | und
     headers: { Accept: "text/csv" },
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
 
@@ -1349,7 +1484,7 @@ export async function exportPaymentsReport(params: PaymentFilters = {}): Promise
   const url = `${API_BASE}/payments/export.csv${query ? `?${query}` : ""}`;
   const res = await authFetch(url, { headers: { Accept: "text/csv" } });
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (res.status === 403) {
@@ -1379,7 +1514,7 @@ export async function exportSponsorshipsCsv(params: SponsorshipExportParams = {}
     res = await authFetch(fallbackUrl, { headers: { Accept: "text/csv" } });
   }
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (res.status === 403) {
@@ -1411,7 +1546,7 @@ export async function exportSponsorshipsExcel(params: SponsorshipExportParams = 
     });
   }
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (res.status === 403) {
@@ -1787,7 +1922,7 @@ export async function importMembers(file: File | Blob, filename = "members_impor
     body,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
 
@@ -1828,7 +1963,7 @@ export async function uploadAvatar(memberId: number, file: File): Promise<Avatar
     method: "POST",
     body,
   });
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
@@ -1842,7 +1977,7 @@ export async function deleteAvatar(memberId: number): Promise<void> {
   const res = await authFetch(`${API_BASE}/members/${memberId}/avatar`, {
     method: "DELETE",
   });
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
@@ -1865,7 +2000,7 @@ export async function uploadContributionExceptionAttachment(
     method: "POST",
     body,
   });
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
@@ -1879,7 +2014,7 @@ export async function deleteContributionExceptionAttachment(memberId: number): P
   const res = await authFetch(`${API_BASE}/members/${memberId}/contribution-exception-attachment`, {
     method: "DELETE",
   });
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
@@ -1892,7 +2027,7 @@ export async function archiveMember(memberId: number): Promise<void> {
   const res = await authFetch(`${API_BASE}/members/${memberId}/archive`, {
     method: "POST",
   });
-  if (res.status === 401) {
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
   }
   if (!res.ok) {
@@ -2296,6 +2431,16 @@ export async function getReportActivity(filters: { start_date?: string; end_date
   });
   const query = search.toString();
   return api<ReportActivityItem[]>(`/reports/activity${query ? `?${query}` : ""}`);
+}
+
+export async function getNewcomerReport(filters: { start_date?: string; end_date?: string } = {}): Promise<NewcomerReportResponse> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<NewcomerReportResponse>(`/reports/newcomers${query ? `?${query}` : ""}`);
 }
 
 export async function getAICapabilities(): Promise<AICapability[]> {
