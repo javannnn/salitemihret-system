@@ -12,7 +12,7 @@ class UserMemberSummary(BaseModel):
     last_name: str
     username: str
     status: str | None = None
-    email: EmailStr | None = None
+    email: str | None = None
     phone: str | None = None
     linked_user_id: int | None = None
     linked_username: str | None = None
