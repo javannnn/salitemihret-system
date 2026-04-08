@@ -73,6 +73,11 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
         label="Sponsorships",
         description="Sponsorship cases, approvals, and related notes.",
         fields=(
+            PermissionFieldCatalogEntry(
+                "budget_rounds",
+                "Budget Rounds",
+                "Create, update, and remove sponsorship budget rounds and slot limits.",
+            ),
             PermissionFieldCatalogEntry("sponsor_id", "Sponsor", "Sponsor member reference."),
             PermissionFieldCatalogEntry("beneficiary_member_id", "Beneficiary Member", "Beneficiary member reference."),
             PermissionFieldCatalogEntry("newcomer_id", "Beneficiary Newcomer", "Beneficiary newcomer reference."),
@@ -130,7 +135,30 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
         key="reports",
         label="Reports",
         description="Operational reports and analytics exports.",
-        fields=(),
+        fields=(
+            PermissionFieldCatalogEntry(
+                "overview",
+                "Overview",
+                "Cross-module overview cards, operational highlights, and recent activity.",
+            ),
+            PermissionFieldCatalogEntry("members", "Member Report", "Roster, growth, and member data quality analytics."),
+            PermissionFieldCatalogEntry("payments", "Financial Report", "Payment summaries, revenue mix, and finance analytics."),
+            PermissionFieldCatalogEntry(
+                "sponsorships",
+                "Sponsorship Report",
+                "Sponsorship capacity, budget utilization, and case analytics.",
+            ),
+            PermissionFieldCatalogEntry(
+                "newcomers",
+                "Newcomer Report",
+                "Intake pipeline, follow-up pressure, and settlement reporting.",
+            ),
+            PermissionFieldCatalogEntry(
+                "schools",
+                "School Report",
+                "Sunday school participation, content queue, and revenue reporting.",
+            ),
+        ),
     ),
     PermissionModuleCatalogEntry(
         key="users",
@@ -160,6 +188,12 @@ PERMISSION_FIELD_KEYS: dict[str, set[str]] = {
     for module in PERMISSION_CATALOG
 }
 
+DEFAULT_FIELD_PERMISSION_OVERRIDES: dict[str, dict[str, dict[str, bool]]] = {
+    "sponsorships": {
+        "budget_rounds": {"read": False, "write": False},
+    },
+}
+
 SYSTEM_ROLE_NAMES: set[str] = {
     "SuperAdmin",
     "Admin",
@@ -182,11 +216,11 @@ def is_system_role_name(role_name: str) -> bool:
 
 
 def _all_modules_enabled() -> dict[str, dict[str, bool]]:
-    return {module: {"read": True, "write": True} for module in PERMISSION_MODULE_KEYS}
+    return {module: {"read": True, "write": True, "visible": True} for module in PERMISSION_MODULE_KEYS}
 
 
 def _empty_modules() -> dict[str, dict[str, bool]]:
-    return {module: {"read": False, "write": False} for module in PERMISSION_MODULE_KEYS}
+    return {module: {"read": False, "write": False, "visible": False} for module in PERMISSION_MODULE_KEYS}
 
 
 SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
@@ -272,6 +306,14 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
     },
 }
 
+SYSTEM_ROLE_FIELD_DEFAULTS: dict[str, dict[str, dict[str, dict[str, bool]]]] = {
+    "Admin": {
+        "sponsorships": {
+            "budget_rounds": {"read": True, "write": True},
+        },
+    },
+}
+
 
 def _copy_modules(source: dict[str, dict[str, bool]] | None = None) -> dict[str, dict[str, bool]]:
     baseline = _empty_modules()
@@ -280,8 +322,42 @@ def _copy_modules(source: dict[str, dict[str, bool]] | None = None) -> dict[str,
     for module, flags in source.items():
         if module not in baseline or not isinstance(flags, dict):
             continue
-        baseline[module]["read"] = bool(flags.get("read"))
-        baseline[module]["write"] = bool(flags.get("write"))
+        normalized = _module_permission_flags(flags)
+        if normalized is None:
+            continue
+        baseline[module] = normalized
+    return baseline
+
+
+def _copy_field_permissions_with_defaults(
+    source: dict[str, dict[str, dict[str, bool]]] | None = None,
+) -> dict[str, dict[str, dict[str, bool]]]:
+    baseline = {
+        module: {
+            field: {
+                "read": bool(flags.get("read")),
+                "write": bool(flags.get("write")),
+            }
+            for field, flags in field_map.items()
+            if module in PERMISSION_FIELD_KEYS and field in PERMISSION_FIELD_KEYS[module]
+        }
+        for module, field_map in DEFAULT_FIELD_PERMISSION_OVERRIDES.items()
+        if module in PERMISSION_FIELD_KEYS
+    }
+    if not source:
+        return baseline
+
+    for module, field_map in source.items():
+        if module not in PERMISSION_FIELD_KEYS:
+            continue
+        module_target = baseline.setdefault(module, {})
+        for field, flags in field_map.items():
+            if field not in PERMISSION_FIELD_KEYS[module]:
+                continue
+            module_target[field] = {
+                "read": bool(flags.get("read")),
+                "write": bool(flags.get("write")),
+            }
     return baseline
 
 
@@ -297,14 +373,13 @@ def normalize_module_permissions(
     for module, flags in payload.items():
         if module not in PERMISSION_MODULE_KEYS:
             continue
-        normalized_flags = _permission_flags_dict(flags)
+        normalized_flags = _module_permission_flags(flags)
         if normalized_flags is None:
             continue
-        normalized = {"read": bool(normalized_flags.get("read")), "write": bool(normalized_flags.get("write"))}
         if include_all_modules:
-            result[module] = normalized
+            result[module] = normalized_flags
         else:
-            result[module] = normalized
+            result[module] = normalized_flags
     return result
 
 
@@ -351,8 +426,25 @@ def _permission_flags_dict(value: Any) -> dict[str, Any] | None:
     return {"read": bool(read), "write": bool(write)}
 
 
+def _module_permission_flags(value: Any) -> dict[str, bool] | None:
+    normalized_flags = _permission_flags_dict(value)
+    if normalized_flags is None:
+        return None
+    read = bool(normalized_flags.get("read"))
+    write = bool(normalized_flags.get("write"))
+    raw_visible = normalized_flags.get("visible")
+    visible = bool(raw_visible) if raw_visible is not None else (read or write)
+    if not (read or write):
+        visible = False
+    return {"read": read, "write": write, "visible": visible}
+
+
 def get_default_module_permissions_for_role(role_name: str) -> dict[str, dict[str, bool]]:
     return _copy_modules(SYSTEM_ROLE_DEFAULTS.get(role_name))
+
+
+def get_default_field_permissions_for_role(role_name: str) -> dict[str, dict[str, dict[str, bool]]]:
+    return _copy_field_permissions_with_defaults(SYSTEM_ROLE_FIELD_DEFAULTS.get(role_name))
 
 
 def resolve_role_module_permissions(role: Role) -> dict[str, dict[str, bool]]:
@@ -361,14 +453,27 @@ def resolve_role_module_permissions(role: Role) -> dict[str, dict[str, bool]]:
         return defaults
     overrides = normalize_module_permissions(role.module_permissions, include_all_modules=False)
     for module, flags in overrides.items():
-        defaults[module] = {"read": bool(flags.get("read")), "write": bool(flags.get("write"))}
+        defaults[module] = {
+            "read": bool(flags.get("read")),
+            "write": bool(flags.get("write")),
+            "visible": bool(flags.get("visible")),
+        }
     return defaults
 
 
 def resolve_role_field_permissions(role: Role) -> dict[str, dict[str, dict[str, bool]]]:
+    defaults = get_default_field_permissions_for_role(role.name)
     if role.field_permissions is None:
-        return {}
-    return normalize_field_permissions(role.field_permissions)
+        return defaults
+    overrides = normalize_field_permissions(role.field_permissions)
+    for module, field_map in overrides.items():
+        module_target = defaults.setdefault(module, {})
+        for field, flags in field_map.items():
+            module_target[field] = {
+                "read": bool(flags.get("read")),
+                "write": bool(flags.get("write")),
+            }
+    return defaults
 
 
 def _merge_field_permissions(
@@ -397,6 +502,7 @@ def compute_effective_permissions(
             for module, flags in resolved.items():
                 modules[module]["read"] = modules[module]["read"] or bool(flags.get("read"))
                 modules[module]["write"] = modules[module]["write"] or bool(flags.get("write"))
+                modules[module]["visible"] = modules[module]["visible"] or bool(flags.get("visible"))
 
     field_permissions: dict[str, dict[str, dict[str, bool]]] = {}
     if not is_super_admin:

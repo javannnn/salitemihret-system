@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 PaymentStatus = Literal["Pending", "Completed", "Overdue"]
+PaymentEntryKind = Literal["Original", "Reversal", "Replacement"]
 
 
 class PaymentServiceTypeBase(BaseModel):
@@ -78,6 +79,16 @@ class PaymentCreate(PaymentBase):
 
 class PaymentCorrectionCreate(BaseModel):
     correction_reason: str = Field(..., min_length=5, max_length=500)
+    replacement: Optional[PaymentCreate] = None
+
+
+class PaymentVoidCreate(BaseModel):
+    reason: str = Field(..., min_length=5, max_length=500)
+
+
+class PaymentBulkVoidCreate(BaseModel):
+    payment_ids: List[int] = Field(..., min_items=1)
+    reason: str = Field(..., min_length=5, max_length=500)
 
 
 class PaymentOut(BaseModel):
@@ -92,6 +103,9 @@ class PaymentOut(BaseModel):
     recorded_by_id: Optional[int]
     correction_of_id: Optional[int]
     correction_reason: Optional[str]
+    entry_kind: PaymentEntryKind
+    has_adjustments: bool = False
+    net_effect_amount: Decimal
     due_date: Optional[date]
     status: PaymentStatus
     created_at: datetime
@@ -110,6 +124,19 @@ class PaymentListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class PaymentAdjustmentResult(BaseModel):
+    original_payment_id: int
+    reason: str
+    reversal: PaymentOut
+    replacement: Optional[PaymentOut] = None
+
+
+class PaymentBulkAdjustmentResult(BaseModel):
+    count: int
+    reason: str
+    items: List[PaymentAdjustmentResult]
 
 
 class PaymentSummaryItem(BaseModel):

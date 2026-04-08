@@ -9,9 +9,11 @@ def test_create_member_under_18_fails(client, authorize, registrar_user):
     payload = {
         "first_name": "Young",
         "last_name": "Member",
+        "email": "young.member@example.com",
         "birth_date": birth_date.isoformat(),
         "status": "Active",
         "phone": "6135550199",
+        "address_postal_code": "T5J 0N3",
         "pays_contribution": True,
     }
     response = client.post("/members", json=payload)
@@ -25,9 +27,11 @@ def test_create_member_with_child_over_18_fails(client, authorize, registrar_use
     payload = {
         "first_name": "Parent",
         "last_name": "Member",
+        "email": "parent.member@example.com",
         "birth_date": today.replace(year=today.year - 40).isoformat(),
         "status": "Active",
         "phone": "6135550198",
+        "address_postal_code": "T5J 0N3",
         "pays_contribution": True,
         "children": [
             {"first_name": "Adult", "last_name": "Child", "birth_date": child_birth_date.isoformat()}

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class RolePermissionFlags(BaseModel):
     read: bool = False
     write: bool = False
+    visible: bool = False
 
 
 class RoleFieldPermissionFlags(BaseModel):

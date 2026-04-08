@@ -16,6 +16,7 @@ def _create_member(session, first_name: str, last_name: str, birth: date | None 
         first_name=first_name,
         last_name=last_name,
         username=f"{first_name.lower()}.{last_name.lower()}",
+        email=f"{first_name.lower()}.{last_name.lower()}@example.com",
         status="Active",
         gender="Female",
         birth_date=birth,

@@ -10,7 +10,9 @@ from app.models.member import Member
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerInteraction
 from app.models.payment import Payment, PaymentServiceType
+from app.models.role import Role
 from app.models.sponsorship import Sponsorship
+from app.models.user import User
 from app.schemas.ai import AIReportQARequest, NewcomerFollowUpDraftRequest
 from app.services.ai.models import AIProviderKind, AITextGeneration
 from app.services.ai.providers import MockAIProvider
@@ -131,6 +133,7 @@ def test_report_qa_uses_mock_provider_and_returns_sources_and_chart(
             first_name="Selam",
             last_name="Kebede",
             username="selam.kebede",
+            email="selam.kebede@example.com",
             status="Pending",
             phone=None,
             pays_contribution=False,
@@ -247,6 +250,65 @@ def test_report_qa_includes_richer_newcomer_report_context(
     assert "follow-up" in payload.answer.lower() or "follow-ups" in payload.answer.lower()
 
 
+def test_report_qa_excludes_report_modules_hidden_by_report_permissions(
+    db_session,
+    sample_member,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "AI_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "AI_REPORT_QA_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_DEFAULT_CHAT_MODEL", "Qwen/Qwen3-14B")
+    service = AIService(provider=MockAIProvider())
+
+    focused_role = Role(
+        name="FocusedReporter",
+        module_permissions={
+            "reports": {"read": True, "write": False},
+            "members": {"read": True, "write": False},
+            "payments": {"read": True, "write": False},
+        },
+        field_permissions={
+            "reports": {
+                "members": {"read": True, "write": False},
+                "payments": {"read": False, "write": False},
+            }
+        },
+    )
+    focused_user = User(
+        email="focused.reporter@example.com",
+        username="focused.reporter",
+        full_name="Focused Reporter",
+        hashed_password="hash",
+        is_active=True,
+    )
+    focused_user.roles.append(focused_role)
+    db_session.add(
+        Member(
+            first_name="Selam",
+            last_name="Kebede",
+            username="selam.kebede",
+            email="selam.kebede@example.com",
+            status="Pending",
+            phone=None,
+            pays_contribution=False,
+        )
+    )
+    db_session.commit()
+
+    payload = service.answer_report_question(
+        db_session,
+        user=focused_user,
+        payload=AIReportQARequest(
+            question="Which payment service is leading revenue, and what stands out in the member roster?",
+            modules=["payments", "members"],
+        ),
+    )
+
+    assert payload.applied_modules == ["members"]
+    assert any("Payments" in warning for warning in payload.warnings)
+
+
 def test_report_qa_answers_top_categories_from_follow_up_history(
     db_session,
     admin_user,
@@ -341,6 +403,7 @@ def test_report_qa_answers_active_payers_directly(
             first_name="Selam",
             last_name="Kebede",
             username="selam.kebede",
+            email="selam.kebede@example.com",
             status="Active",
             phone="+16135550111",
             pays_contribution=True,
@@ -351,6 +414,7 @@ def test_report_qa_answers_active_payers_directly(
             first_name="Rahel",
             last_name="Bekele",
             username="rahel.bekele",
+            email="rahel.bekele@example.com",
             status="Pending",
             phone="+16135550112",
             pays_contribution=True,
@@ -450,6 +514,7 @@ def test_report_qa_returns_member_non_payer_comparison_chart(
             first_name="Hana",
             last_name="Bekele",
             username="hana.bekele",
+            email="hana.bekele@example.com",
             status="Pending",
             phone="+16135550113",
             pays_contribution=False,
@@ -555,6 +620,7 @@ def test_report_qa_names_top_payer_and_transactions(
             first_name="Selam",
             last_name="Kebede",
             username="selam.kebede",
+            email="selam.kebede@example.com",
             status="Active",
             phone="+16135550114",
             pays_contribution=True,

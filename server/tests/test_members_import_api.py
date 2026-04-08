@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from app.config import MAX_IMPORT_FILE_SIZE_MB, MAX_IMPORT_ROWS
+
 
 def test_members_import_returns_success_rows(client, authorize, admin_user):
     authorize(admin_user)
     csv_content = (
-        "first_name,last_name,phone\n"
-        "Abel,Haile,6135550177\n"
+        "first_name,last_name,email,phone\n"
+        "Abel,Haile,abel.haile@example.com,6135550177\n"
     )
 
     response = client.post(
@@ -31,9 +33,9 @@ def test_members_import_returns_success_rows(client, authorize, admin_user):
 def test_members_import_returns_mixed_success_and_failures(client, authorize, admin_user):
     authorize(admin_user)
     csv_content = (
-        "first_name,last_name,phone\n"
-        "Sara,Tesfaye,6135550199\n"
-        "Bad,Phone,not-a-phone\n"
+        "first_name,last_name,email,phone\n"
+        "Sara,Tesfaye,sara.tesfaye@example.com,6135550199\n"
+        "Bad,Phone,bad.phone@example.com,not-a-phone\n"
     )
 
     response = client.post(
@@ -55,8 +57,8 @@ def test_members_import_returns_mixed_success_and_failures(client, authorize, ad
 def test_members_import_allows_contribution_above_minimum_without_exception(client, authorize, admin_user):
     authorize(admin_user)
     csv_content = (
-        "first_name,last_name,phone,contribution_amount\n"
-        "Martha,Haile,6135550123,120\n"
+        "first_name,last_name,email,phone,contribution_amount\n"
+        "Martha,Haile,martha.haile@example.com,6135550123,120\n"
     )
 
     response = client.post(
@@ -73,8 +75,8 @@ def test_members_import_allows_contribution_above_minimum_without_exception(clie
 def test_members_import_rejects_contribution_below_minimum_without_exception(client, authorize, admin_user):
     authorize(admin_user)
     csv_content = (
-        "first_name,last_name,phone,contribution_amount\n"
-        "Martha,Haile,6135550123,60\n"
+        "first_name,last_name,email,phone,contribution_amount\n"
+        "Martha,Haile,martha.haile@example.com,6135550123,60\n"
     )
 
     response = client.post(
@@ -87,3 +89,58 @@ def test_members_import_rejects_contribution_below_minimum_without_exception(cli
     assert data["inserted"] == 0
     assert data["failed"] == 1
     assert "at least 75.00 CAD" in data["errors"][0]["reason"]
+
+
+def test_members_import_requires_email(client, authorize, admin_user):
+    authorize(admin_user)
+    csv_content = (
+        "first_name,last_name,phone\n"
+        "Abel,Haile,6135550177\n"
+    )
+
+    response = client.post(
+        "/members/import",
+        files={"file": ("members.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["inserted"] == 0
+    assert data["failed"] == 1
+    assert "email is required" in data["errors"][0]["reason"].lower()
+
+
+def test_members_meta_includes_import_limits(client, authorize, admin_user):
+    authorize(admin_user)
+
+    response = client.get("/members/meta")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["import_limits"] == {
+        "max_rows": MAX_IMPORT_ROWS,
+        "max_file_size_mb": MAX_IMPORT_FILE_SIZE_MB,
+    }
+
+
+def test_members_import_rejects_file_above_row_limit_without_partial_import(client, authorize, admin_user, db_session, monkeypatch):
+    from app.models.member import Member
+    import app.services.members_import as members_import_service
+
+    authorize(admin_user)
+    monkeypatch.setattr(members_import_service, "MAX_IMPORT_ROWS", 2)
+    csv_content = (
+        "first_name,last_name,email,phone\n"
+        "Abel,Haile,abel.haile@example.com,6135550177\n"
+        "Sara,Tesfaye,sara.tesfaye@example.com,6135550199\n"
+        "Martha,Bekele,martha.bekele@example.com,6135550123\n"
+    )
+
+    response = client.post(
+        "/members/import",
+        files={"file": ("members.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "maximum allowed rows (2)" in response.json()["detail"]
+    assert db_session.query(Member).count() == 0

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, ReceiptText } from "lucide-react";
 
 import { Card, Button, Badge } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -12,6 +12,14 @@ const STATUS_STYLES: Record<Payment["status"], string> = {
   Completed: "bg-emerald-100 text-emerald-900 border-emerald-200",
   Overdue: "bg-rose-100 text-rose-900 border-rose-200",
 };
+const ENTRY_KIND_STYLES: Record<Payment["entry_kind"], string> = {
+  Original: "bg-slate-100 text-slate-700 border-slate-200",
+  Reversal: "bg-rose-100 text-rose-800 border-rose-200",
+  Replacement: "bg-sky-100 text-sky-800 border-sky-200",
+};
+
+const formatMoney = (amount: number, currency = "CAD") =>
+  `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
 export default function MemberPaymentTimeline() {
   const { memberId } = useParams<{ memberId: string }>();
@@ -96,7 +104,7 @@ export default function MemberPaymentTimeline() {
           </Button>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Payment history</h1>
-            <p className="text-sm text-mute">Timeline view for member {member ? `#${member.id}` : ""}</p>
+            <p className="text-sm text-mute">Member-specific ledger timeline with adjustments, reversals, and replacement entries.</p>
           </div>
         </div>
         {member && (
@@ -181,17 +189,35 @@ export default function MemberPaymentTimeline() {
                       {new Date(payment.posted_at).toLocaleString()}
                     </div>
                     <div className="text-xl font-semibold">
-                      {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {formatMoney(payment.amount, payment.currency)}
                     </div>
+                    {payment.has_adjustments && (
+                      <div className="text-xs text-mute">Net effect {formatMoney(payment.net_effect_amount, payment.currency)}</div>
+                    )}
                   </div>
-                  <Badge className={`${STATUS_STYLES[payment.status]} normal-case`}>
-                    {payment.status}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={`${STATUS_STYLES[payment.status]} normal-case`}>
+                      {payment.status}
+                    </Badge>
+                    {payment.entry_kind !== "Original" && (
+                      <Badge className={`${ENTRY_KIND_STYLES[payment.entry_kind]} normal-case`}>
+                        {payment.entry_kind}
+                      </Badge>
+                    )}
+                    {payment.has_adjustments && (
+                      <Badge className="bg-amber-100 text-amber-900 border-amber-200 normal-case">
+                        Adjusted
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                   <div>
                     <div className="text-xs uppercase text-mute">Service</div>
-                    <div className="font-medium">{payment.service_type.label}</div>
+                    <div className="font-medium inline-flex items-center gap-2">
+                      <ReceiptText className="h-4 w-4 text-accent" />
+                      {payment.service_type.label}
+                    </div>
                     {payment.service_type.description && (
                       <div className="text-xs text-mute">{payment.service_type.description}</div>
                     )}
@@ -209,6 +235,12 @@ export default function MemberPaymentTimeline() {
                   <div className="mt-3 text-sm">
                     <div className="text-xs uppercase text-mute">Memo</div>
                     <p>{payment.memo}</p>
+                  </div>
+                )}
+                {payment.correction_reason && (
+                  <div className="mt-3 text-sm">
+                    <div className="text-xs uppercase text-mute">Adjustment reason</div>
+                    <p>{payment.correction_reason}</p>
                   </div>
                 )}
               </Card>

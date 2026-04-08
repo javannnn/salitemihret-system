@@ -8,6 +8,7 @@ def _create_member(session, first_name: str, last_name: str) -> Member:
         first_name=first_name,
         last_name=last_name,
         username=f"{first_name.lower()}.{last_name.lower()}",
+        email=f"{first_name.lower()}.{last_name.lower()}@example.com",
         status="Active",
         phone="+14165550000",
     )

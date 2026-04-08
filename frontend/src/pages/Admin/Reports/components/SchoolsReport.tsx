@@ -9,6 +9,7 @@ import { DateRangeControls, DateRangeValue } from "./DateRangeControls";
 
 export function SchoolsReport() {
     const permissions = usePermissions();
+    const canViewSchoolReport = permissions.viewSchools && permissions.canAccessReport("schools");
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [stats, setStats] = useState<SundaySchoolStats | null>(null);
     const [loading, setLoading] = useState(true);
@@ -26,7 +27,7 @@ export function SchoolsReport() {
         const fetchStats = async () => {
             setLoading(true);
             try {
-                if (!permissions.viewSchools) {
+                if (!canViewSchoolReport) {
                     setStats(null);
                     return;
                 }
@@ -48,7 +49,7 @@ export function SchoolsReport() {
         };
 
         fetchStats();
-    }, [toast, permissions.viewSchools, normalizedRange.start, normalizedRange.end]);
+    }, [canViewSchoolReport, toast, normalizedRange.start, normalizedRange.end]);
 
     if (loading) {
         return <div className="p-8 text-center text-muted">Loading school statistics...</div>;

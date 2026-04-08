@@ -264,6 +264,8 @@ export type PaymentHousehold = {
   name: string;
 };
 
+export type PaymentEntryKind = "Original" | "Reversal" | "Replacement";
+
 export type Payment = {
   id: number;
   amount: number;
@@ -278,6 +280,9 @@ export type Payment = {
   recorded_by_id?: number | null;
   correction_of_id?: number | null;
   correction_reason?: string | null;
+  entry_kind: PaymentEntryKind;
+  has_adjustments: boolean;
+  net_effect_amount: number;
   created_at: string;
   updated_at: string;
   service_type: PaymentServiceType;
@@ -302,6 +307,13 @@ export type PaymentSummaryItem = {
 export type PaymentSummaryResponse = {
   items: PaymentSummaryItem[];
   grand_total: number;
+};
+
+export type PaymentAdjustmentResult = {
+  original_payment_id: number;
+  reason: string;
+  reversal: Payment;
+  replacement?: Payment | null;
 };
 
 export type ReportActivityItem = {
@@ -535,6 +547,7 @@ export type AdminUserAuditEntry = {
 export type RolePermissionFlags = {
   read: boolean;
   write: boolean;
+  visible: boolean;
 };
 
 export type RoleFieldPermissionFlags = {
@@ -595,6 +608,10 @@ export type AdminUserProvisionPayload = {
   member_id?: number;
   message?: string;
 };
+
+export type AdminUserUpdatePayload = Partial<
+  Pick<AdminUserSummary, "email" | "full_name" | "username" | "is_active" | "is_super_admin">
+>;
 
 export type AdminUserProvisionResponse = {
   user: AdminUserSummary;
@@ -781,7 +798,6 @@ export type SponsorshipPayload = {
   budget_year?: number;
   budget_round_id?: number | null;
   budget_slots?: number;
-  used_slots?: number;
   notes?: string;
   notes_template?: SponsorshipNotesTemplate;
 };
@@ -1190,6 +1206,8 @@ export type NewcomerPayload = {
   past_profession?: string;
   notes?: string;
   status?: Newcomer["status"];
+  sponsored_by_member_id?: number | null;
+  assigned_owner_id?: number | null;
 };
 
 export type NewcomerUpdatePayload = Partial<Omit<NewcomerPayload, "arrival_date">> & {
@@ -2024,8 +2042,8 @@ export async function deleteContributionExceptionAttachment(memberId: number): P
 }
 
 export async function archiveMember(memberId: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/members/${memberId}/archive`, {
-    method: "POST",
+  const res = await authFetch(`${API_BASE}/members/${memberId}`, {
+    method: "DELETE",
   });
   if (res.status === 401 && shouldHandleUnauthorized(res)) {
     handleUnauthorized("Unauthorized");
@@ -2034,6 +2052,34 @@ export async function archiveMember(memberId: number): Promise<void> {
     const message = await res.text();
     throw new ApiError(res.status, message || "Failed to archive member");
   }
+}
+
+export async function restoreMember(memberId: number): Promise<MemberDetail> {
+  return api<MemberDetail>(`/members/${memberId}/restore`, { method: "POST" });
+}
+
+export type MemberDeletionDependency = {
+  key: string;
+  label: string;
+  count: number;
+  severity: "blocker" | "warning";
+  message: string;
+};
+
+export type MemberPermanentDeleteImpact = {
+  member_id: number;
+  member_name: string;
+  can_delete: boolean;
+  blockers: MemberDeletionDependency[];
+  warnings: MemberDeletionDependency[];
+};
+
+export async function getMemberPermanentDeleteImpact(memberId: number): Promise<MemberPermanentDeleteImpact> {
+  return api<MemberPermanentDeleteImpact>(`/members/${memberId}/permanent-delete-impact`);
+}
+
+export async function permanentlyDeleteArchivedMember(memberId: number): Promise<void> {
+  await api<void>(`/members/${memberId}/permanent`, { method: "DELETE" });
 }
 
 
@@ -2046,8 +2092,38 @@ export type MemberAuditEntry = {
   new_value: string | null;
 };
 
+export type MemberTimelineEvent = {
+  id: string;
+  category: string;
+  event_type: string;
+  title: string;
+  detail?: string | null;
+  actor?: string | null;
+  occurred_at: string;
+  amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  reference_id?: number | null;
+};
+
+export type MemberTimelineResponse = {
+  items: MemberTimelineEvent[];
+  total: number;
+};
+
 export async function getMemberAudit(memberId: number): Promise<MemberAuditEntry[]> {
   return api<MemberAuditEntry[]>(`/members/${memberId}/audit`);
+}
+
+export async function getMemberTimeline(memberId: number, limit = 100): Promise<MemberTimelineResponse> {
+  const response = await api<MemberTimelineResponse>(`/members/${memberId}/timeline?limit=${limit}`);
+  return {
+    ...response,
+    items: response.items.map((item) => ({
+      ...item,
+      amount: item.amount != null ? Number(item.amount) : null,
+    })),
+  };
 }
 
 export type ContributionPaymentPayload = {
@@ -2082,6 +2158,10 @@ export type MembersMeta = {
   ministries: Ministry[];
   households: Household[];
   father_confessors: Priest[];
+  import_limits: {
+    max_rows: number;
+    max_file_size_mb: number;
+  };
 };
 
 export type ChildPromotionCandidate = {
@@ -2278,6 +2358,7 @@ export async function listPayments(params: PaymentFilters = {}): Promise<Payment
     items: response.items.map((item) => ({
       ...item,
       amount: Number(item.amount),
+      net_effect_amount: Number(item.net_effect_amount),
     })),
   };
 }
@@ -2334,7 +2415,7 @@ export async function getAdminUser(userId: number): Promise<AdminUserDetail> {
   return api<AdminUserDetail>(`/users/${userId}`);
 }
 
-export async function updateAdminUser(userId: number, payload: Partial<Pick<AdminUserSummary, "full_name" | "username" | "is_active" | "is_super_admin">>): Promise<AdminUserSummary> {
+export async function updateAdminUser(userId: number, payload: AdminUserUpdatePayload): Promise<AdminUserSummary> {
   return api<AdminUserSummary>(`/users/${userId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -2395,15 +2476,47 @@ export async function createPaymentEntry(payload: PaymentCreatePayload): Promise
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return { ...result, amount: Number(result.amount) };
+  return {
+    ...result,
+    amount: Number(result.amount),
+    net_effect_amount: Number(result.net_effect_amount),
+  };
 }
 
-export async function correctPayment(paymentId: number, payload: { correction_reason: string }): Promise<Payment> {
-  const result = await api<Payment>(`/payments/${paymentId}/correct`, {
+const normalizePayment = (payment: Payment): Payment => ({
+  ...payment,
+  amount: Number(payment.amount),
+  net_effect_amount: Number(payment.net_effect_amount),
+});
+
+export async function correctPayment(
+  paymentId: number,
+  payload: {
+    correction_reason: string;
+    replacement?: PaymentCreatePayload;
+  },
+): Promise<PaymentAdjustmentResult> {
+  const result = await api<PaymentAdjustmentResult>(`/payments/${paymentId}/correct`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return { ...result, amount: Number(result.amount) };
+  return {
+    ...result,
+    reversal: normalizePayment(result.reversal),
+    replacement: result.replacement ? normalizePayment(result.replacement) : null,
+  };
+}
+
+export async function voidPayment(paymentId: number, payload: { reason: string }): Promise<PaymentAdjustmentResult> {
+  const result = await api<PaymentAdjustmentResult>(`/payments/${paymentId}/void`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return {
+    ...result,
+    reversal: normalizePayment(result.reversal),
+    replacement: result.replacement ? normalizePayment(result.replacement) : null,
+  };
 }
 
 export async function getPaymentSummary(filters: { start_date?: string; end_date?: string } = {}): Promise<PaymentSummaryResponse> {

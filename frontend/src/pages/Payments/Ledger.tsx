@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Download, Loader2 } from "lucide-react";
+import { AlertCircle, CircleSlash, Download, Loader2, PencilLine, ReceiptText, Trash2 } from "lucide-react";
 
-import { Card, Button, Input, Select, Badge } from "@/components/ui";
+import { Card, Button, Input, Select, Badge, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
 import { getCache, setCache } from "@/lib/cache";
@@ -21,6 +21,7 @@ import {
   exportPaymentsReport,
   searchMembers,
   listPayments,
+  voidPayment,
 } from "@/lib/api";
 
 const PAYMENT_METHODS = ["Cash", "Debit Card", "Credit Card", "E-Transfer", "Check", "Other"];
@@ -42,12 +43,20 @@ const STATUS_BADGE_STYLES: Record<(typeof PAYMENT_STATUSES)[number], string> = {
   Completed: "bg-emerald-100 text-emerald-900 border-emerald-200",
   Overdue: "bg-rose-100 text-rose-900 border-rose-200",
 };
+const ENTRY_KIND_BADGE_STYLES: Record<Payment["entry_kind"], string> = {
+  Original: "bg-slate-100 text-slate-700 border-slate-200",
+  Reversal: "bg-rose-100 text-rose-800 border-rose-200",
+  Replacement: "bg-sky-100 text-sky-800 border-sky-200",
+};
 
 const formatPaymentMethod = (method?: string | null) => {
   if (!method) return "—";
   const normalized = method.trim().toLowerCase();
   return PAYMENT_METHOD_LABELS[normalized] || method;
 };
+
+const formatMoney = (amount: number, currency = "CAD") =>
+  `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
 type Filters = {
   reference: string;
@@ -83,8 +92,10 @@ export default function PaymentsLedger() {
   const [loading, setLoading] = useState(true);
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [correction, setCorrection] = useState<Payment | null>(null);
+  const [voidTarget, setVoidTarget] = useState<Payment | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
   const [correctionSaving, setCorrectionSaving] = useState(false);
+  const [voidSaving, setVoidSaving] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [filterMemberOptions, setFilterMemberOptions] = useState<Member[]>([]);
   const [filterMemberLoading, setFilterMemberLoading] = useState(false);
@@ -250,7 +261,7 @@ export default function PaymentsLedger() {
       <div className="flex flex-wrap justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Payments Ledger</h1>
-          <p className="text-sm text-mute">Review contributions, school fees, donations, and corrections.</p>
+          <p className="text-sm text-mute">Review contributions, school fees, donations, corrections, and tracked voids.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -517,10 +528,21 @@ export default function PaymentsLedger() {
                 <tr key={payment.id} className="border-b border-border/60">
                   <td className="px-4 py-3 font-mono text-xs text-mute">PAY-{String(payment.id).padStart(6, "0")}</td>
                   <td className="px-4 py-3">
-                    {new Date(payment.posted_at).toLocaleString()}
-                    {payment.correction_of_id && (
-                      <Badge className="ml-2 bg-amber-50 text-amber-700 normal-case">Correction</Badge>
-                    )}
+                    <div className="space-y-2">
+                      <div>{new Date(payment.posted_at).toLocaleString()}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {payment.entry_kind !== "Original" && (
+                          <Badge className={`${ENTRY_KIND_BADGE_STYLES[payment.entry_kind]} normal-case`}>
+                            {payment.entry_kind}
+                          </Badge>
+                        )}
+                        {payment.has_adjustments && (
+                          <Badge className="bg-amber-100 text-amber-900 border-amber-200 normal-case">
+                            Adjusted
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     {payment.member ? (
@@ -549,7 +571,12 @@ export default function PaymentsLedger() {
                   </td>
                   <td className="px-4 py-3">{formatPaymentMethod(payment.method)}</td>
                   <td className="px-4 py-3 font-medium">
-                    {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    <div>{formatMoney(payment.amount, payment.currency)}</div>
+                    {payment.has_adjustments && (
+                      <div className="text-xs text-mute">
+                        Net effect {formatMoney(payment.net_effect_amount, payment.currency)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <Badge className={`${STATUS_BADGE_STYLES[payment.status]} normal-case`}>
@@ -559,16 +586,34 @@ export default function PaymentsLedger() {
                   <td className={`px-4 py-3 ${payment.status === "Overdue" ? "text-rose-600 font-medium" : ""}`}>
                     {payment.due_date ? new Date(payment.due_date).toLocaleDateString() : "—"}
                   </td>
-                  <td className="px-4 py-3">{payment.memo || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="space-y-1">
+                      <div>{payment.memo || "—"}</div>
+                      {payment.correction_reason && (
+                        <div className="text-xs text-mute">{payment.correction_reason}</div>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-right">
-                    {permissions.managePayments && !payment.correction_of_id && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => setCorrection(payment)}
-                        className="text-xs"
-                      >
-                        Correct
-                      </Button>
+                    {permissions.managePayments && payment.entry_kind === "Original" && !payment.has_adjustments ? (
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={() => setCorrection(payment)} className="text-xs">
+                          <PencilLine className="h-3.5 w-3.5" />
+                          Correct
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => setVoidTarget(payment)}
+                          className="text-xs text-rose-700 hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Void
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-mute">
+                        {payment.has_adjustments ? "Adjusted" : payment.entry_kind === "Original" ? "—" : "Derived entry"}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -629,8 +674,20 @@ export default function PaymentsLedger() {
           setCorrection(null);
           loadData(page);
         }}
+        serviceTypes={serviceTypes}
         saving={correctionSaving}
         setSaving={setCorrectionSaving}
+      />
+
+      <VoidDialog
+        payment={voidTarget}
+        onClose={() => setVoidTarget(null)}
+        onSuccess={() => {
+          setVoidTarget(null);
+          loadData(page);
+        }}
+        saving={voidSaving}
+        setSaving={setVoidSaving}
       />
     </div>
   );
@@ -971,22 +1028,44 @@ function CorrectionDialog({
   payment,
   onClose,
   onSuccess,
+  serviceTypes,
   saving,
   setSaving,
 }: {
   payment: Payment | null;
   onClose: () => void;
   onSuccess: () => void;
+  serviceTypes: PaymentServiceType[];
   saving: boolean;
   setSaving: (value: boolean) => void;
 }) {
   const toast = useToast();
   const [reason, setReason] = useState("");
+  const [form, setForm] = useState({
+    amount: "",
+    currency: "CAD",
+    method: "",
+    memo: "",
+    service_type_code: "",
+    due_date: "",
+    status: "Completed",
+  });
+  const [customMethod, setCustomMethod] = useState("");
 
   useEffect(() => {
-    if (!payment) {
-      setReason("");
-    }
+    if (!payment) return;
+    const normalizedMethod = payment.method && PAYMENT_METHODS.includes(payment.method) ? payment.method : payment.method ? "Other" : "";
+    setReason("");
+    setCustomMethod(normalizedMethod === "Other" ? payment.method || "" : "");
+    setForm({
+      amount: String(payment.amount),
+      currency: payment.currency || "CAD",
+      method: normalizedMethod,
+      memo: payment.memo || "",
+      service_type_code: payment.service_type.code,
+      due_date: payment.due_date ? payment.due_date.slice(0, 10) : "",
+      status: payment.status,
+    });
   }, [payment]);
 
   if (!payment) return null;
@@ -998,9 +1077,35 @@ function CorrectionDialog({
       toast.push("Correction reason is required");
       return;
     }
+    if (!form.amount || Number(form.amount) <= 0) {
+      toast.push("Replacement amount must be greater than zero");
+      return;
+    }
+    if (!form.service_type_code) {
+      toast.push("Select the corrected service type");
+      return;
+    }
+    if (form.method === "Other" && !customMethod.trim()) {
+      toast.push("Enter the corrected payment method");
+      return;
+    }
     setSaving(true);
+    const resolvedMethod = form.method === "Other" ? customMethod.trim() : form.method.trim();
     try {
-      await correctPayment(payment.id, { correction_reason: reason.trim() });
+      await correctPayment(payment.id, {
+        correction_reason: reason.trim(),
+        replacement: {
+          amount: Number(form.amount),
+          currency: form.currency || "CAD",
+          method: resolvedMethod || undefined,
+          memo: form.memo || undefined,
+          service_type_code: form.service_type_code,
+          member_id: payment.member_id ?? undefined,
+          household_id: payment.household_id ?? undefined,
+          due_date: form.due_date || undefined,
+          status: form.status || undefined,
+        },
+      });
       toast.push("Correction recorded");
       onSuccess();
     } catch (error) {
@@ -1017,18 +1122,121 @@ function CorrectionDialog({
         <div>
           <h3 className="text-lg font-semibold">Correct payment #{payment.id}</h3>
           <p className="text-sm text-mute">
-            Original: {payment.currency} {payment.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} • {payment.service_type.label}
+            The system will post a reversal for the original entry and then record a corrected replacement.
           </p>
         </div>
+        <Card className="p-4 bg-accent/5 border-dashed space-y-1">
+          <div className="text-xs uppercase text-mute">Original entry</div>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-ink">
+            <ReceiptText className="h-4 w-4 text-accent" />
+            <span className="font-semibold">{formatMoney(payment.amount, payment.currency)}</span>
+            <span>•</span>
+            <span>{payment.service_type.label}</span>
+            <span>•</span>
+            <span>{payment.member ? `${payment.member.first_name} ${payment.member.last_name}` : "Unassigned"}</span>
+          </div>
+          <p className="text-xs text-mute">If the member link is wrong, void this entry and record a new payment instead.</p>
+        </Card>
         <div>
           <label className="text-xs uppercase text-mute block mb-1">Reason</label>
-          <textarea
-            className="w-full rounded-xl border border-border bg-card/80 text-ink p-2 outline-none transition focus:border-accent focus:shadow-ring focus:shadow-accent/40"
-            rows={4}
+          <Textarea
+            rows={3}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             placeholder="Explain why this payment needs to be corrected"
             required
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Corrected amount</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={form.amount}
+              onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))}
+              required
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Currency</label>
+            <Input
+              value={form.currency}
+              onChange={(event) => setForm((prev) => ({ ...prev, currency: event.target.value.toUpperCase() }))}
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Service type</label>
+            <Select
+              value={form.service_type_code}
+              onChange={(event) => setForm((prev) => ({ ...prev, service_type_code: event.target.value }))}
+              required
+            >
+              <option value="">Select</option>
+              {serviceTypes.map((type) => (
+                <option key={type.code} value={type.code}>
+                  {type.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Method</label>
+            <Select
+              value={form.method}
+              onChange={(event) => {
+                const value = event.target.value;
+                setForm((prev) => ({ ...prev, method: value }));
+                if (value !== "Other") {
+                  setCustomMethod("");
+                }
+              }}
+            >
+              <option value="">Select method</option>
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </Select>
+            {form.method === "Other" && (
+              <Input
+                className="mt-2"
+                value={customMethod}
+                onChange={(event) => setCustomMethod(event.target.value)}
+                placeholder="Enter payment method"
+                required
+              />
+            )}
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Due date</label>
+            <Input
+              type="date"
+              value={form.due_date}
+              onChange={(event) => setForm((prev) => ({ ...prev, due_date: event.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase text-mute block mb-1">Status</label>
+            <Select
+              value={form.status}
+              onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
+            >
+              {PAYMENT_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <div>
+          <label className="text-xs uppercase text-mute block mb-1">Corrected memo</label>
+          <Input
+            value={form.memo}
+            onChange={(event) => setForm((prev) => ({ ...prev, memo: event.target.value }))}
+            placeholder="Optional note"
           />
         </div>
         <div className="flex justify-end gap-2">
@@ -1036,7 +1244,93 @@ function CorrectionDialog({
             Cancel
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Recording…" : "Record correction"}
+            {saving ? "Recording…" : "Post reversal and replacement"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function VoidDialog({
+  payment,
+  onClose,
+  onSuccess,
+  saving,
+  setSaving,
+}: {
+  payment: Payment | null;
+  onClose: () => void;
+  onSuccess: () => void;
+  saving: boolean;
+  setSaving: (value: boolean) => void;
+}) {
+  const toast = useToast();
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (payment) {
+      setReason("");
+    }
+  }, [payment]);
+
+  if (!payment) return null;
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (saving) return;
+    if (!reason.trim()) {
+      toast.push("Void reason is required");
+      return;
+    }
+    setSaving(true);
+    try {
+      await voidPayment(payment.id, { reason: reason.trim() });
+      toast.push("Payment voided with a tracked audit entry");
+      onSuccess();
+    } catch (error) {
+      console.error(error);
+      toast.push("Failed to void payment");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div>
+          <h3 className="text-lg font-semibold">Void payment #{payment.id}</h3>
+          <p className="text-sm text-mute">
+            This does not hard-delete the record. A matching void entry is posted so the ledger stays auditable.
+          </p>
+        </div>
+        <Card className="p-4 border border-rose-200 bg-rose-50/70 text-rose-900">
+          <div className="flex items-start gap-3">
+            <CircleSlash className="h-5 w-5 mt-0.5" />
+            <div className="space-y-1 text-sm">
+              <div className="font-semibold">{formatMoney(payment.amount, payment.currency)}</div>
+              <div>{payment.service_type.label}</div>
+              <div>{payment.member ? `${payment.member.first_name} ${payment.member.last_name}` : "Unassigned member"}</div>
+            </div>
+          </div>
+        </Card>
+        <div>
+          <label className="text-xs uppercase text-mute block mb-1">Reason</label>
+          <Textarea
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Explain why this ledger entry is being voided"
+            required
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving} className="bg-rose-600 border-rose-600 text-white hover:bg-rose-700">
+            {saving ? "Voiding…" : "Post void entry"}
           </Button>
         </div>
       </form>

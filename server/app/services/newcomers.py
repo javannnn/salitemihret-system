@@ -31,6 +31,7 @@ from app.schemas.newcomer import (
     NewcomerTimelineResponse,
     NewcomerUpdate,
 )
+from app.schemas.member import normalize_required_member_email
 from app.services.members_utils import ensure_household, generate_username
 
 DEFAULT_CONTRIBUTION_AMOUNT = Decimal("75.00")
@@ -78,6 +79,19 @@ def _normalize_household_type(value: str | None) -> str:
     if coerced in VALID_HOUSEHOLD_TYPES:
         return coerced
     return DEFAULT_HOUSEHOLD_TYPE
+
+
+def _member_name(member: Member | None) -> str | None:
+    if not member:
+        return None
+    parts = [member.first_name, member.last_name]
+    return " ".join(part.strip() for part in parts if part and part.strip()) or None
+
+
+def _user_name(user: User | None) -> str | None:
+    if not user:
+        return None
+    return user.full_name or user.username or user.email
 
 
 def _to_schema(
@@ -265,10 +279,12 @@ def list_newcomers(
     for newcomer, last_interaction_at in rows:
         sponsor_name = None
         if newcomer.sponsored_by_member:
-            sponsor_name = f"{newcomer.sponsored_by_member.first_name} {newcomer.sponsored_by_member.last_name}".strip()
+            sponsor_name = _member_name(newcomer.sponsored_by_member)
         assigned_name = None
-        if newcomer.assigned_owner:
-            assigned_name = newcomer.assigned_owner.full_name or newcomer.assigned_owner.username
+        if sponsor_name:
+            assigned_name = sponsor_name
+        elif newcomer.assigned_owner:
+            assigned_name = _user_name(newcomer.assigned_owner)
         latest = latest_sponsorships.get(newcomer.id)
         items.append(
             _to_schema(
@@ -305,6 +321,11 @@ def get_newcomer_metrics(db: Session) -> NewcomerMetrics:
 
 
 def create_newcomer(db: Session, payload: NewcomerCreate) -> NewcomerOut:
+    if payload.sponsored_by_member_id is not None:
+        sponsor = db.query(Member).filter(Member.id == payload.sponsored_by_member_id).first()
+        if not sponsor:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor member not found")
+
     followup_due = payload.followup_due_date or payload.arrival_date + timedelta(days=7)
     record = Newcomer(
         newcomer_code=_generate_newcomer_code(db),
@@ -346,13 +367,14 @@ def create_newcomer(db: Session, payload: NewcomerCreate) -> NewcomerOut:
     db.add(record)
     db.commit()
     db.refresh(record)
-    return _to_schema(record)
+    return get_newcomer(db, record.id)
 
 
 def update_newcomer(db: Session, newcomer_id: int, payload: NewcomerUpdate, actor_id: int | None) -> NewcomerOut:
     record = db.query(Newcomer).filter(Newcomer.id == newcomer_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
+    fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
 
     if payload.status is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update settlement status via the status endpoint")
@@ -433,18 +455,44 @@ def update_newcomer(db: Session, newcomer_id: int, payload: NewcomerUpdate, acto
         record.past_profession = payload.past_profession
     if payload.notes is not None:
         record.notes = payload.notes
-    if payload.sponsored_by_member_id is not None:
-        record.sponsored_by_member_id = payload.sponsored_by_member_id
+    if "sponsored_by_member_id" in fields_set:
+        previous_sponsor_id = record.sponsored_by_member_id
+        previous_sponsor_name = _member_name(record.sponsored_by_member)
+        next_sponsor_id = payload.sponsored_by_member_id or None
+        if next_sponsor_id is not None:
+            sponsor = db.query(Member).filter(Member.id == next_sponsor_id).first()
+            if not sponsor:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor member not found")
+            next_sponsor_name = _member_name(sponsor)
+        else:
+            next_sponsor_name = None
+        record.sponsored_by_member_id = next_sponsor_id
+        if previous_sponsor_id != record.sponsored_by_member_id:
+            if next_sponsor_name:
+                reason = f"Sponsor assigned: {next_sponsor_name}"
+            elif previous_sponsor_name:
+                reason = f"Sponsor removed: {previous_sponsor_name}"
+            else:
+                reason = "Sponsor assignment cleared"
+            _log_status_audit(
+                db,
+                newcomer=record,
+                from_status=record.status,
+                to_status=record.status,
+                reason=reason,
+                actor_id=actor_id,
+                action="Assignment",
+            )
     if payload.father_of_repentance_id is not None:
         record.father_of_repentance_id = payload.father_of_repentance_id
-    if payload.assigned_owner_id is not None:
+    if "assigned_owner_id" in fields_set:
         previous_owner_id = record.assigned_owner_id
         record.assigned_owner_id = payload.assigned_owner_id or None
         if record.assigned_owner_id != previous_owner_id:
             assignee_name = None
             if record.assigned_owner_id:
                 assignee = db.query(User).filter(User.id == record.assigned_owner_id).first()
-                assignee_name = assignee.full_name or assignee.username if assignee else None
+                assignee_name = _user_name(assignee)
             reason = f"Assigned to {assignee_name}" if assignee_name else "Assignment updated"
             _log_status_audit(
                 db,
@@ -463,7 +511,7 @@ def update_newcomer(db: Session, newcomer_id: int, payload: NewcomerUpdate, acto
 
     db.commit()
     db.refresh(record)
-    return _to_schema(record)
+    return get_newcomer(db, record.id)
 
 
 def get_newcomer(db: Session, newcomer_id: int) -> NewcomerOut:
@@ -491,10 +539,12 @@ def get_newcomer(db: Session, newcomer_id: int) -> NewcomerOut:
     )
     sponsor_name = None
     if record.sponsored_by_member:
-        sponsor_name = f"{record.sponsored_by_member.first_name} {record.sponsored_by_member.last_name}".strip()
+        sponsor_name = _member_name(record.sponsored_by_member)
     assigned_name = None
-    if record.assigned_owner:
-        assigned_name = record.assigned_owner.full_name or record.assigned_owner.username
+    if sponsor_name:
+        assigned_name = sponsor_name
+    elif record.assigned_owner:
+        assigned_name = _user_name(record.assigned_owner)
     return _to_schema(
         record,
         assigned_owner_name=assigned_name,
@@ -543,7 +593,7 @@ def transition_newcomer_status(
 
     db.commit()
     db.refresh(newcomer)
-    return _to_schema(newcomer)
+    return get_newcomer(db, newcomer.id)
 
 
 def inactivate_newcomer(
@@ -575,7 +625,7 @@ def inactivate_newcomer(
 
     db.commit()
     db.refresh(newcomer)
-    return _to_schema(newcomer)
+    return get_newcomer(db, newcomer.id)
 
 
 def reactivate_newcomer(
@@ -607,7 +657,7 @@ def reactivate_newcomer(
 
     db.commit()
     db.refresh(newcomer)
-    return _to_schema(newcomer)
+    return get_newcomer(db, newcomer.id)
 
 
 def list_interactions(
@@ -773,7 +823,10 @@ def _create_member_from_newcomer(
     actor_id: Optional[int],
 ) -> Member:
     phone = (payload.phone or newcomer.contact_phone or newcomer.contact_whatsapp or "").strip()
-    email = payload.email or newcomer.contact_email
+    try:
+        email = normalize_required_member_email(payload.email or newcomer.contact_email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not phone:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone is required to create a member")
     _ensure_member_contact_unique(db, phone=phone, email=email)
@@ -878,4 +931,4 @@ def convert_newcomer(db: Session, newcomer_id: int, payload: NewcomerConvertRequ
 
     db.commit()
     db.refresh(newcomer)
-    return _to_schema(newcomer)
+    return get_newcomer(db, newcomer.id)

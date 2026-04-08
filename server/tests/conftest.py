@@ -220,6 +220,7 @@ def sample_member(db_session: Session) -> Member:
         middle_name="S.",
         last_name="Tesfaye",
         username=_unique_username("abeba.tesfaye"),
+        email=_unique_email("member"),
         status="Active",
         gender="Female",
         district="Arada",

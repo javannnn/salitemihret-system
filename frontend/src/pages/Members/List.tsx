@@ -29,6 +29,8 @@ import {
   ImportReport,
   Member,
   MemberDetail,
+  MemberDeletionDependency,
+  MemberPermanentDeleteImpact,
   MemberStatus,
   MembersMeta,
   Page,
@@ -37,7 +39,11 @@ import {
   createPriest,
   exportMembers,
   getMembersMeta,
+  getMemberPermanentDeleteImpact,
   archiveMember,
+  parseApiErrorMessage,
+  permanentlyDeleteArchivedMember,
+  restoreMember,
   searchMembers,
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -83,6 +89,18 @@ const INITIAL_FILTERS: Filters = {
   newThisMonth: false,
 };
 
+type DeletionTarget = {
+  id: number;
+  name: string;
+};
+
+type DeleteDialogState = {
+  targets: DeletionTarget[];
+  impacts: MemberPermanentDeleteImpact[];
+  loading: boolean;
+  deleting: boolean;
+};
+
 function avatarUrl(path?: string | null) {
   if (!path) return null;
   if (path.startsWith("http")) return path;
@@ -104,6 +122,25 @@ function formatContributionException(reason?: string | null) {
     default:
       return reason;
   }
+}
+
+function aggregateDeletionDependencies(
+  impacts: MemberPermanentDeleteImpact[],
+  severity: "blocker" | "warning"
+): MemberDeletionDependency[] {
+  const combined = new Map<string, MemberDeletionDependency>();
+  impacts.forEach((impact) => {
+    const items = severity === "blocker" ? impact.blockers : impact.warnings;
+    items.forEach((item) => {
+      const current = combined.get(item.key);
+      if (current) {
+        combined.set(item.key, { ...current, count: current.count + item.count });
+        return;
+      }
+      combined.set(item.key, { ...item });
+    });
+  });
+  return Array.from(combined.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
 }
 
 export default function MembersList() {
@@ -146,18 +183,6 @@ export default function MembersList() {
   const [bulkWorking, setBulkWorking] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
 
-
-  const handleArchive = async (id: number) => {
-    try {
-      await archiveMember(id);
-      toast.push("Member archived");
-      loadMembers(page);
-    } catch (error) {
-      console.error(error);
-      toast.push("Failed to archive member");
-    }
-  };
-
   const [accessIssue, setAccessIssue] = useState<{ status: number; message: string } | null>(null);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [draftFilters, setDraftFilters] = useState<Filters>(INITIAL_FILTERS);
@@ -185,6 +210,7 @@ export default function MembersList() {
   const [priestDirectoryOpen, setPriestDirectoryOpen] = useState(false);
   const [spouseDrawerOpen, setSpouseDrawerOpen] = useState(false);
   const [spouseMember, setSpouseMember] = useState<{ id: number | null; name: string }>({ id: null, name: "" });
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
   const spouseDraftsRef = useRef<Map<number, SpouseDraft>>(new Map());
   const [viewMode, setViewMode] = useState<"list" | "grid">(() => {
     if (typeof window !== "undefined") {
@@ -193,6 +219,7 @@ export default function MembersList() {
     }
     return "list";
   });
+  const isArchivedView = filters.status === "Archived";
 
   useEffect(() => {
     sessionStorage.setItem("members-view-mode", viewMode);
@@ -201,6 +228,66 @@ export default function MembersList() {
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
   }, []);
+
+  const closeDeleteDialog = useCallback(() => {
+    setDeleteDialog((current) => (current?.deleting ? current : null));
+  }, []);
+
+  const handleArchiveMember = useCallback(
+    async (memberId: number) => {
+      try {
+        await archiveMember(memberId);
+        toast.push("Member archived");
+        loadMembers(page);
+      } catch (error) {
+        console.error(error);
+        toast.push(parseApiErrorMessage(error, "Failed to archive member"));
+      }
+    },
+    [page, toast]
+  );
+
+  const handleRestoreMember = useCallback(
+    async (memberId: number) => {
+      try {
+        await restoreMember(memberId);
+        toast.push("Member restored");
+        loadMembers(page);
+      } catch (error) {
+        console.error(error);
+        toast.push(parseApiErrorMessage(error, "Failed to restore member"));
+      }
+    },
+    [page, toast]
+  );
+
+  const openPermanentDeleteDialog = useCallback(
+    async (targets: DeletionTarget[]) => {
+      if (!targets.length) {
+        return;
+      }
+      setDeleteDialog({
+        targets,
+        impacts: [],
+        loading: true,
+        deleting: false,
+      });
+      try {
+        const impacts = await Promise.all(targets.map((target) => getMemberPermanentDeleteImpact(target.id)));
+        setDeleteDialog({
+          targets,
+          impacts,
+          loading: false,
+          deleting: false,
+        });
+      } catch (error) {
+        console.error(error);
+        setDeleteDialog(null);
+        toast.push(parseApiErrorMessage(error, "Failed to check permanent deletion impact"));
+      }
+    },
+    [toast]
+  );
 
   const syncSearchParams = useCallback(
     ({ query: nextQuery, filters: nextFilters, sort: nextSort, page: nextPage }: {
@@ -532,6 +619,21 @@ export default function MembersList() {
   }, [user, token, permissions.viewMembers, initialized, searchParams, loadMembers]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
+  const deleteDialogBlockers = useMemo(
+    () => aggregateDeletionDependencies(deleteDialog?.impacts ?? [], "blocker"),
+    [deleteDialog]
+  );
+  const deleteDialogWarnings = useMemo(
+    () => aggregateDeletionDependencies(deleteDialog?.impacts ?? [], "warning"),
+    [deleteDialog]
+  );
+  const deleteDialogBlockedMembers = useMemo(
+    () => (deleteDialog?.impacts ?? []).filter((impact) => !impact.can_delete).map((impact) => impact.member_name),
+    [deleteDialog]
+  );
+  const canConfirmPermanentDelete = Boolean(
+    deleteDialog && !deleteDialog.loading && !deleteDialog.deleting && deleteDialogBlockers.length === 0
+  );
 
   const handleSearch = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -587,21 +689,27 @@ export default function MembersList() {
     if (!canBulk || !anySelected) return;
     const targetIds = resolveSelectedMemberIds();
     if (!targetIds.length) return;
+    const fallbackTargets = targetIds.map((id) => ({ id, name: `Member #${id}` }));
+    const targets = selectedMembersList.length ? selectedMembersList : fallbackTargets;
+
+    if (isArchivedView) {
+      await openPermanentDeleteDialog(targets);
+      return;
+    }
+
     const confirmed = window.confirm(
       `Archive ${targetIds.length} selected member${targetIds.length === 1 ? "" : "s"}?`
     );
     if (!confirmed) return;
     setBulkWorking(true);
     try {
-      await Promise.all(
-        targetIds.map((id) => api(`/members/${id}`, { method: "DELETE" }))
-      );
+      await Promise.all(targetIds.map((id) => archiveMember(id)));
       toast.push("Selected members archived");
       clearSelection();
       loadMembers(page);
     } catch (error) {
       console.error(error);
-      toast.push("Archiving failed");
+      toast.push(parseApiErrorMessage(error, "Archiving failed"));
     } finally {
       setBulkWorking(false);
     }
@@ -650,31 +758,40 @@ export default function MembersList() {
       return;
     }
 
-    const isArchived = filters.status === "Archived";
-    const action = isArchived ? "Restore" : "Archive";
+    setRowMenu(null);
 
-    const confirmed = window.confirm(
-      isArchived
-        ? "Restore this member? They will be moved back to the active list."
-        : "Archive this member? You can find archived records via the Archived view."
-    );
+    if (isArchivedView) {
+      await openPermanentDeleteDialog([{ id: memberId, name: `Member #${memberId}` }]);
+      return;
+    }
 
+    const confirmed = window.confirm("Archive this member? You can find archived records via the Archived view.");
     if (!confirmed) {
       return;
     }
-    setRowMenu(null);
+    await handleArchiveMember(memberId);
+  };
+
+  const confirmPermanentDelete = async () => {
+    if (!deleteDialog || deleteDialog.loading || deleteDialog.deleting) {
+      return;
+    }
+
+    setDeleteDialog((current) => (current ? { ...current, deleting: true } : current));
     try {
-      if (isArchived) {
-        await api(`/members/${memberId}/restore`, { method: "POST" });
-        toast.push("Member restored");
-      } else {
-        await api(`/members/${memberId}`, { method: "DELETE" });
-        toast.push("Member archived");
-      }
+      await Promise.all(deleteDialog.targets.map((target) => permanentlyDeleteArchivedMember(target.id)));
+      clearSelection();
+      setDeleteDialog(null);
+      toast.push(
+        deleteDialog.targets.length === 1
+          ? "Archived member permanently deleted"
+          : `${deleteDialog.targets.length} archived members permanently deleted`
+      );
       loadMembers(page);
     } catch (error) {
       console.error(error);
-      toast.push(`Failed to ${action.toLowerCase()} member`);
+      setDeleteDialog((current) => (current ? { ...current, deleting: false } : current));
+      toast.push(parseApiErrorMessage(error, "Permanent deletion failed"));
     }
   };
 
@@ -1272,7 +1389,7 @@ export default function MembersList() {
                     onClick={handleBulkArchive}
                   >
                     <Trash2 className="h-4 w-4" />
-                    Archive selected
+                    {isArchivedView ? "Delete permanently" : "Archive selected"}
                   </Button>
                 </div>
               </Card>
@@ -1358,16 +1475,37 @@ export default function MembersList() {
                             }
                           }
                         },
-                        {
+                      ];
+                      if (isArchivedView) {
+                        actions.push(
+                          {
+                            label: "Restore",
+                            icon: <Undo className="h-4 w-4 text-sky-500" />,
+                            onClick: () => {
+                              if (window.confirm(`Restore ${member.first_name}? They will return to the active list.`)) {
+                                handleRestoreMember(member.id);
+                              }
+                            }
+                          },
+                          {
+                            label: "Delete permanently",
+                            icon: <Trash2 className="h-4 w-4 text-red-500" />,
+                            onClick: () => {
+                              openPermanentDeleteDialog([{ id: member.id, name: `${member.first_name} ${member.last_name}` }]);
+                            }
+                          }
+                        );
+                      } else {
+                        actions.push({
                           label: "Archive",
                           icon: <Trash2 className="h-4 w-4 text-red-500" />,
                           onClick: () => {
                             if (window.confirm(`Are you sure you want to archive ${member.first_name}?`)) {
-                              handleArchive(member.id);
+                              handleArchiveMember(member.id);
                             }
                           }
-                        }
-                      ];
+                        });
+                      }
 
                       return {
                         image: avatarUrl(member.avatar_path) || `https://ui-avatars.com/api/?name=${member.first_name}+${member.last_name}&background=random`,
@@ -1676,6 +1814,20 @@ export default function MembersList() {
                                     >
                                       Export CSV
                                     </button>
+                                    {canManage && isArchivedView && (
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-sky-500/10 text-sm text-sky-700"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          event.preventDefault();
+                                          setRowMenu(null);
+                                          handleRestoreMember(member.id);
+                                        }}
+                                      >
+                                        Restore member
+                                      </button>
+                                    )}
                                     {canManage && (
                                       <button
                                         type="button"
@@ -1683,10 +1835,15 @@ export default function MembersList() {
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           event.preventDefault();
+                                          if (isArchivedView) {
+                                            setRowMenu(null);
+                                            openPermanentDeleteDialog([{ id: member.id, name: `${member.first_name} ${member.last_name}` }]);
+                                            return;
+                                          }
                                           handleArchiveSingle(member.id);
                                         }}
                                       >
-                                        Archive member
+                                        {isArchivedView ? "Delete permanently" : "Archive member"}
                                       </button>
                                     )}
                                   </div>
@@ -1900,8 +2057,119 @@ export default function MembersList() {
         )}
       </AnimatePresence>
 
-      {
-        assignModalOpen && (
+      {deleteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-ink/60 backdrop-blur-sm"
+            onClick={closeDeleteDialog}
+          />
+          <Card className="relative z-10 w-full max-w-2xl p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-lg font-semibold text-foreground">
+                  {deleteDialog.targets.length === 1 ? "Delete archived member permanently?" : "Delete archived members permanently?"}
+                </h3>
+                <p className="text-sm text-mute">
+                  {deleteDialog.loading
+                    ? "Checking linked records before permanent deletion."
+                    : deleteDialogBlockers.length > 0
+                      ? "Permanent deletion is blocked until the linked records below are cleaned up."
+                      : "This action cannot be undone. The member profile will be removed from the system."}
+                </p>
+              </div>
+              <Badge className="normal-case bg-red-50 text-red-700 border-red-200">
+                {deleteDialog.targets.length} selected
+              </Badge>
+            </div>
+
+            {deleteDialog.loading ? (
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-5 text-sm text-mute">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Checking payments, sponsorships, newcomer links, school records, and user links…
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-card/60 p-4">
+                  <p className="text-xs uppercase tracking-wide text-mute">Archived records</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {deleteDialog.targets.map((target) => (
+                      <Badge key={target.id} className="normal-case bg-slate-100 text-slate-700 border-slate-200">
+                        {target.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {deleteDialogBlockedMembers.length > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <div className="flex items-start gap-3">
+                      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="space-y-2">
+                        <p className="font-medium">Deletion blocked</p>
+                        <p>
+                          {deleteDialogBlockedMembers.join(", ")} still {deleteDialogBlockedMembers.length === 1 ? "has" : "have"} critical linked records.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {deleteDialogBlockers.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-mute">Blocking records</p>
+                    <div className="space-y-2">
+                      {deleteDialogBlockers.map((item) => (
+                        <div key={item.key} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          <div className="font-medium">{item.label}</div>
+                          <div className="text-amber-800/90">{item.message}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {deleteDialogWarnings.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-mute">
+                      {deleteDialogBlockers.length > 0 ? "Linked records that would also be changed" : "Records that will be unlinked"}
+                    </p>
+                    <div className="space-y-2">
+                      {deleteDialogWarnings.map((item) => (
+                        <div key={item.key} className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                          <div className="font-medium">{item.label}</div>
+                          <div className="text-red-800/90">{item.message}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {deleteDialogBlockers.length === 0 && deleteDialogWarnings.length === 0 && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                    No linked module records will be changed outside this archived member profile.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={closeDeleteDialog} disabled={deleteDialog.deleting}>
+                Close
+              </Button>
+              <Button
+                variant="soft"
+                className="border-red-500 text-red-700 hover:bg-red-50"
+                onClick={confirmPermanentDelete}
+                disabled={!canConfirmPermanentDelete}
+              >
+                {deleteDialog.deleting ? "Deleting…" : "Delete permanently"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {assignModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
             <div
               className="absolute inset-0 bg-ink/60 backdrop-blur-sm"
@@ -2052,6 +2320,7 @@ export default function MembersList() {
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onComplete={handleImportComplete}
+        importLimits={meta?.import_limits}
       />
       <HouseholdAssignDrawer
         open={householdDrawerOpen}

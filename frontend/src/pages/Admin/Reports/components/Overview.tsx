@@ -28,6 +28,12 @@ interface OverviewProps {
 
 export function Overview({ onNavigate }: OverviewProps) {
     const permissions = usePermissions();
+    const canViewOverviewReport = permissions.canAccessReport("overview");
+    const canViewMembersReport = permissions.viewMembers && permissions.canAccessReport("members");
+    const canViewPaymentsReport = permissions.viewPayments && permissions.canAccessReport("payments");
+    const canViewSponsorshipsReport = permissions.viewSponsorships && permissions.canAccessReport("sponsorships");
+    const canViewNewcomersReport = permissions.viewNewcomers && permissions.canAccessReport("newcomers");
+    const canViewSchoolsReport = permissions.viewSchools && permissions.canAccessReport("schools");
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [stats, setStats] = useState({
         members: 0,
@@ -54,6 +60,15 @@ export function Overview({ onNavigate }: OverviewProps) {
         return dateRange;
     }, [dateRange]);
     const hasRange = Boolean(normalizedRange.start || normalizedRange.end);
+    const heroTargets = [
+        canViewMembersReport ? { tab: "members", label: "View Members" } : null,
+        canViewNewcomersReport ? { tab: "newcomers", label: "View Newcomers" } : null,
+        canViewPaymentsReport ? { tab: "payments", label: "View Financials" } : null,
+        canViewSponsorshipsReport ? { tab: "sponsorships", label: "View Sponsorships" } : null,
+        canViewSchoolsReport ? { tab: "schools", label: "View Schools" } : null,
+    ].filter((target): target is { tab: string; label: string } => Boolean(target));
+    const primaryHeroTarget = heroTargets[0] ?? null;
+    const secondaryHeroTarget = heroTargets[1] ?? null;
 
     useEffect(() => {
         let cancelled = false;
@@ -79,31 +94,31 @@ export function Overview({ onNavigate }: OverviewProps) {
                 const promises: Promise<any>[] = [];
                 const keys: string[] = [];
 
-                if (permissions.viewMembers) {
+                if (canViewMembersReport) {
                     promises.push(fetchMemberCount({})); keys.push("members");
                 }
-                if (permissions.viewPayments) {
+                if (canViewPaymentsReport) {
                     promises.push(getPaymentSummary({
                         start_date: normalizedRange.start || undefined,
                         end_date: normalizedRange.end || undefined,
                     }));
                     keys.push("payments");
                 }
-                if (permissions.viewSponsorships || permissions.viewNewcomers) {
+                if (canViewSponsorshipsReport) {
                     promises.push(getSponsorshipMetrics({
                         start_date: normalizedRange.start || undefined,
                         end_date: normalizedRange.end || undefined,
                     }));
                     keys.push("sponsorships");
                 }
-                if (permissions.viewNewcomers) {
+                if (canViewNewcomersReport) {
                     promises.push(getNewcomerReport({
                         start_date: normalizedRange.start || undefined,
                         end_date: normalizedRange.end || undefined,
                     }));
                     keys.push("newcomers");
                 }
-                if (permissions.viewSchools) {
+                if (canViewSchoolsReport) {
                     promises.push(getSundaySchoolStats({
                         start_date: normalizedRange.start || undefined,
                         end_date: normalizedRange.end || undefined,
@@ -111,7 +126,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                     keys.push("schools");
                 }
 
-                const highlightPromises = permissions.viewMembers
+                const highlightPromises = canViewMembersReport
                     ? [
                         hasRange ? fetchMemberCount({}) : fetchMemberCount({ new_this_month: true }),
                         fetchMemberCount({ missing_phone: true }),
@@ -163,7 +178,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                 setNewcomerReport(nextNewcomerReport);
                 setSchoolStats(nextSchoolStats);
 
-                if (permissions.viewMembers) {
+                if (canViewMembersReport) {
                     const [newThisMonthResult, missingPhoneResult] = highlightResults;
                     setMemberHighlights({
                         newThisMonth: newThisMonthResult?.status === "fulfilled" ? newThisMonthResult.value : 0,
@@ -187,11 +202,11 @@ export function Overview({ onNavigate }: OverviewProps) {
             cancelled = true;
         };
     }, [
-        permissions.viewMembers,
-        permissions.viewPayments,
-        permissions.viewSponsorships,
-        permissions.viewNewcomers,
-        permissions.viewSchools,
+        canViewMembersReport,
+        canViewNewcomersReport,
+        canViewPaymentsReport,
+        canViewSchoolsReport,
+        canViewSponsorshipsReport,
         hasRange,
         normalizedRange.start,
         normalizedRange.end,
@@ -201,6 +216,10 @@ export function Overview({ onNavigate }: OverviewProps) {
     useEffect(() => {
         let cancelled = false;
         const fetchActivity = async () => {
+            if (!canViewOverviewReport) {
+                setActivity([]);
+                return;
+            }
             try {
                 const items = await getReportActivity({
                     start_date: normalizedRange.start || undefined,
@@ -217,7 +236,11 @@ export function Overview({ onNavigate }: OverviewProps) {
         return () => {
             cancelled = true;
         };
-    }, [normalizedRange.start, normalizedRange.end]);
+    }, [canViewOverviewReport, normalizedRange.start, normalizedRange.end]);
+
+    if (!canViewOverviewReport) {
+        return <div className="p-8 text-center text-muted">Overview reporting is restricted for this role.</div>;
+    }
 
     if (loading) {
         return <div className="p-8 text-center text-muted">Loading dashboard...</div>;
@@ -237,21 +260,25 @@ export function Overview({ onNavigate }: OverviewProps) {
                     <p className="text-white/80 max-w-xl mb-6">
                         Get real-time insights into your organization's performance. Track members, finances, and programs all in one place.
                     </p>
-                    <div className="flex gap-3">
-                        <Button
-                            onClick={() => onNavigate("members")}
-                            className="bg-white text-indigo-600 hover:bg-white/90 border-none"
-                        >
-                            View Members
-                        </Button>
-                        <Button
-                            onClick={() => onNavigate(permissions.viewNewcomers ? "newcomers" : "payments")}
-                            variant="outline"
-                            className="bg-transparent text-white border-white hover:bg-white/10 hover:text-white"
-                        >
-                            {permissions.viewNewcomers ? "View Newcomers" : "View Financials"}
-                        </Button>
-                    </div>
+                    {primaryHeroTarget ? (
+                        <div className="flex gap-3">
+                            <Button
+                                onClick={() => onNavigate(primaryHeroTarget.tab)}
+                                className="bg-white text-indigo-600 hover:bg-white/90 border-none"
+                            >
+                                {primaryHeroTarget.label}
+                            </Button>
+                            {secondaryHeroTarget ? (
+                                <Button
+                                    onClick={() => onNavigate(secondaryHeroTarget.tab)}
+                                    variant="outline"
+                                    className="bg-transparent text-white border-white hover:bg-white/10 hover:text-white"
+                                >
+                                    {secondaryHeroTarget.label}
+                                </Button>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
                 {/* Decorative circles */}
                 <div className="absolute top-0 right-0 -mr-16 -mt-16 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
@@ -270,30 +297,30 @@ export function Overview({ onNavigate }: OverviewProps) {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                     title={memberCardLabel}
-                    value={stats.members}
+                    value={canViewMembersReport ? stats.members : "—"}
                     icon={Users}
-                    description={memberCardDescription}
+                    description={canViewMembersReport ? memberCardDescription : "Report access required"}
                     className="bg-card border-l-4 border-l-blue-500"
                 />
                 <StatCard
                     title={revenueCardLabel}
-                    value={`$${stats.revenue.toLocaleString()}`}
+                    value={canViewPaymentsReport ? `$${stats.revenue.toLocaleString()}` : "—"}
                     icon={DollarSign}
-                    description={revenueCardDescription}
+                    description={canViewPaymentsReport ? revenueCardDescription : "Report access required"}
                     className="bg-card border-l-4 border-l-emerald-500"
                 />
                 <StatCard
                     title="Active Sponsors"
-                    value={stats.sponsorships}
+                    value={canViewSponsorshipsReport ? stats.sponsorships : "—"}
                     icon={Heart}
-                    description="Supporting others"
+                    description={canViewSponsorshipsReport ? "Supporting others" : "Report access required"}
                     className="bg-card border-l-4 border-l-pink-500"
                 />
                 <StatCard
                     title="Students"
-                    value={stats.students}
+                    value={canViewSchoolsReport ? stats.students : "—"}
                     icon={GraduationCap}
-                    description="Enrolled in programs"
+                    description={canViewSchoolsReport ? "Enrolled in programs" : "Report access required"}
                     className="bg-card border-l-4 border-l-violet-500"
                 />
             </div>
@@ -305,30 +332,32 @@ export function Overview({ onNavigate }: OverviewProps) {
                         <div className="flex items-center justify-between">
                             <span className="text-muted">{hasRange ? "Members in range" : "New members this month"}</span>
                             <span className="font-semibold text-ink">
-                                {permissions.viewMembers ? memberHighlights.newThisMonth : "—"}
+                                {canViewMembersReport ? memberHighlights.newThisMonth : "—"}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-muted">Profiles missing phone</span>
                             <span className="font-semibold text-ink">
-                                {permissions.viewMembers ? memberHighlights.missingPhone : "—"}
+                                {canViewMembersReport ? memberHighlights.missingPhone : "—"}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-muted">Overdue newcomer follow-up</span>
                             <span className="font-semibold text-ink">
-                                {permissions.viewNewcomers ? newcomerReport?.summary.followups_overdue ?? "—" : "—"}
+                                {canViewNewcomersReport ? newcomerReport?.summary.followups_overdue ?? "—" : "—"}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-muted">Unassigned newcomer cases</span>
                             <span className="font-semibold text-ink">
-                                {permissions.viewNewcomers ? newcomerReport?.summary.unassigned_cases ?? "—" : "—"}
+                                {canViewNewcomersReport ? newcomerReport?.summary.unassigned_cases ?? "—" : "—"}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-muted">Sponsorship alerts</span>
-                            <span className="font-semibold text-ink">{sponsorshipMetrics?.alerts.length ?? "—"}</span>
+                            <span className="font-semibold text-ink">
+                                {canViewSponsorshipsReport ? sponsorshipMetrics?.alerts.length ?? "—" : "—"}
+                            </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-muted">Pending school content</span>
@@ -343,7 +372,7 @@ export function Overview({ onNavigate }: OverviewProps) {
 
                 <div className="rounded-xl border border-border bg-card p-6">
                     <h3 className="mb-4 text-lg font-semibold text-ink">Newcomer Watchlist</h3>
-                    {permissions.viewNewcomers && newcomerReport ? (
+                    {canViewNewcomersReport && newcomerReport ? (
                         <div className="space-y-3 text-sm">
                             <div className="flex items-center justify-between">
                                 <span className="text-muted">Open newcomer pipeline</span>
@@ -408,7 +437,9 @@ export function Overview({ onNavigate }: OverviewProps) {
 
             <div className="rounded-xl border border-border bg-card p-6">
                 <h3 className="mb-4 text-lg font-semibold text-ink">Recent Activity</h3>
-                {activity.length === 0 ? (
+                {!canViewOverviewReport ? (
+                    <div className="text-sm text-muted">Recent activity is restricted for this role.</div>
+                ) : activity.length === 0 ? (
                     <div className="text-sm text-muted">No recent activity for the selected range.</div>
                 ) : (
                     <ul className="space-y-3 text-sm">
@@ -432,7 +463,7 @@ export function Overview({ onNavigate }: OverviewProps) {
 
             {/* Quick Links */}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {(permissions.viewSponsorships || permissions.viewNewcomers) ? (
+                {canViewSponsorshipsReport ? (
                     <div
                         onClick={() => onNavigate("sponsorships")}
                         className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
@@ -452,7 +483,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                     </div>
                 ) : null}
 
-                {permissions.viewNewcomers ? (
+                {canViewNewcomersReport ? (
                     <div
                         onClick={() => onNavigate("newcomers")}
                         className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"
@@ -472,7 +503,7 @@ export function Overview({ onNavigate }: OverviewProps) {
                     </div>
                 ) : null}
 
-                {permissions.viewSchools ? (
+                {canViewSchoolsReport ? (
                     <div
                         onClick={() => onNavigate("schools")}
                         className="group cursor-pointer rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-accent/50"

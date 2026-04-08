@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_roles
+from app.auth.deps import require_field_permission, require_roles
 from app.core.db import get_db
 from app.models.sponsorship import Sponsorship
 from app.models.user import User
@@ -417,6 +417,7 @@ def create_budget_round(
     payload: SponsorshipBudgetRoundCreate,
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*MANAGE_ROLES)),
+    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.create_budget_round(db, payload)
 
@@ -427,6 +428,7 @@ def update_budget_round(
     payload: SponsorshipBudgetRoundUpdate,
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*MANAGE_ROLES)),
+    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.update_budget_round(db, round_id, payload)
 
@@ -436,6 +438,7 @@ def delete_budget_round(
     round_id: int,
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*MANAGE_ROLES)),
+    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> None:
     sponsorships_service.delete_budget_round(db, round_id)
 

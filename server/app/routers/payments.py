@@ -5,7 +5,7 @@ import io
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.models.user import User
 from app.models.payment import Payment
 from app.models.payment_day_lock import PaymentDayLock
 from app.schemas.payment import (
+    PaymentAdjustmentResult,
     PaymentCorrectionCreate,
     PaymentCreate,
     PaymentDayLockOut,
@@ -25,6 +26,7 @@ from app.schemas.payment import (
     PaymentSummaryResponse,
     PaymentServiceTypeOut,
     PaymentStatusUpdate,
+    PaymentVoidCreate,
 )
 from app.services import payments as payments_service
 
@@ -133,6 +135,7 @@ def list_payments(
         service_type_code=service_type,
         method=method,
         status_filter=status_filter,
+        member_name=member_name,
         start_date=start_date,
         end_date=end_date,
     )
@@ -184,6 +187,7 @@ def export_payments_report(
         service_type_code=service_type,
         method=method,
         status_filter=status_filter,
+        member_name=member_name,
         start_date=start_date,
         end_date=end_date,
     )
@@ -215,15 +219,35 @@ def get_payment(
     return PaymentOut.from_orm(payment)
 
 
-@router.post("/{payment_id:int}/correct", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
+def _adjustment_to_schema(outcome: payments_service.PaymentAdjustmentOutcome) -> PaymentAdjustmentResult:
+    return PaymentAdjustmentResult(
+        original_payment_id=outcome.original.id,
+        reason=outcome.reason,
+        reversal=PaymentOut.from_orm(outcome.reversal),
+        replacement=PaymentOut.from_orm(outcome.replacement) if outcome.replacement else None,
+    )
+
+
+@router.post("/{payment_id:int}/correct", response_model=PaymentAdjustmentResult, status_code=status.HTTP_201_CREATED)
 def correct_payment(
     payment_id: int,
     payload: PaymentCorrectionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*FINANCE_ROLES)),
-) -> PaymentOut:
-    correction = payments_service.request_correction(db, payment_id, payload, current_user)
-    return PaymentOut.from_orm(correction)
+) -> PaymentAdjustmentResult:
+    outcome = payments_service.request_correction(db, payment_id, payload, current_user)
+    return _adjustment_to_schema(outcome)
+
+
+@router.post("/{payment_id:int}/void", response_model=PaymentAdjustmentResult, status_code=status.HTTP_201_CREATED)
+def void_payment(
+    payment_id: int,
+    payload: PaymentVoidCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*FINANCE_ROLES)),
+) -> PaymentAdjustmentResult:
+    outcome = payments_service.void_payment(db, payment_id, payload.reason, current_user)
+    return _adjustment_to_schema(outcome)
 
 
 @router.get("/reports/summary", response_model=PaymentSummaryResponse, status_code=status.HTTP_200_OK)

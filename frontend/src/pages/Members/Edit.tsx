@@ -7,17 +7,17 @@ import {
   API_BASE,
   ApiError,
   MemberDuplicateMatch,
-  MemberAuditEntry,
   MemberDetail,
   MemberStatus,
   MemberSundaySchoolParticipantStatus,
+  MemberTimelineEvent,
   MembersMeta,
   Payment,
   PaymentServiceType,
   api,
   findMemberDuplicates,
   createPaymentEntry,
-  getMemberAudit,
+  getMemberTimeline,
   getMembersMeta,
   getPaymentServiceTypes,
   listPayments,
@@ -89,6 +89,14 @@ const CANADIAN_COUNTRY_CODE = "+1";
 const CANADA_FLAG = "🇨🇦";
 const CREATE_FATHER_CONFESSOR_OPTION = "__create_father_confessor__";
 const QUICK_AMOUNT_OPTIONS = [30, 75, 100] as const;
+const TIMELINE_CATEGORY_STYLES: Record<string, string> = {
+  Profile: "bg-slate-100 text-slate-700 border-slate-200",
+  Status: "bg-amber-100 text-amber-900 border-amber-200",
+  Community: "bg-sky-100 text-sky-800 border-sky-200",
+  Payment: "bg-emerald-100 text-emerald-900 border-emerald-200",
+  Contribution: "bg-indigo-100 text-indigo-900 border-indigo-200",
+  Membership: "bg-rose-100 text-rose-900 border-rose-200",
+};
 
 const createEmptyFatherConfessorForm = (): NewFatherConfessorFormState => ({
   fullName: "",
@@ -611,37 +619,97 @@ function SnapshotCard({
   );
 }
 
-function AuditTrailCard({
-  auditLoading,
-  auditEntries,
+function TimelineIcon({ category }: { category: string }) {
+  if (category === "Payment" || category === "Contribution") {
+    return <CreditCard className="h-4 w-4 text-emerald-600" />;
+  }
+  if (category === "Membership" || category === "Status") {
+    return <ShieldAlert className="h-4 w-4 text-amber-600" />;
+  }
+  if (category === "Community") {
+    return <UsersRound className="h-4 w-4 text-sky-600" />;
+  }
+  return <FileText className="h-4 w-4 text-slate-600" />;
+}
+
+function formatTimelineAmount(entry: MemberTimelineEvent) {
+  if (entry.amount == null) return null;
+  return `${entry.currency || "CAD"} ${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+}
+
+function MemberTimelineCard({
+  timelineLoading,
+  timelineEntries,
 }: {
-  auditLoading: boolean;
-  auditEntries: MemberAuditEntry[];
+  timelineLoading: boolean;
+  timelineEntries: MemberTimelineEvent[];
 }) {
+  const categoryCounts = timelineEntries.reduce<Record<string, number>>((acc, entry) => {
+    acc[entry.category] = (acc[entry.category] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
-    <div className="border rounded-lg p-4 space-y-3" data-tour="member-audit">
-      <h3 className="text-sm font-semibold uppercase tracking-wide">Audit Trail</h3>
-      {auditLoading ? (
-        <div className="text-sm text-mute">Loading audit entries…</div>
-      ) : auditEntries.length === 0 ? (
-        <div className="text-sm text-mute">No changes recorded yet.</div>
+    <div className="border rounded-lg p-4 space-y-4" data-tour="member-audit">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide">Member Timeline</h3>
+          <p className="text-xs text-mute">Profile changes, finance activity, and membership milestones in one place.</p>
+        </div>
+        {timelineEntries.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(categoryCounts).map(([category, count]) => (
+              <Badge key={category} className={`${TIMELINE_CATEGORY_STYLES[category] || "bg-slate-100 text-slate-700 border-slate-200"} normal-case`}>
+                {category} {count}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      {timelineLoading ? (
+        <div className="text-sm text-mute">Loading timeline…</div>
+      ) : timelineEntries.length === 0 ? (
+        <div className="text-sm text-mute">No timeline activity yet.</div>
       ) : (
-        <ul className="space-y-2 text-sm">
-          {auditEntries.map((entry, index) => (
-            <li key={`${entry.changed_at}-${index}`} className="border rounded-md p-3">
-              <div className="flex items-center justify-between text-xs text-mute">
-                <span>{new Date(entry.changed_at).toLocaleString()}</span>
-                <span>{entry.actor}</span>
+        <div className="relative pl-6">
+          <div className="absolute left-3 top-0 bottom-0 w-px bg-border" aria-hidden />
+          <div className="space-y-4">
+            {timelineEntries.map((entry) => (
+              <div key={entry.id} className="relative pl-3">
+                <span className="absolute left-0 top-5 h-3 w-3 -translate-x-1 rounded-full bg-accent shadow-ring" />
+                <div className="rounded-xl border border-border bg-card/70 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TimelineIcon category={entry.category} />
+                        <Badge className={`${TIMELINE_CATEGORY_STYLES[entry.category] || "bg-slate-100 text-slate-700 border-slate-200"} normal-case`}>
+                          {entry.category}
+                        </Badge>
+                        {entry.status && (
+                          <Badge className="bg-card text-mute border-border normal-case">
+                            {entry.status}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="font-semibold text-ink">{entry.title}</div>
+                      {entry.detail && <div className="text-sm text-mute">{entry.detail}</div>}
+                    </div>
+                    <div className="text-right space-y-1">
+                      {entry.amount != null && (
+                        <div className="text-sm font-semibold text-ink">{formatTimelineAmount(entry)}</div>
+                      )}
+                      <div className="text-xs text-mute">{new Date(entry.occurred_at).toLocaleString()}</div>
+                      <div className="text-xs text-mute">
+                        {entry.actor ? `by ${entry.actor}` : "System"}
+                        {entry.reference_id != null ? ` • #${entry.reference_id}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="mt-1 font-medium">
-                {entry.action.toUpperCase()} {entry.field}
-              </div>
-              <div className="text-xs text-mute">
-                {entry.old_value ?? "—"} → {entry.new_value ?? "—"}
-              </div>
-            </li>
-          ))}
-        </ul>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -723,8 +791,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
-  const [auditEntries, setAuditEntries] = useState<MemberAuditEntry[]>([]);
-  const [auditLoading, setAuditLoading] = useState(true);
+  const [timelineEntries, setTimelineEntries] = useState<MemberTimelineEvent[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(true);
   const [householdMode, setHouseholdMode] = useState<HouseholdSelectionMode>("none");
   const [householdSearch, setHouseholdSearch] = useState("");
   const [selectedHousehold, setSelectedHousehold] = useState<string>("");
@@ -1208,42 +1276,42 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     };
   }, [member?.id, member?.email, member?.phone, member?.first_name, member?.last_name, toast]);
 
-  const refreshAudit = async (memberId: number) => {
+  const refreshTimeline = async (memberId: number) => {
     if (!canViewAudit) {
-      setAuditEntries([]);
-      setAuditLoading(false);
+      setTimelineEntries([]);
+      setTimelineLoading(false);
       return;
     }
-    setAuditLoading(true);
+    setTimelineLoading(true);
     try {
-      const entries = await getMemberAudit(memberId);
-      setAuditEntries(entries);
+      const entries = await getMemberTimeline(memberId);
+      setTimelineEntries(entries.items);
     } catch (error) {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         return;
       }
       console.error(error);
-      toast.push("Failed to load audit trail");
+      toast.push("Failed to load member timeline");
     } finally {
-      setAuditLoading(false);
+      setTimelineLoading(false);
     }
   };
 
   useEffect(() => {
     if (isCreateMode) {
-      setAuditEntries([]);
-      setAuditLoading(false);
+      setTimelineEntries([]);
+      setTimelineLoading(false);
       return;
     }
     if (!memberId || Number.isNaN(memberId)) {
       return;
     }
     if (!canViewAudit) {
-      setAuditEntries([]);
-      setAuditLoading(false);
+      setTimelineEntries([]);
+      setTimelineLoading(false);
       return;
     }
-    refreshAudit(memberId);
+    refreshTimeline(memberId);
   }, [canViewAudit, isCreateMode, memberId]);
 
   useEffect(() => {
@@ -1637,6 +1705,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         const trimmed = value?.trim();
         return trimmed && trimmed.length > 0 ? trimmed : null;
       };
+      const normalizedEmail = member.email?.trim().toLowerCase() ?? "";
+
+      if (!disableCore && !normalizedEmail) {
+        toast.push("Email is required");
+        setUpdating(false);
+        return;
+      }
 
       if (!member.phone || !member.phone.trim()) {
         toast.push("Phone number is required");
@@ -1714,7 +1789,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         payload.middle_name = trimOrNull(member.middle_name);
         payload.last_name = member.last_name.trim();
         payload.baptismal_name = trimOrNull(member.baptismal_name);
-        payload.email = trimOrNull(member.email);
+        payload.email = normalizedEmail;
         payload.phone = member.phone.trim();
         payload.gender = trimOrNull(member.gender);
         payload.marital_status = trimOrNull(member.marital_status);
@@ -1832,14 +1907,18 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       initializeFormsFromMember(normalized);
       baselineMemberRef.current = cloneMemberDetail(updated);
       setHasUnsavedChanges(false);
-      await refreshAudit(normalized.id);
+      await refreshTimeline(normalized.id);
       toast.push(isCreateMode ? "Member created" : "Changes saved");
       if (isCreateMode) {
         navigate(`/members/${normalized.id}/edit`, { replace: true });
       }
     } catch (error) {
       console.error(error);
-      toast.push("Failed to update member");
+      if (error instanceof ApiError) {
+        toast.push(parseApiErrorMessage(error.body) || error.message || "Failed to update member");
+      } else {
+        toast.push("Failed to update member");
+      }
     } finally {
       setUpdating(false);
     }
@@ -1893,7 +1972,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         : response.avatar_url;
       setMember((prev) => (prev ? { ...prev, avatar_path: relative } : prev));
       toast.push("Avatar updated");
-      refreshAudit(member.id);
+      refreshTimeline(member.id);
     } catch (error) {
       console.error(error);
       if (error instanceof Error) {
@@ -1925,7 +2004,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       await deleteAvatar(member.id);
       setMember((prev) => (prev ? { ...prev, avatar_path: null } : prev));
       toast.push("Avatar removed");
-      refreshAudit(member.id);
+      refreshTimeline(member.id);
     } catch (error) {
       console.error(error);
       toast.push("Failed to remove avatar");
@@ -1970,7 +2049,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         : response.attachment_url;
       setMember((prev) => (prev ? { ...prev, contribution_exception_attachment_path: relative } : prev));
       toast.push("Low-income document uploaded");
-      refreshAudit(member.id);
+      refreshTimeline(member.id);
     } catch (error) {
       console.error(error);
       if (error instanceof Error) {
@@ -2006,7 +2085,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       await deleteContributionExceptionAttachment(member.id);
       setMember((prev) => (prev ? { ...prev, contribution_exception_attachment_path: null } : prev));
       toast.push("Low-income document removed");
-      refreshAudit(member.id);
+      refreshTimeline(member.id);
     } catch (error) {
       console.error(error);
       toast.push("Failed to remove the low-income document.");
@@ -2550,8 +2629,18 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 >
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs uppercase text-mute">Email</label>
-                      <Input value={member.email ?? ""} onChange={handleChange("email")} type="email" disabled={disableCore} />
+                      <label className="inline-flex items-center gap-1 text-xs uppercase text-mute">
+                        <span>Email</span>
+                        <span className="text-[10px] font-semibold normal-case tracking-normal text-rose-600">Required</span>
+                      </label>
+                      <Input
+                        value={member.email ?? ""}
+                        onChange={handleChange("email")}
+                        type="email"
+                        disabled={disableCore}
+                        required={!disableCore}
+                        className={!disableCore && !(member.email ?? "").trim() ? requiredFieldInputClass : ""}
+                      />
                     </div>
                     <div>
                       {renderFieldLabel("Phone", true)}
@@ -3576,7 +3665,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 </div>
               </form>
               <SummaryCards member={member} formatDate={formatDate} />
-              <AuditTrailCard auditLoading={auditLoading} auditEntries={auditEntries} />
+              <MemberTimelineCard timelineLoading={timelineLoading} timelineEntries={timelineEntries} />
             </div>
             <aside className="space-y-4">
               <AvatarCard

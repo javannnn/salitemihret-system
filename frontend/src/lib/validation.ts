@@ -1,4 +1,5 @@
 const CANONICAL_CANADIAN_PHONE = /^\+1[2-9]\d{2}[2-9]\d{6}$/;
+const CANONICAL_CANADIAN_POSTAL_CODE = /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ] ?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const PHONE_ALLOWED_CHARS = /^[\d\s()+\-.]+$/;
 
@@ -87,6 +88,55 @@ export function getCanadianPhoneSnapSuggestion(value: string): string | null {
 
   const suggestion = `+1${nextDigits.join("")}`;
   return CANONICAL_CANADIAN_PHONE.test(suggestion) ? suggestion : null;
+}
+
+export function formatCanadianPostalCode(value: string): string {
+  if (!value) return "";
+
+  let clean = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  clean = clean.replace(/[DFIOQU]/g, "");
+
+  if (clean.length > 0 && /[WZ]/.test(clean[0])) {
+    clean = clean.slice(1);
+  }
+
+  let formatted = "";
+  for (let i = 0; i < clean.length && i < 6; i++) {
+    const char = clean[i];
+    const isLetterPosition = i % 2 === 0;
+
+    if (isLetterPosition) {
+      if (/[A-Z]/.test(char)) {
+        formatted += char;
+      }
+    } else if (/[0-9]/.test(char)) {
+      formatted += char;
+    }
+  }
+
+  if (formatted.length > 3) {
+    formatted = `${formatted.slice(0, 3)} ${formatted.slice(3)}`;
+  }
+
+  return formatted;
+}
+
+export function hasValidCanadianPostalCode(value: string): boolean {
+  const formatted = formatCanadianPostalCode(value);
+  return CANONICAL_CANADIAN_POSTAL_CODE.test(formatted);
+}
+
+export function getCanadianPostalCodeValidationMessage(value: string, fieldLabel = "Postal code"): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (hasValidCanadianPostalCode(trimmed)) {
+    return null;
+  }
+
+  return `${fieldLabel} must use the Canadian format A1A 1A1.`;
 }
 
 export function normalizeEmailInput(value: string): string {

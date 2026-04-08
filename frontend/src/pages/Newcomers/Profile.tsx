@@ -9,12 +9,12 @@ import { useToast } from "@/components/Toast";
 import { parseApiFieldErrors } from "@/lib/formErrors";
 import {
   ApiError,
+  Member,
   Newcomer,
   NewcomerAddressHistoryListResponse,
   NewcomerInteraction,
   NewcomerInteractionListResponse,
   NewcomerTimelineResponse,
-  StaffSummary,
   convertNewcomer,
   createNewcomerInteraction,
   getNewcomer,
@@ -22,12 +22,13 @@ import {
   inactivateNewcomer,
   listNewcomerAddressHistory,
   listNewcomerInteractions,
-  listStaff,
   reactivateNewcomer,
+  searchMembers,
   transitionNewcomerStatus,
   updateNewcomer,
 } from "@/lib/api";
 import { COUNTRY_OPTIONS, MEMBER_STATUS_OPTIONS, PROVINCE_OPTIONS } from "@/lib/options";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   getCanonicalCanadianPhone,
   getCanadianPhoneValidationMessage,
@@ -145,6 +146,11 @@ function formatDate(value?: string | null) {
   return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
 }
 
+function memberFullName(member?: Pick<Member, "first_name" | "last_name"> | null) {
+  if (!member) return "";
+  return [member.first_name, member.last_name].filter(Boolean).join(" ").trim();
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -172,10 +178,13 @@ export default function NewcomerProfile() {
   const [timeline, setTimeline] = useState<NewcomerTimelineResponse | null>(null);
   const [interactions, setInteractions] = useState<NewcomerInteractionListResponse | null>(null);
   const [addressHistory, setAddressHistory] = useState<NewcomerAddressHistoryListResponse | null>(null);
-  const [staff, setStaff] = useState<StaffSummary[]>([]);
   const [activeTab, setActiveTab] = useState<TabOption>("Overview");
 
-  const [assignStaffId, setAssignStaffId] = useState("");
+  const [assignSponsorId, setAssignSponsorId] = useState("");
+  const [assignSponsorName, setAssignSponsorName] = useState("");
+  const [sponsorSearchQuery, setSponsorSearchQuery] = useState("");
+  const [sponsorSearchResults, setSponsorSearchResults] = useState<Member[]>([]);
+  const [sponsorSearchLoading, setSponsorSearchLoading] = useState(false);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
 
   const [interactionType, setInteractionType] = useState<NewcomerInteraction["interaction_type"]>("Note");
@@ -204,6 +213,7 @@ export default function NewcomerProfile() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsFieldErrors, setDetailsFieldErrors] = useState<NewcomerDetailFieldErrors>({});
   const [detailsForm, setDetailsForm] = useState<NewcomerDetailsForm>(emptyDetailsForm);
+  const debouncedSponsorSearchQuery = useDebouncedValue(sponsorSearchQuery, 300);
 
   useEffect(() => {
     if (!newcomer) return;
@@ -234,7 +244,7 @@ export default function NewcomerProfile() {
       return { label: "Mark Contacted", action: () => handleStatusTransition("Contacted") };
     }
     if (newcomer.status === "Contacted") {
-      return { label: "Assign", action: () => handleStatusTransition("Assigned") };
+      return { label: "Assign sponsor", action: () => handleStatusTransition("Assigned") };
     }
     if (newcomer.status === "Assigned") {
       return { label: "Move to In Progress", action: () => handleStatusTransition("InProgress") };
@@ -264,18 +274,19 @@ export default function NewcomerProfile() {
         const detail = await getNewcomer(numericId);
         if (!active) return;
         setNewcomer(detail);
-        setAssignStaffId(detail.assigned_owner_id ? String(detail.assigned_owner_id) : "");
-        const [timelineData, interactionData, addressData, staffData] = await Promise.all([
+        setAssignSponsorId(detail.sponsored_by_member_id ? String(detail.sponsored_by_member_id) : "");
+        setAssignSponsorName(detail.sponsored_by_member_name || "");
+        setSponsorSearchQuery("");
+        setSponsorSearchResults([]);
+        const [timelineData, interactionData, addressData] = await Promise.all([
           getNewcomerTimeline(numericId),
           listNewcomerInteractions(numericId),
           listNewcomerAddressHistory(numericId),
-          listStaff().then((resp) => resp.items),
         ]);
         if (!active) return;
         setTimeline(timelineData);
         setInteractions(interactionData);
         setAddressHistory(addressData);
-        setStaff(staffData);
       } catch (error) {
         console.error(error);
         if (error instanceof ApiError && error.status === 404) {
@@ -292,6 +303,36 @@ export default function NewcomerProfile() {
       active = false;
     };
   }, [canView, id, numericId, toast]);
+
+  useEffect(() => {
+    if (!debouncedSponsorSearchQuery.trim()) {
+      setSponsorSearchResults([]);
+      setSponsorSearchLoading(false);
+      return;
+    }
+    let active = true;
+    setSponsorSearchLoading(true);
+    searchMembers(debouncedSponsorSearchQuery.trim(), 6)
+      .then((response) => {
+        if (active) {
+          setSponsorSearchResults(response.items.slice(0, 6));
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.error(error);
+          setSponsorSearchResults([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSponsorSearchLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [debouncedSponsorSearchQuery]);
 
   const refreshTimeline = async () => {
     if (!newcomer) return;
@@ -463,14 +504,14 @@ export default function NewcomerProfile() {
     setAssignSubmitting(true);
     try {
       const updated = await updateNewcomer(newcomer.id, {
-        assigned_owner_id: assignStaffId ? Number(assignStaffId) : null,
+        sponsored_by_member_id: assignSponsorId ? Number(assignSponsorId) : null,
       });
       setNewcomer(updated);
       await refreshTimeline();
-      toast.push("Assignment updated.");
+      toast.push("Sponsor assignment updated.");
     } catch (error) {
       console.error(error);
-      toast.push("Unable to update assignment.");
+      toast.push("Unable to update sponsor assignment.");
     } finally {
       setAssignSubmitting(false);
     }
@@ -699,8 +740,7 @@ export default function NewcomerProfile() {
                 </div>
                 <div>Country of origin: {newcomer.country || "-"}</div>
                 <div>Interpreter: {newcomer.interpreter_required ? "Required" : "No"}</div>
-                <div>Assigned to: {newcomer.assigned_owner_name || "-"}</div>
-                <div>Sponsored by: {newcomer.sponsored_by_member_name || "-"}</div>
+                <div>Assigned sponsor: {newcomer.sponsored_by_member_name || "-"}</div>
               </div>
               {newcomer.latest_sponsorship_id && (
                 <Button
@@ -713,18 +753,64 @@ export default function NewcomerProfile() {
             </Card>
 
             <Card className="p-4 space-y-3">
-              <h2 className="text-sm uppercase text-mute">Assignment</h2>
-              <Select value={assignStaffId} onChange={(event) => setAssignStaffId(event.target.value)} disabled={!canManage}>
-                <option value="">Unassigned</option>
-                {staff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name || member.username}
-                  </option>
-                ))}
-              </Select>
+              <h2 className="text-sm uppercase text-mute">Sponsor Assignment</h2>
+              <div className="space-y-3">
+                <div className="text-sm text-mute">
+                  Current sponsor: <span className="font-medium text-ink">{assignSponsorName || "Unassigned"}</span>
+                </div>
+                <Input
+                  value={sponsorSearchQuery}
+                  onChange={(event) => setSponsorSearchQuery(event.target.value)}
+                  placeholder="Search member by name"
+                  disabled={!canManage}
+                />
+                {sponsorSearchLoading && <p className="text-xs text-mute">Searching members...</p>}
+                {!sponsorSearchLoading && sponsorSearchQuery.trim() && sponsorSearchResults.length === 0 && (
+                  <p className="text-xs text-mute">No matching members found.</p>
+                )}
+                {sponsorSearchResults.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto rounded-xl border border-border">
+                    {sponsorSearchResults.map((member) => {
+                      const name = memberFullName(member) || member.username;
+                      const selected = String(member.id) === assignSponsorId;
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${selected ? "bg-accent/10 text-accent" : "hover:bg-muted/50"}`}
+                          onClick={() => {
+                            setAssignSponsorId(String(member.id));
+                            setAssignSponsorName(name);
+                            setSponsorSearchQuery("");
+                            setSponsorSearchResults([]);
+                          }}
+                        >
+                          <span>{name}</span>
+                          {selected && <span className="text-xs font-medium">Selected</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {assignSponsorId && canManage && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setAssignSponsorId("");
+                      setAssignSponsorName("");
+                      setSponsorSearchQuery("");
+                      setSponsorSearchResults([]);
+                    }}
+                  >
+                    Clear sponsor
+                  </Button>
+                )}
+              </div>
               {canManage && (
                 <Button onClick={handleAssign} disabled={assignSubmitting}>
-                  {assignSubmitting ? "Saving..." : "Save assignment"}
+                  {assignSubmitting ? "Saving..." : "Save sponsor"}
                 </Button>
               )}
             </Card>
@@ -913,7 +999,7 @@ export default function NewcomerProfile() {
 
             {activeTab === "Sponsorship" && (
               <Card className="p-4 space-y-2">
-                <div className="text-sm">Sponsor: {newcomer.sponsored_by_member_name || "-"}</div>
+                <div className="text-sm">Assigned sponsor: {newcomer.sponsored_by_member_name || "-"}</div>
                 <div className="text-sm">Case status: {newcomer.latest_sponsorship_status || "-"}</div>
                 {newcomer.latest_sponsorship_id && (
                   <Button

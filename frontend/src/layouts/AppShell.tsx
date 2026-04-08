@@ -90,40 +90,58 @@ export default function AppShell() {
   }, [user]);
 
   const navItems = useMemo(() => {
+    const showMembers = permissions.isModuleVisible("members");
+    const showPayments = permissions.isModuleVisible("payments");
+    const showNewcomers = permissions.isModuleVisible("newcomers");
+    const showSponsorships = permissions.isModuleVisible("sponsorships");
+    const showVolunteers = permissions.isModuleVisible("volunteers");
+    const showSchools = permissions.isModuleVisible("schools");
+    const showReports = permissions.isModuleVisible("reports");
+    const showUsers = permissions.isModuleVisible("users");
+    const canViewOverviewReport = permissions.canAccessReport("overview");
+    const canViewMembersReport = permissions.viewMembers && permissions.canAccessReport("members");
+    const canViewPaymentsReport = permissions.viewPayments && permissions.canAccessReport("payments");
+    const canViewSponsorshipsReport = permissions.viewSponsorships && permissions.canAccessReport("sponsorships");
+    const canViewNewcomersReport = permissions.viewNewcomers && permissions.canAccessReport("newcomers");
+    const canViewSchoolsReport = permissions.viewSchools && permissions.canAccessReport("schools");
     const canViewReports =
-      permissions.viewMembers ||
-      permissions.viewNewcomers ||
-      permissions.viewPayments ||
-      permissions.viewSponsorships ||
-      permissions.viewSchools;
+      showReports &&
+      (
+        canViewOverviewReport ||
+        canViewMembersReport ||
+        canViewNewcomersReport ||
+        canViewPaymentsReport ||
+        canViewSponsorshipsReport ||
+        canViewSchoolsReport
+      );
 
     const items = [
       { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, visible: true },
-      { label: "Members", to: "/members", icon: Users, visible: permissions.viewMembers },
-      { label: "Payments", to: "/payments", icon: CreditCard, visible: permissions.viewPayments },
+      { label: "Members", to: "/members", icon: Users, visible: showMembers && permissions.viewMembers },
+      { label: "Payments", to: "/payments", icon: CreditCard, visible: showPayments && permissions.viewPayments },
       {
         label: "Newcomers",
         to: "/newcomers",
         icon: UserPlus,
-        visible: permissions.viewNewcomers || permissions.manageNewcomers,
+        visible: showNewcomers && (permissions.viewNewcomers || permissions.manageNewcomers),
       },
       {
         label: "Sponsorships",
         to: "/sponsorships",
         icon: HeartHandshake,
-        visible: permissions.viewSponsorships || permissions.manageSponsorships,
+        visible: showSponsorships && (permissions.viewSponsorships || permissions.manageSponsorships),
       },
       {
         label: "Volunteers",
         to: "/volunteers",
         icon: HandHeart,
-        visible: permissions.viewVolunteers || permissions.manageVolunteers,
+        visible: showVolunteers && (permissions.viewVolunteers || permissions.manageVolunteers),
       },
       {
         label: "Schools",
         to: "/schools",
         icon: GraduationCap,
-        visible: permissions.viewSchools,
+        visible: showSchools && permissions.viewSchools,
       },
       {
         label: "Reports",
@@ -131,21 +149,13 @@ export default function AppShell() {
         icon: BarChart3,
         visible: canViewReports
       },
-      { label: "User Management", to: "/admin/users", icon: ShieldCheck, visible: isSuperAdmin },
+      { label: "User Management", to: "/admin/users", icon: ShieldCheck, visible: isSuperAdmin && showUsers },
       { label: "Email", to: "/admin/email", icon: Mail, visible: isSuperAdmin },
     ];
     return items.filter((item) => item.visible);
   }, [
     isSuperAdmin,
-    permissions.viewMembers,
-    permissions.viewNewcomers,
-    permissions.viewPayments,
-    permissions.viewSponsorships,
-    permissions.manageSponsorships,
-    permissions.viewVolunteers,
-    permissions.manageVolunteers,
-    permissions.manageNewcomers,
-    permissions.viewSchools,
+    permissions,
   ]);
 
   const mobileNavItems = useMemo(() => (navItems.length ? navItems : [{ label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, visible: true }]), [navItems]);
@@ -543,7 +553,7 @@ export default function AppShell() {
                     Show tour
                   </button>
                 )}
-                {isSuperAdmin && (
+                {isSuperAdmin && permissions.isModuleVisible("users") && (
                   <button
                     className="w-full text-left px-3 py-2 rounded-xl hover:bg-accent/10"
                     onClick={() => {

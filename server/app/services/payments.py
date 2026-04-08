@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -67,6 +68,14 @@ PAYMENT_METHOD_ALIASES: dict[str, list[str]] = {
 }
 
 
+@dataclass
+class PaymentAdjustmentOutcome:
+    original: Payment
+    reversal: Payment
+    replacement: Payment | None
+    reason: str
+
+
 def ensure_default_service_types(db: Session) -> None:
     """Insert baseline payment service types if the table is empty or missing required codes."""
     existing_codes = {
@@ -118,6 +127,7 @@ def _base_payment_query(db: Session) -> Query:
             selectinload(Payment.household),
             selectinload(Payment.receipts),
             selectinload(Payment.recorded_by),
+            selectinload(Payment.corrections),
         )
         .order_by(Payment.posted_at.desc(), Payment.id.desc())
     )
@@ -177,12 +187,18 @@ def _ensure_unlocked(db: Session, day: date) -> None:
         )
 
 
-def record_payment(db: Session, payload: PaymentCreate, actor: User | None, *, auto_commit: bool = True) -> Payment:
+def _build_payment(
+    db: Session,
+    payload: PaymentCreate,
+    actor: User | None,
+    *,
+    correction_of_id: int | None = None,
+    correction_reason: str | None = None,
+) -> tuple[Payment, Optional[Member], datetime, PaymentServiceType]:
     service_type = _get_service_type(db, payload.service_type_code)
     member = _resolve_member(db, payload.member_id)
     posted_at = payload.posted_at or datetime.now(timezone.utc)
     status = _normalize_status(payload.status, payload.due_date)
-    _ensure_unlocked(db, _normalize_day(posted_at))
     payment = Payment(
         amount=payload.amount,
         currency=(payload.currency or "CAD").upper(),
@@ -195,7 +211,15 @@ def record_payment(db: Session, payload: PaymentCreate, actor: User | None, *, a
         posted_at=posted_at,
         due_date=payload.due_date,
         status=status,
+        correction_of_id=correction_of_id,
+        correction_reason=correction_reason,
     )
+    return payment, member, posted_at, service_type
+
+
+def record_payment(db: Session, payload: PaymentCreate, actor: User | None, *, auto_commit: bool = True) -> Payment:
+    payment, member, posted_at, service_type = _build_payment(db, payload, actor)
+    _ensure_unlocked(db, _normalize_day(posted_at))
     db.add(payment)
     db.flush()
     membership_status_payload: tuple[Member, str | None, MembershipHealthData] | None = None
@@ -267,6 +291,8 @@ def get_payment(db: Session, payment_id: int) -> Payment:
             selectinload(Payment.member),
             selectinload(Payment.household),
             selectinload(Payment.receipts),
+            selectinload(Payment.recorded_by),
+            selectinload(Payment.corrections),
         )
         .filter(Payment.id == payment_id)
         .first()
@@ -276,16 +302,38 @@ def get_payment(db: Session, payment_id: int) -> Payment:
     return payment
 
 
-def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionCreate, actor: User) -> Payment:
-    original = get_payment(db, payment_id)
-    if original.correction_of_id is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot correct a correction entry")
-    if original.corrections:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A correction already exists for this payment")
+def _load_payments(db: Session, payment_ids: list[int]) -> list[Payment]:
+    payments = (
+        db.query(Payment)
+        .options(
+            selectinload(Payment.service_type),
+            selectinload(Payment.member),
+            selectinload(Payment.household),
+            selectinload(Payment.receipts),
+            selectinload(Payment.recorded_by),
+            selectinload(Payment.corrections),
+        )
+        .filter(Payment.id.in_(payment_ids))
+        .all()
+    )
+    payment_by_id = {payment.id: payment for payment in payments}
+    missing_ids = [payment_id for payment_id in payment_ids if payment_id not in payment_by_id]
+    if missing_ids:
+        refs = ", ".join(f"PAY-{payment_id:06d}" for payment_id in missing_ids)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Payments not found: {refs}")
+    return [payment_by_id[payment_id] for payment_id in payment_ids]
 
-    correction_posted_at = datetime.now(timezone.utc)
-    _ensure_unlocked(db, _normalize_day(correction_posted_at))
-    correction = Payment(
+
+def _ensure_payment_adjustable(payment: Payment) -> None:
+    if payment.correction_of_id is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot adjust a reversal or replacement entry")
+    if payment.corrections:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This payment already has a recorded adjustment")
+
+
+def _create_reversal_entry(db: Session, original: Payment, reason: str, actor: User, posted_at: datetime) -> Payment:
+    _ensure_unlocked(db, _normalize_day(posted_at))
+    reversal = Payment(
         amount=-original.amount,
         currency=original.currency,
         method=original.method,
@@ -294,15 +342,107 @@ def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionC
         member_id=original.member_id,
         household_id=original.household_id,
         recorded_by_id=actor.id if actor else None,
-        posted_at=correction_posted_at,
+        posted_at=posted_at,
+        due_date=original.due_date,
         correction_of_id=original.id,
-        correction_reason=payload.correction_reason,
+        correction_reason=reason,
         status="Completed",
     )
-    db.add(correction)
+    db.add(reversal)
+    db.flush()
+    return reversal
+
+
+def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionCreate, actor: User) -> PaymentAdjustmentOutcome:
+    original = get_payment(db, payment_id)
+    _ensure_payment_adjustable(original)
+
+    correction_posted_at = datetime.now(timezone.utc)
+    reversal = _create_reversal_entry(db, original, payload.correction_reason, actor, correction_posted_at)
+
+    replacement: Payment | None = None
+    if payload.replacement is not None:
+        replacement_payload = payload.replacement.copy(
+            update={
+                "member_id": payload.replacement.member_id if payload.replacement.member_id is not None else original.member_id,
+                "household_id": payload.replacement.household_id if payload.replacement.household_id is not None else original.household_id,
+            }
+        )
+        replacement_payment, _, replacement_posted_at, _ = _build_payment(
+            db,
+            replacement_payload,
+            actor,
+            correction_of_id=original.id,
+            correction_reason=payload.correction_reason,
+        )
+        _ensure_unlocked(db, _normalize_day(replacement_posted_at))
+        db.add(replacement_payment)
+        db.flush()
+        replacement = replacement_payment
+
     db.commit()
-    db.refresh(correction)
-    return correction
+    db.refresh(original)
+    db.refresh(reversal)
+    if replacement is not None:
+        db.refresh(replacement)
+    return PaymentAdjustmentOutcome(
+        original=original,
+        reversal=reversal,
+        replacement=replacement,
+        reason=payload.correction_reason,
+    )
+
+
+def void_payment(db: Session, payment_id: int, reason: str, actor: User) -> PaymentAdjustmentOutcome:
+    original = get_payment(db, payment_id)
+    _ensure_payment_adjustable(original)
+
+    reversal = _create_reversal_entry(db, original, reason, actor, datetime.now(timezone.utc))
+    db.commit()
+    db.refresh(original)
+    db.refresh(reversal)
+    return PaymentAdjustmentOutcome(
+        original=original,
+        reversal=reversal,
+        replacement=None,
+        reason=reason,
+    )
+
+
+def void_payments(db: Session, payment_ids: list[int], reason: str, actor: User) -> list[PaymentAdjustmentOutcome]:
+    unique_ids = list(dict.fromkeys(payment_ids))
+    originals = _load_payments(db, unique_ids)
+
+    blocking_reasons: list[str] = []
+    for original in originals:
+        try:
+            _ensure_payment_adjustable(original)
+        except HTTPException as exc:
+            blocking_reasons.append(f"PAY-{original.id:06d}: {exc.detail}")
+    if blocking_reasons:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete the selected payments. " + " ".join(blocking_reasons),
+        )
+
+    posted_at = datetime.now(timezone.utc)
+    outcomes: list[PaymentAdjustmentOutcome] = []
+    for original in originals:
+        reversal = _create_reversal_entry(db, original, reason, actor, posted_at)
+        outcomes.append(
+            PaymentAdjustmentOutcome(
+                original=original,
+                reversal=reversal,
+                replacement=None,
+                reason=reason,
+            )
+        )
+
+    db.commit()
+    for outcome in outcomes:
+        db.refresh(outcome.original)
+        db.refresh(outcome.reversal)
+    return outcomes
 
 
 def summarize_payments(

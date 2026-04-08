@@ -21,6 +21,10 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onComplete: (report: ImportReport) => void;
+  importLimits?: {
+    max_rows: number;
+    max_file_size_mb: number;
+  };
 };
 
 type WizardStep = "upload" | "mapping" | "review" | "results";
@@ -49,7 +53,7 @@ const FIELDS: CanonicalField[] = [
   { key: "first_name", label: "First name", required: true },
   { key: "middle_name", label: "Middle name" },
   { key: "last_name", label: "Last name", required: true },
-  { key: "email", label: "Email" },
+  { key: "email", label: "Email", required: true },
   { key: "phone", label: "Phone", required: true },
   { key: "gender", label: "Gender" },
   { key: "status", label: "Status" },
@@ -217,8 +221,9 @@ function inferMapping(headers: string[]): Record<string, string | ""> {
   }, {});
 }
 
-export default function ImportWizard({ open, onClose, onComplete }: Props) {
+export default function ImportWizard({ open, onClose, onComplete, importLimits }: Props) {
   const toast = useToast();
+  const resolvedImportLimits = importLimits ?? { max_rows: 5000, max_file_size_mb: 5 };
   const [step, setStep] = useState<WizardStep>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -308,7 +313,13 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
   const mappedFields = useMemo(() => FIELDS.filter((field) => Boolean(mapping[field.key])), [mapping]);
   const previewRows = useMemo(() => rows.slice(0, 8), [rows]);
 
-  const importReady = Boolean(file) && rows.length > 0 && requiredMissing.length === 0 && mappingCollisions.length === 0;
+  const rowLimitExceeded = rows.length > resolvedImportLimits.max_rows;
+  const importReady =
+    Boolean(file) &&
+    rows.length > 0 &&
+    !rowLimitExceeded &&
+    requiredMissing.length === 0 &&
+    mappingCollisions.length === 0;
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
 
@@ -350,8 +361,8 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
     const candidate = acceptedFiles[0];
-    if (candidate.size > 5 * 1024 * 1024) {
-      setError("CSV is too large. Maximum file size is 5MB.");
+    if (candidate.size > resolvedImportLimits.max_file_size_mb * 1024 * 1024) {
+      setError(`CSV is too large. Maximum file size is ${resolvedImportLimits.max_file_size_mb}MB.`);
       return;
     }
 
@@ -369,13 +380,17 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
       setRows(parsedRows);
       setMapping(inferMapping(parsedHeaders));
       setReport(null);
-      setError(null);
+      setError(
+        parsedRows.length > resolvedImportLimits.max_rows
+          ? `This file has ${parsedRows.length} rows. The current import limit is ${resolvedImportLimits.max_rows} rows, so split the file before importing.`
+          : null
+      );
       setStep("upload");
     } catch (err) {
       console.error(err);
       setError("Failed to read CSV file. Ensure it is UTF-8 encoded.");
     }
-  }, []);
+  }, [resolvedImportLimits.max_file_size_mb, resolvedImportLimits.max_rows]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -519,7 +534,9 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                       <Upload className="mx-auto h-10 w-10 text-accent" />
                       <p className="mt-3 text-sm font-medium">{heading}</p>
                       <p className="mt-1 text-xs text-mute">
-                        {isDragActive ? "Drop CSV file here..." : "Drag & drop or click to browse (.csv, UTF-8, up to 5MB)."}
+                        {isDragActive
+                          ? "Drop CSV file here..."
+                          : `Drag & drop or click to browse (.csv, UTF-8, up to ${resolvedImportLimits.max_file_size_mb}MB).`}
                       </p>
                     </div>
 
@@ -530,8 +547,16 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                           <div className="text-sm text-ink">
                             <p className="font-semibold">Import format tips</p>
                             <p className="text-xs text-mute mt-1">
-                              Required member fields: <code>first_name</code>, <code>last_name</code>, <code>phone</code>.
+                              Required member fields: <code>first_name</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>.
                               The wizard auto-maps common aliases and lets you correct mismatches.
+                            </p>
+                            <p className="text-xs text-mute mt-1">
+                              Imports accept CSV files, including spreadsheets saved from Excel as CSV. Current limit:{" "}
+                              <code>{resolvedImportLimits.max_rows.toLocaleString()}</code> rows or{" "}
+                              <code>{resolvedImportLimits.max_file_size_mb}MB</code> per file.
+                            </p>
+                            <p className="text-xs text-mute mt-1">
+                              For a smoother import, split very large rosters into batches of roughly <code>2,500</code> rows or fewer.
                             </p>
                             <p className="text-xs text-mute mt-1">
                               Children format: <code>First|Last|Gender|YYYY-MM-DD|Country|Notes</code>, separated by <code>;</code>.
@@ -583,6 +608,12 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                         {rows.length === 0 && (
                           <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
                             The file has headers but no data rows.
+                          </div>
+                        )}
+                        {rowLimitExceeded && (
+                          <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
+                            This file exceeds the import ceiling of {resolvedImportLimits.max_rows.toLocaleString()} rows.
+                            Split it into smaller CSV files before continuing.
                           </div>
                         )}
                       </Card>
@@ -653,6 +684,12 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                               : "No duplicate header mappings."}
                           </div>
 
+                          <div className={`rounded-lg px-3 py-2 ${rowLimitExceeded ? "bg-rose-50 text-rose-900 border border-rose-200" : "bg-emerald-50 text-emerald-800 border border-emerald-200"}`}>
+                            {rowLimitExceeded
+                              ? `This file has ${rows.length} rows, above the ${resolvedImportLimits.max_rows} row limit.`
+                              : `Row count is within the ${resolvedImportLimits.max_rows} row limit.`}
+                          </div>
+
                           {mappingCollisions.length > 0 && (
                             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-900">
                               {mappingCollisions.map((collision) => (
@@ -702,13 +739,15 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                       </Card>
                       <Card className="border border-border bg-card/70 p-3">
                         <p className="text-[11px] uppercase tracking-wide text-mute">Failed checks</p>
-                        <p className="text-lg font-semibold text-ink">{requiredMissing.length + mappingCollisions.length}</p>
+                        <p className="text-lg font-semibold text-ink">
+                          {requiredMissing.length + mappingCollisions.length + (rowLimitExceeded ? 1 : 0)}
+                        </p>
                       </Card>
                     </div>
 
-                    {(requiredMissing.length > 0 || mappingCollisions.length > 0) && (
+                    {(requiredMissing.length > 0 || mappingCollisions.length > 0 || rowLimitExceeded) && (
                       <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-                        Resolve mapping issues before importing.
+                        Resolve mapping issues before importing. Files larger than {resolvedImportLimits.max_rows.toLocaleString()} rows must be split first.
                       </div>
                     )}
 
@@ -874,7 +913,7 @@ export default function ImportWizard({ open, onClose, onComplete }: Props) {
                       </Button>
                       <Button
                         onClick={() => setStep("mapping")}
-                        disabled={!file || rows.length === 0}
+                        disabled={!file || rows.length === 0 || rowLimitExceeded}
                       >
                         Continue
                         <ArrowRight className="h-4 w-4" />

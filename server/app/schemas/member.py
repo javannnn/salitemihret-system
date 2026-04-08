@@ -1,8 +1,9 @@
 from datetime import date, datetime
+from decimal import Decimal
 import re
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, ValidationError, parse_obj_as, validator
 
 from app.schemas.household import HouseholdOut
 from app.schemas.payment import PaymentStatus
@@ -38,6 +39,18 @@ def normalize_optional_member_phone(value: Optional[str]) -> Optional[str]:
     return normalize_member_phone(stripped)
 
 
+def normalize_required_member_email(value: str | EmailStr | None) -> str:
+    if value is None:
+        raise ValueError("Email is required")
+    normalized = str(value).strip().lower()
+    if not normalized:
+        raise ValueError("Email is required")
+    try:
+        return str(parse_obj_as(EmailStr, normalized))
+    except ValidationError as exc:
+        raise ValueError("value is not a valid email address") from exc
+
+
 class SpouseBase(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=120)
     last_name: str = Field(..., min_length=1, max_length=120)
@@ -64,6 +77,7 @@ class SpouseCreate(SpouseBase):
 class SpouseOut(SpouseBase):
     id: int
     full_name: str
+    email: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -155,7 +169,7 @@ class PriestOut(BaseModel):
     id: int
     full_name: str
     phone: Optional[str]
-    email: Optional[EmailStr]
+    email: Optional[str]
     status: str
 
     class Config:
@@ -181,7 +195,7 @@ class MemberBase(BaseModel):
     middle_name: Optional[str] = Field(None, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
     baptismal_name: Optional[str] = Field(None, max_length=150)
-    email: Optional[EmailStr] = None
+    email: EmailStr
     phone: str = Field(..., min_length=3, max_length=25)
     birth_date: Optional[date] = None
     join_date: Optional[date] = None
@@ -237,6 +251,10 @@ class MemberBase(BaseModel):
         if not value or not value.strip():
             raise ValueError("Phone number is required")
         return normalize_member_phone(value.strip())
+
+    @validator("email", pre=True)
+    def validate_email(cls, value: str | EmailStr | None) -> str:
+        return normalize_required_member_email(value)
 
     @validator("address_postal_code")
     def validate_postal_code(cls, value: str) -> str:
@@ -341,6 +359,10 @@ class MemberUpdate(BaseModel):
             raise ValueError("Invalid marital status value")
         return value
 
+    @validator("email", pre=True)
+    def validate_email(cls, value: str | EmailStr | None) -> str:
+        return normalize_required_member_email(value)
+
     @validator("address_postal_code")
     def validate_postal_code(cls, value: Optional[str]) -> Optional[str]:
         if value is not None and not value.strip():
@@ -382,7 +404,7 @@ class MemberListOut(BaseModel):
     birth_date: Optional[date]
     marital_status: Optional[str]
     district: Optional[str]
-    email: Optional[EmailStr]
+    email: Optional[str]
     phone: Optional[str]
     avatar_path: Optional[str]
     is_tither: bool
@@ -570,6 +592,46 @@ class MemberAuditFeedItem(BaseModel):
     new_value: Optional[str]
 
 
+class MemberTimelineEvent(BaseModel):
+    id: str
+    category: str
+    event_type: str
+    title: str
+    detail: Optional[str]
+    actor: Optional[str]
+    occurred_at: datetime
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    status: Optional[str] = None
+    reference_id: Optional[int] = None
+
+
+class MemberTimelineResponse(BaseModel):
+    items: List[MemberTimelineEvent]
+    total: int
+
+
+class MemberDeletionDependency(BaseModel):
+    key: str
+    label: str
+    count: int
+    severity: Literal["blocker", "warning"]
+    message: str
+
+
+class MemberPermanentDeleteImpact(BaseModel):
+    member_id: int
+    member_name: str
+    can_delete: bool
+    blockers: List[MemberDeletionDependency]
+    warnings: List[MemberDeletionDependency]
+
+
+class MemberImportLimits(BaseModel):
+    max_rows: int
+    max_file_size_mb: int
+
+
 class MemberDuplicateMatch(BaseModel):
     id: int
     first_name: str
@@ -596,6 +658,7 @@ class MemberMetaResponse(BaseModel):
     ministries: List[MinistryOut]
     households: List[HouseholdOut]
     father_confessors: List[PriestOut]
+    import_limits: MemberImportLimits
     contribution_exception_reasons: List[str]
 
 

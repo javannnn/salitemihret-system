@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, Download, Filter, Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
 
+import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
@@ -54,9 +55,12 @@ import {
   VOLUNTEER_SERVICE_OPTIONS,
 } from "@/lib/options";
 import {
+  formatCanadianPostalCode,
   getCanonicalCanadianPhone,
+  getCanadianPhoneSnapSuggestion,
+  getCanadianPhoneValidationMessage,
+  getCanadianPostalCodeValidationMessage,
   hasValidEmail,
-  isLikelyPhoneNumber,
   normalizeEmailInput,
 } from "@/lib/validation";
 
@@ -118,7 +122,7 @@ type StatusModalState = {
 
 type NewcomerListItem = NewcomerListResponse["items"][number];
 type SelectOption = { value: string; label: string };
-type BudgetDraft = { budget_slots: string; used_slots: string; budget_round_id: string };
+type BudgetDraft = { budget_slots: string; budget_round_id: string };
 type BudgetRoundDraft = {
   round_number: string;
   start_date: string;
@@ -136,6 +140,15 @@ const STATUS_STYLES: Record<Sponsorship["status"], string> = {
   Completed: "bg-zinc-50 text-zinc-600 border-zinc-200",
   Closed: "bg-neutral-50 text-neutral-600 border-neutral-200",
 };
+
+const BUDGET_CONSUMING_STATUSES = new Set<Sponsorship["status"]>([
+  "Submitted",
+  "Approved",
+  "Active",
+  "Suspended",
+  "Completed",
+  "Closed",
+]);
 
 const PAGE_SIZE = 12;
 const MONTH_OPTIONS = [
@@ -453,7 +466,117 @@ export default function SponsorshipWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const canView = permissions.viewSponsorships || permissions.manageSponsorships;
   const canManage = permissions.manageSponsorships;
+  const canViewBudgetRoundAdmin =
+    permissions.canReadField("sponsorships", "budget_rounds") ||
+    permissions.canWriteField("sponsorships", "budget_rounds");
+  const canManageBudgetRounds = permissions.canWriteField("sponsorships", "budget_rounds");
   const canApprove = permissions.hasRole("Admin") || permissions.isSuperAdmin;
+  const permissionLabel = (moduleLabel: string, actionLabel: "Read" | "Write", fieldLabel?: string) =>
+    fieldLabel ? `${moduleLabel} > ${fieldLabel}: ${actionLabel}` : `${moduleLabel}: ${actionLabel}`;
+  const formatPermissionRequest = useCallback(
+    (requiredPermissions: string[]) => [...new Set(requiredPermissions.filter(Boolean))].join(", "),
+    []
+  );
+  const permissionMessage = useCallback(
+    (action: string, requiredPermissions: string[]) => {
+      const permissionRequest = formatPermissionRequest(requiredPermissions);
+      return permissionRequest
+        ? `You do not have permission to ${action}. Ask your admin to enable: ${permissionRequest}.`
+        : `You do not have permission to ${action}.`;
+    },
+    [formatPermissionRequest]
+  );
+  const membersReadPermission = permissionLabel("Members", "Read");
+  const newcomersReadPermission = permissionLabel("Newcomers", "Read");
+  const newcomersWritePermission = permissionLabel("Newcomers", "Write");
+  const newcomerFirstNameWritePermission = permissionLabel("Newcomers", "Write", "First Name");
+  const newcomerLastNameWritePermission = permissionLabel("Newcomers", "Write", "Last Name");
+  const newcomerPhoneWritePermission = permissionLabel("Newcomers", "Write", "Phone");
+  const newcomerEmailWritePermission = permissionLabel("Newcomers", "Write", "Email");
+  const newcomerFamilySizeWritePermission = permissionLabel("Newcomers", "Write", "Family Size");
+  const newcomerLanguagesWritePermission = permissionLabel("Newcomers", "Write", "Languages");
+  const canSearchSponsors = Boolean(permissions.modules.members?.read);
+  const canSearchBeneficiaryMembers = Boolean(permissions.modules.members?.read);
+  const canSearchNewcomers = Boolean(permissions.modules.newcomers?.read);
+  const newcomerFieldAccess = useMemo(
+    () => ({
+      first_name: permissions.canWriteField("newcomers", "first_name"),
+      last_name: permissions.canWriteField("newcomers", "last_name"),
+      contact_phone: permissions.canWriteField("newcomers", "contact_phone"),
+      contact_email: permissions.canWriteField("newcomers", "contact_email"),
+      family_size: permissions.canWriteField("newcomers", "family_size"),
+      preferred_language: permissions.canWriteField("newcomers", "preferred_language"),
+      interpreter_required: permissions.canWriteField("newcomers", "interpreter_required"),
+    }),
+    [permissions]
+  );
+  const canQuickCreateNewcomer =
+    Boolean(permissions.modules.newcomers?.write) &&
+    newcomerFieldAccess.first_name &&
+    newcomerFieldAccess.last_name &&
+    (newcomerFieldAccess.contact_phone || newcomerFieldAccess.contact_email);
+  const newcomerQuickCreatePermissionNeeds = useMemo(() => {
+    const missingPermissions: string[] = [];
+    if (!permissions.modules.newcomers?.write) {
+      missingPermissions.push(newcomersWritePermission);
+    }
+    if (!newcomerFieldAccess.first_name) {
+      missingPermissions.push(newcomerFirstNameWritePermission);
+    }
+    if (!newcomerFieldAccess.last_name) {
+      missingPermissions.push(newcomerLastNameWritePermission);
+    }
+    if (!newcomerFieldAccess.contact_phone && !newcomerFieldAccess.contact_email) {
+      missingPermissions.push(`${newcomerPhoneWritePermission} or ${newcomerEmailWritePermission}`);
+    }
+    return missingPermissions;
+  }, [
+    newcomerEmailWritePermission,
+    newcomerFieldAccess,
+    newcomerFirstNameWritePermission,
+    newcomerLastNameWritePermission,
+    newcomerPhoneWritePermission,
+    newcomersWritePermission,
+    permissions.modules.newcomers?.write,
+  ]);
+  const newcomerQuickCreateHint = useMemo(() => {
+    if (newcomerQuickCreatePermissionNeeds.length === 0) {
+      return "";
+    }
+    return permissionMessage("create a newcomer from this sponsorship", newcomerQuickCreatePermissionNeeds);
+  }, [newcomerQuickCreatePermissionNeeds, permissionMessage]);
+  const beneficiaryPermissionNeeds = useMemo(() => {
+    const missingPermissions = new Set<string>();
+    if (!canSearchNewcomers) {
+      missingPermissions.add(newcomersReadPermission);
+    }
+    if (!canSearchBeneficiaryMembers) {
+      missingPermissions.add(membersReadPermission);
+    }
+    if (!canQuickCreateNewcomer) {
+      newcomerQuickCreatePermissionNeeds.forEach((permissionName) => missingPermissions.add(permissionName));
+    }
+    return [...missingPermissions];
+  }, [
+    canQuickCreateNewcomer,
+    canSearchBeneficiaryMembers,
+    canSearchNewcomers,
+    membersReadPermission,
+    newcomerQuickCreatePermissionNeeds,
+    newcomersReadPermission,
+  ]);
+  const sponsorSearchPermissionHint = permissionMessage("search co-sponsors", [membersReadPermission]);
+  const beneficiaryOptionsPermissionHint = permissionMessage(
+    "use some beneficiary options in this step",
+    beneficiaryPermissionNeeds
+  );
+  const existingNewcomerPermissionHint = permissionMessage("link an existing newcomer", [newcomersReadPermission]);
+  const memberLookupPermissionHint = permissionMessage("search members here", [membersReadPermission]);
+  const familySizePermissionHint = permissionMessage("edit family size", [newcomerFamilySizeWritePermission]);
+  const preferredLanguagePermissionHint = permissionMessage(
+    "edit preferred language",
+    [newcomerLanguagesWritePermission]
+  );
 
   const viewParam = searchParams.get("view");
   const [activeView, setActiveView] = useState<"cases" | "budget">(
@@ -525,6 +648,13 @@ export default function SponsorshipWorkspace() {
   const [memberSearchLoading, setMemberSearchLoading] = useState(false);
   const [newcomerForm, setNewcomerForm] = useState<NewcomerQuickForm>(emptyNewcomerForm);
   const [newcomerFieldErrors, setNewcomerFieldErrors] = useState<NewcomerQuickErrors>({});
+  const newcomerPhoneSnapSuggestion = useMemo(() => {
+    const value = newcomerForm.contact_phone.trim();
+    if (!value || getCanonicalCanadianPhone(value)) {
+      return null;
+    }
+    return getCanadianPhoneSnapSuggestion(value);
+  }, [newcomerForm.contact_phone]);
 
   const [statusModal, setStatusModal] = useState<StatusModalState>({
     open: false,
@@ -767,9 +897,15 @@ export default function SponsorshipWorkspace() {
       setSponsorSearchError(null);
       setSponsorSearchLoading(false);
     }
-  }, [sponsorSearch]);
+  }, [canSearchSponsors, sponsorSearch]);
 
   useEffect(() => {
+    if (!canSearchSponsors) {
+      setSponsorSearchLoading(false);
+      setSponsorResults([]);
+      setSponsorSearchError(null);
+      return;
+    }
     if (!debouncedSponsorSearch) return;
     let active = true;
     setSponsorSearchLoading(true);
@@ -794,16 +930,24 @@ export default function SponsorshipWorkspace() {
     return () => {
       active = false;
     };
-  }, [debouncedSponsorSearch]);
+  }, [canSearchSponsors, debouncedSponsorSearch]);
 
   useEffect(() => {
+    if (!canSearchBeneficiaryMembers) {
+      setMemberResults([]);
+      setMemberSearchLoading(false);
+      return;
+    }
     if (!memberSearch.trim() || wizardForm.beneficiary_mode !== "member") {
       setMemberResults([]);
       setMemberSearchLoading(false);
     }
-  }, [memberSearch, wizardForm.beneficiary_mode]);
+  }, [canSearchBeneficiaryMembers, memberSearch, wizardForm.beneficiary_mode]);
 
   useEffect(() => {
+    if (!canSearchBeneficiaryMembers) {
+      return;
+    }
     if (!debouncedMemberSearch || wizardForm.beneficiary_mode !== "member") {
       return;
     }
@@ -824,16 +968,24 @@ export default function SponsorshipWorkspace() {
     return () => {
       active = false;
     };
-  }, [debouncedMemberSearch, wizardForm.beneficiary_mode]);
+  }, [canSearchBeneficiaryMembers, debouncedMemberSearch, wizardForm.beneficiary_mode]);
 
   useEffect(() => {
+    if (!canSearchNewcomers) {
+      setBeneficiaryResults(null);
+      setBeneficiaryLoading(false);
+      return;
+    }
     if (!beneficiarySearch.trim() || wizardForm.beneficiary_mode !== "newcomer_existing") {
       setBeneficiaryResults(null);
       setBeneficiaryLoading(false);
     }
-  }, [beneficiarySearch, wizardForm.beneficiary_mode]);
+  }, [beneficiarySearch, canSearchNewcomers, wizardForm.beneficiary_mode]);
 
   useEffect(() => {
+    if (!canSearchNewcomers) {
+      return;
+    }
     if (!debouncedBeneficiarySearch || wizardForm.beneficiary_mode !== "newcomer_existing") {
       return;
     }
@@ -854,7 +1006,7 @@ export default function SponsorshipWorkspace() {
     return () => {
       active = false;
     };
-  }, [debouncedBeneficiarySearch, wizardForm.beneficiary_mode]);
+  }, [canSearchNewcomers, debouncedBeneficiarySearch, wizardForm.beneficiary_mode]);
 
   useEffect(() => {
     const draftParam = searchParams.get("draft");
@@ -981,6 +1133,34 @@ export default function SponsorshipWorkspace() {
     if (!wizardForm.budget_round_id) return null;
     return budgetRoundLookup.get(wizardForm.budget_round_id) ?? null;
   }, [budgetRoundLookup, wizardForm.budget_round_id]);
+  const sponsorshipConsumesBudget = useCallback(
+    (status: Sponsorship["status"]) => BUDGET_CONSUMING_STATUSES.has(status),
+    []
+  );
+  const getAvailableSlotsForRound = useCallback(
+    (round: SponsorshipBudgetRound, sponsorship?: Sponsorship) => {
+      const currentUsage =
+        sponsorship &&
+        sponsorshipConsumesBudget(sponsorship.status) &&
+        sponsorship.budget_round_id === round.id
+          ? sponsorship.used_slots || 0
+          : 0;
+      return Math.max((round.slot_budget || 0) - (round.used_slots || 0) + currentUsage, 0);
+    },
+    [sponsorshipConsumesBudget]
+  );
+  const selectedWizardRoundRemainingSlots = useMemo(() => {
+    if (!selectedWizardRound) return null;
+    return Math.max((selectedWizardRound.slot_budget || 0) - (selectedWizardRound.used_slots || 0), 0);
+  }, [selectedWizardRound]);
+  const availableBudgetRounds = useMemo(
+    () => budgetRounds.filter((round) => (round.used_slots || 0) < (round.slot_budget || 0)),
+    [budgetRounds]
+  );
+  const allBudgetRoundsFull = useMemo(
+    () => budgetRounds.length > 0 && availableBudgetRounds.length === 0,
+    [availableBudgetRounds.length, budgetRounds.length]
+  );
 
   useEffect(() => {
     if (!wizardForm.budget_round_id) return;
@@ -1142,7 +1322,6 @@ export default function SponsorshipWorkspace() {
       return (
         budgetEdits[item.id] ?? {
           budget_slots: item.budget_slots ? String(item.budget_slots) : "",
-          used_slots: item.used_slots !== undefined && item.used_slots !== null ? String(item.used_slots) : "",
           budget_round_id: item.budget_round_id ? String(item.budget_round_id) : "",
         }
       );
@@ -1152,7 +1331,7 @@ export default function SponsorshipWorkspace() {
 
   const handleBudgetFieldChange = (id: number, field: keyof BudgetDraft, value: string) => {
     setBudgetEdits((prev) => {
-      const current = prev[id] ?? { budget_slots: "", used_slots: "", budget_round_id: "" };
+      const current = prev[id] ?? { budget_slots: "", budget_round_id: "" };
       return { ...prev, [id]: { ...current, [field]: value } };
     });
   };
@@ -1160,41 +1339,49 @@ export default function SponsorshipWorkspace() {
   const handleBudgetSave = async (item: Sponsorship) => {
     const draft = getBudgetDraft(item);
     const nextSlots = draft.budget_slots.trim();
-    const nextUsed = draft.used_slots.trim();
     const nextRound = draft.budget_round_id.trim();
+    const nextRoundId = nextRound ? Number(nextRound) : null;
+    const itemConsumesBudget = sponsorshipConsumesBudget(item.status);
+    const selectedRound =
+      nextRoundId && Number.isFinite(nextRoundId) && nextRoundId > 0
+        ? budgetRounds.find((round) => round.id === nextRoundId) ?? null
+        : null;
+    const resolvedBudgetSlots = nextSlots
+      ? Number(nextSlots)
+      : item.budget_slots || (selectedRound ? 1 : null);
     const payload: Partial<SponsorshipPayload> = {};
 
     if (nextSlots) {
-      const parsed = Number(nextSlots);
-      if (!Number.isFinite(parsed) || parsed < 1) {
+      if (!Number.isFinite(resolvedBudgetSlots) || (resolvedBudgetSlots ?? 0) < 1) {
         toast.push("Budget slots must be a positive number.");
         return;
       }
-      payload.budget_slots = parsed;
-    }
-    if (nextUsed !== "") {
-      const parsed = Number(nextUsed);
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        toast.push("Used slots must be a non-negative number.");
-        return;
-      }
-      const slotLimit = payload.budget_slots ?? item.budget_slots;
-      if (slotLimit && parsed > slotLimit) {
-        toast.push("Used slots cannot exceed budget slots.");
-        return;
-      }
-      payload.used_slots = parsed;
+      payload.budget_slots = resolvedBudgetSlots;
     }
     if (nextRound !== String(item.budget_round_id ?? "")) {
       if (nextRound) {
-        const parsed = Number(nextRound);
-        if (!Number.isFinite(parsed) || parsed < 1) {
+        if (!Number.isFinite(nextRoundId) || (nextRoundId ?? 0) < 1) {
           toast.push("Select a valid budget round.");
           return;
         }
-        payload.budget_round_id = parsed;
+        payload.budget_round_id = nextRoundId;
       } else {
         payload.budget_round_id = null;
+      }
+    }
+    if (itemConsumesBudget && !selectedRound && payload.budget_round_id === null) {
+      toast.push("This sponsorship must stay assigned to a budget round while it is submitted or active.");
+      return;
+    }
+    if (selectedRound && resolvedBudgetSlots) {
+      const availableSlots = getAvailableSlotsForRound(selectedRound, item);
+      if (resolvedBudgetSlots > availableSlots) {
+        toast.push(
+          `Round ${selectedRound.round_number} (${selectedRound.year}) only has ${availableSlots} remaining slot${
+            availableSlots === 1 ? "" : "s"
+          }. Create the next round before increasing this case further.`
+        );
+        return;
       }
     }
     if (Object.keys(payload).length === 0) {
@@ -1217,7 +1404,11 @@ export default function SponsorshipWorkspace() {
       toast.push("Budget updated.");
     } catch (error) {
       console.error(error);
-      toast.push("Unable to update budget.");
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Unable to update budget.");
+      } else {
+        toast.push("Unable to update budget.");
+      }
     } finally {
       setBudgetSavingId(null);
     }
@@ -1272,7 +1463,7 @@ export default function SponsorshipWorkspace() {
   };
 
   const handleRoundSave = async (round: SponsorshipBudgetRound) => {
-    if (!canManage) return;
+    if (!canManageBudgetRounds) return;
     const draft = getRoundDraft(round);
     const errorMessage = validateRoundDraft(draft, budgetRounds, round.id);
     if (errorMessage) {
@@ -1308,7 +1499,7 @@ export default function SponsorshipWorkspace() {
   };
 
   const handleRoundCreate = async () => {
-    if (!canManage) return;
+    if (!canManageBudgetRounds) return;
     const errorMessage = validateRoundDraft(newRoundDraft, budgetRounds);
     if (errorMessage) {
       toast.push(errorMessage);
@@ -1342,7 +1533,7 @@ export default function SponsorshipWorkspace() {
   };
 
   const handleRoundDelete = async (round: SponsorshipBudgetRound) => {
-    if (!canManage) return;
+    if (!canManageBudgetRounds) return;
     const confirmed = window.confirm(`Remove Round ${round.round_number} for ${round.year}?`);
     if (!confirmed) return;
     setRoundDeletingId(round.id);
@@ -1514,6 +1705,11 @@ export default function SponsorshipWorkspace() {
   };
 
   const handleCreateNewcomer = async () => {
+    if (!canQuickCreateNewcomer) {
+      setWizardError(newcomerQuickCreateHint || permissionMessage("create a newcomer from this sponsorship", [newcomersWritePermission]));
+      return;
+    }
+
     const fieldErrors: NewcomerQuickErrors = {};
     const firstName = newcomerForm.first_name.trim();
     const lastName = newcomerForm.last_name.trim();
@@ -1521,32 +1717,54 @@ export default function SponsorshipWorkspace() {
     const normalizedEmail = emailInput ? normalizeEmailInput(emailInput) : "";
     const phoneInput = newcomerForm.contact_phone.trim();
     const canonicalPhone = phoneInput ? getCanonicalCanadianPhone(phoneInput) : null;
+    const phoneValidationMessage = phoneInput ? getCanadianPhoneValidationMessage(phoneInput, "Phone") : null;
+    const postalCodeInput = newcomerForm.temporary_address_postal_code.trim();
+    const formattedPostalCode = formatCanadianPostalCode(postalCodeInput);
+    const postalCodeValidationMessage = postalCodeInput
+      ? getCanadianPostalCodeValidationMessage(postalCodeInput)
+      : null;
 
-    if (!firstName) {
+    if (newcomerFieldAccess.first_name && !firstName) {
       fieldErrors.first_name = "First name is required.";
     }
-    if (!lastName) {
+    if (newcomerFieldAccess.last_name && !lastName) {
       fieldErrors.last_name = "Last name is required.";
     }
-    if (emailInput && !hasValidEmail(normalizedEmail)) {
+    if (newcomerFieldAccess.contact_email && emailInput && !hasValidEmail(normalizedEmail)) {
       fieldErrors.contact_email = "Enter a valid email address.";
     }
-    if (phoneInput && !canonicalPhone && !isLikelyPhoneNumber(phoneInput)) {
-      fieldErrors.contact_phone = "Enter a valid phone number (ex: +1 5551234567).";
+    if (newcomerFieldAccess.contact_phone && phoneInput && !canonicalPhone) {
+      fieldErrors.contact_phone =
+        phoneValidationMessage || "Enter a valid Canadian phone number in +1########## format.";
     }
-    if (newcomerForm.family_size) {
+    if (newcomerFieldAccess.family_size && newcomerForm.family_size) {
       const size = Number(newcomerForm.family_size);
       if (!Number.isInteger(size) || size < 1 || size > 20) {
         fieldErrors.family_size = "Family size must be between 1 and 20.";
       }
     }
+    if (postalCodeValidationMessage) {
+      fieldErrors.temporary_address_postal_code = postalCodeValidationMessage;
+    }
 
-    const missingContact = !phoneInput && !emailInput;
+    const missingContact = newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email
+      ? !phoneInput && !emailInput
+      : newcomerFieldAccess.contact_phone
+        ? !phoneInput
+        : newcomerFieldAccess.contact_email
+          ? !emailInput
+          : false;
     const hasFieldErrors = Object.keys(fieldErrors).length > 0;
     if (missingContact || hasFieldErrors) {
       setNewcomerFieldErrors(fieldErrors);
       if (missingContact) {
-        setWizardError("Provide a phone or email for the newcomer.");
+        setWizardError(
+          newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email
+            ? "Provide a phone or email for the newcomer."
+            : newcomerFieldAccess.contact_phone
+              ? "Provide a phone number for the newcomer."
+              : "Provide an email address for the newcomer."
+        );
       } else {
         setWizardError("Fix the highlighted fields.");
       }
@@ -1560,17 +1778,27 @@ export default function SponsorshipWorkspace() {
       const newcomer = await createNewcomer({
         first_name: firstName,
         last_name: lastName,
-        family_size: newcomerForm.family_size ? Number(newcomerForm.family_size) : undefined,
-        contact_phone: canonicalPhone || phoneInput || undefined,
-        contact_email: normalizedEmail || undefined,
-        preferred_language: newcomerForm.preferred_language || undefined,
-        interpreter_required: newcomerForm.interpreter_required,
-        country: newcomerForm.country || undefined,
-        county: newcomerForm.county || undefined,
-        temporary_address_street: newcomerForm.temporary_address_street || undefined,
-        temporary_address_city: newcomerForm.temporary_address_city || undefined,
-        temporary_address_province: newcomerForm.temporary_address_province || undefined,
-        temporary_address_postal_code: newcomerForm.temporary_address_postal_code || undefined,
+        ...(newcomerFieldAccess.family_size && newcomerForm.family_size
+          ? { family_size: Number(newcomerForm.family_size) }
+          : {}),
+        ...(newcomerFieldAccess.contact_phone && (canonicalPhone || phoneInput)
+          ? { contact_phone: canonicalPhone || phoneInput }
+          : {}),
+        ...(newcomerFieldAccess.contact_email && normalizedEmail
+          ? { contact_email: normalizedEmail }
+          : {}),
+        ...(newcomerFieldAccess.preferred_language && newcomerForm.preferred_language
+          ? { preferred_language: newcomerForm.preferred_language }
+          : {}),
+        ...(newcomerFieldAccess.interpreter_required
+          ? { interpreter_required: newcomerForm.interpreter_required }
+          : {}),
+        ...(newcomerForm.country ? { country: newcomerForm.country } : {}),
+        ...(newcomerForm.county ? { county: newcomerForm.county } : {}),
+        ...(newcomerForm.temporary_address_street ? { temporary_address_street: newcomerForm.temporary_address_street } : {}),
+        ...(newcomerForm.temporary_address_city ? { temporary_address_city: newcomerForm.temporary_address_city } : {}),
+        ...(newcomerForm.temporary_address_province ? { temporary_address_province: newcomerForm.temporary_address_province } : {}),
+        ...(formattedPostalCode ? { temporary_address_postal_code: formattedPostalCode } : {}),
         arrival_date: new Date().toISOString().slice(0, 10),
       });
       setWizardForm((prev) => ({
@@ -1619,6 +1847,32 @@ export default function SponsorshipWorkspace() {
       setWizardError("Provide a reason when the last sponsorship was rejected.");
       return;
     }
+    const resolvedBudgetSlots = wizardForm.budget_round_id ? Number(wizardForm.budget_slots || "1") : undefined;
+    if (status !== "Draft") {
+      if (!wizardForm.budget_round_id) {
+        setWizardError(
+          "This sponsorship cannot be submitted until a budget round with available slots is selected. Ask an admin to create a new round if the current ones are full."
+        );
+        return;
+      }
+      if (!selectedWizardRound) {
+        setWizardError("Select a valid budget round before submitting this sponsorship.");
+        return;
+      }
+      if (!resolvedBudgetSlots || !Number.isFinite(resolvedBudgetSlots) || resolvedBudgetSlots < 1) {
+        setWizardError("Select a valid number of budget slots before submitting this sponsorship.");
+        return;
+      }
+      const remainingSlots = selectedWizardRoundRemainingSlots ?? 0;
+      if (resolvedBudgetSlots > remainingSlots) {
+        setWizardError(
+          `Round ${selectedWizardRound.round_number} (${selectedWizardRound.year}) only has ${remainingSlots} remaining slot${
+            remainingSlots === 1 ? "" : "s"
+          }. Ask an admin to create the next round or choose another round with enough capacity.`
+        );
+        return;
+      }
+    }
     setWizardLoading(true);
     setWizardError(null);
     const submitPayload = (statusToSend: Sponsorship["status"]) => ({
@@ -1643,7 +1897,7 @@ export default function SponsorshipWorkspace() {
         budget_month: wizardForm.budget_month ? Number(wizardForm.budget_month) : undefined,
         budget_year: wizardForm.budget_year ? Number(wizardForm.budget_year) : undefined,
         budget_round_id: wizardForm.budget_round_id ? Number(wizardForm.budget_round_id) : null,
-        budget_slots: wizardForm.budget_slots ? Number(wizardForm.budget_slots) : undefined,
+        budget_slots: resolvedBudgetSlots,
         notes: wizardForm.notes || undefined,
         status: statusToSend,
       });
@@ -2128,220 +2382,226 @@ export default function SponsorshipWorkspace() {
 
       {activeView === "budget" && (
         <div className="space-y-4">
-          <Card className="p-4 space-y-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase text-mute">Slot budget setup</p>
-                <p className="text-sm text-mute">
-                  Define how many sponsorship slots the church will allocate per round. Use 2–3 rounds for the year when needed.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-end gap-3">
+          {canViewBudgetRoundAdmin ? (
+            <Card className="p-4 space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Budget year</label>
-                  <Select value={roundYear} onChange={(event) => setRoundYear(event.target.value)}>
-                    {YEAR_OPTIONS.map((year) => (
-                      <option key={year} value={String(year)}>
-                        {year}
-                      </option>
-                    ))}
-                  </Select>
+                  <p className="text-xs uppercase text-mute">Slot budget setup</p>
+                  <p className="text-sm text-mute">
+                    Define how many sponsorship slots the church will allocate per round. Use 2–3 rounds for the year when needed.
+                  </p>
                 </div>
-                <Button variant="ghost" onClick={() => setRoundRefreshTick((prev) => prev + 1)}>
-                  Refresh rounds
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <Card className="p-3">
-                <p className="text-xs uppercase text-mute">Configured rounds</p>
-                <p className="text-xl font-semibold">{budgetRoundTotals.rounds}</p>
-              </Card>
-              <Card className="p-3">
-                <p className="text-xs uppercase text-mute">Slot budget</p>
-                <p className="text-xl font-semibold">{budgetRoundTotals.slots}</p>
-              </Card>
-              <Card className="p-3">
-                <p className="text-xs uppercase text-mute">Used slots</p>
-                <p className="text-xl font-semibold">{budgetRoundTotals.used}</p>
-              </Card>
-              <Card className="p-3">
-                <p className="text-xs uppercase text-mute">Utilization</p>
-                <p className="text-xl font-semibold">{budgetRoundTotals.utilization}%</p>
-              </Card>
-            </div>
-
-            <div className="overflow-x-auto border border-border rounded-xl">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-mute">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Round</th>
-                    <th className="px-4 py-2 text-left">Start date</th>
-                    <th className="px-4 py-2 text-left">End date</th>
-                    <th className="px-4 py-2 text-left">Slot budget</th>
-                    <th className="px-4 py-2 text-left">Allocated</th>
-                    <th className="px-4 py-2 text-left">Used</th>
-                    <th className="px-4 py-2 text-left">Utilization</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roundsLoading ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
-                        <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
-                        Loading rounds...
-                      </td>
-                    </tr>
-                  ) : budgetRounds.length ? (
-                    budgetRounds.map((round) => {
-                      const draft = getRoundDraft(round);
-                      const saving = roundSavingId === round.id;
-                      const deleting = roundDeletingId === round.id;
-                      return (
-                        <tr key={round.id} className="border-t border-border/60">
-                          <td className="px-4 py-2">
-                            {canManage ? (
-                              <Select
-                                value={draft.round_number}
-                                onChange={(event) => handleRoundFieldChange(round, "round_number", event.target.value)}
-                              >
-                                {ROUND_OPTIONS.map((option) => (
-                                  <option key={option} value={option}>
-                                    Round {option}
-                                  </option>
-                                ))}
-                              </Select>
-                            ) : (
-                              <span>Round {round.round_number}</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            {canManage ? (
-                              <Input
-                                type="date"
-                                value={draft.start_date}
-                                onChange={(event) => handleRoundFieldChange(round, "start_date", event.target.value)}
-                              />
-                            ) : (
-                              formatDate(round.start_date)
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            {canManage ? (
-                              <Input
-                                type="date"
-                                value={draft.end_date}
-                                onChange={(event) => handleRoundFieldChange(round, "end_date", event.target.value)}
-                              />
-                            ) : (
-                              formatDate(round.end_date)
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            {canManage ? (
-                              <Input
-                                type="number"
-                                min={1}
-                                value={draft.slot_budget}
-                                onChange={(event) => handleRoundFieldChange(round, "slot_budget", event.target.value)}
-                              />
-                            ) : (
-                              round.slot_budget
-                            )}
-                          </td>
-                          <td className="px-4 py-2">{round.allocated_slots}</td>
-                          <td className="px-4 py-2">{round.used_slots}</td>
-                          <td className="px-4 py-2">{round.utilization_percent}%</td>
-                          <td className="px-4 py-2">
-                            {canManage ? (
-                              <div className="flex gap-2">
-                                <Button size="sm" onClick={() => handleRoundSave(round)} disabled={saving}>
-                                  {saving ? "Saving..." : "Save"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleRoundDelete(round)}
-                                  disabled={deleting}
-                                >
-                                  {deleting ? "Removing..." : "Remove"}
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-mute">No edit access</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
-                        No rounds configured for {roundYear} yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {roundsError && <p className="text-xs text-rose-600">{roundsError}</p>}
-
-            {canManage && (
-              <div className="border-t border-border pt-4 space-y-3">
-                <p className="text-sm font-medium">Add a round</p>
-                <div className="grid gap-3 md:grid-cols-5">
+                <div className="flex flex-wrap items-end gap-3">
                   <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Round</label>
-                    <Select
-                      value={newRoundDraft.round_number}
-                      onChange={(event) =>
-                        setNewRoundDraft((prev) => ({ ...prev, round_number: event.target.value }))
-                      }
-                    >
-                      <option value="">Select</option>
-                      {ROUND_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          Round {option}
+                    <label className="text-xs uppercase text-mute block mb-1">Budget year</label>
+                    <Select value={roundYear} onChange={(event) => setRoundYear(event.target.value)}>
+                      {YEAR_OPTIONS.map((year) => (
+                        <option key={year} value={String(year)}>
+                          {year}
                         </option>
                       ))}
                     </Select>
                   </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Start date</label>
-                    <Input
-                      type="date"
-                      value={newRoundDraft.start_date}
-                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, start_date: event.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">End date</label>
-                    <Input
-                      type="date"
-                      value={newRoundDraft.end_date}
-                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, end_date: event.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Slot budget</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={newRoundDraft.slot_budget}
-                      onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, slot_budget: event.target.value }))}
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <Button onClick={handleRoundCreate} disabled={roundSavingId === "new"}>
-                      {roundSavingId === "new" ? "Adding..." : "Add round"}
-                    </Button>
-                  </div>
+                  <Button variant="ghost" onClick={() => setRoundRefreshTick((prev) => prev + 1)}>
+                    Refresh rounds
+                  </Button>
                 </div>
               </div>
-            )}
-          </Card>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <Card className="p-3">
+                  <p className="text-xs uppercase text-mute">Configured rounds</p>
+                  <p className="text-xl font-semibold">{budgetRoundTotals.rounds}</p>
+                </Card>
+                <Card className="p-3">
+                  <p className="text-xs uppercase text-mute">Slot budget</p>
+                  <p className="text-xl font-semibold">{budgetRoundTotals.slots}</p>
+                </Card>
+                <Card className="p-3">
+                  <p className="text-xs uppercase text-mute">Used slots</p>
+                  <p className="text-xl font-semibold">{budgetRoundTotals.used}</p>
+                </Card>
+                <Card className="p-3">
+                  <p className="text-xs uppercase text-mute">Utilization</p>
+                  <p className="text-xl font-semibold">{budgetRoundTotals.utilization}%</p>
+                </Card>
+              </div>
+
+              <div className="overflow-x-auto border border-border rounded-xl">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-mute">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Round</th>
+                      <th className="px-4 py-2 text-left">Start date</th>
+                      <th className="px-4 py-2 text-left">End date</th>
+                      <th className="px-4 py-2 text-left">Slot budget</th>
+                      <th className="px-4 py-2 text-left">Allocated</th>
+                      <th className="px-4 py-2 text-left">Used</th>
+                      <th className="px-4 py-2 text-left">Utilization</th>
+                      <th className="px-4 py-2 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roundsLoading ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                          <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                          Loading rounds...
+                        </td>
+                      </tr>
+                    ) : budgetRounds.length ? (
+                      budgetRounds.map((round) => {
+                        const draft = getRoundDraft(round);
+                        const saving = roundSavingId === round.id;
+                        const deleting = roundDeletingId === round.id;
+                        return (
+                          <tr key={round.id} className="border-t border-border/60">
+                            <td className="px-4 py-2">
+                              {canManageBudgetRounds ? (
+                                <Select
+                                  value={draft.round_number}
+                                  onChange={(event) => handleRoundFieldChange(round, "round_number", event.target.value)}
+                                >
+                                  {ROUND_OPTIONS.map((option) => (
+                                    <option key={option} value={option}>
+                                      Round {option}
+                                    </option>
+                                  ))}
+                                </Select>
+                              ) : (
+                                <span>Round {round.round_number}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              {canManageBudgetRounds ? (
+                                <Input
+                                  type="date"
+                                  value={draft.start_date}
+                                  onChange={(event) => handleRoundFieldChange(round, "start_date", event.target.value)}
+                                />
+                              ) : (
+                                formatDate(round.start_date)
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              {canManageBudgetRounds ? (
+                                <Input
+                                  type="date"
+                                  value={draft.end_date}
+                                  onChange={(event) => handleRoundFieldChange(round, "end_date", event.target.value)}
+                                />
+                              ) : (
+                                formatDate(round.end_date)
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              {canManageBudgetRounds ? (
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  value={draft.slot_budget}
+                                  onChange={(event) => handleRoundFieldChange(round, "slot_budget", event.target.value)}
+                                />
+                              ) : (
+                                round.slot_budget
+                              )}
+                            </td>
+                            <td className="px-4 py-2">{round.allocated_slots}</td>
+                            <td className="px-4 py-2">{round.used_slots}</td>
+                            <td className="px-4 py-2">{round.utilization_percent}%</td>
+                            <td className="px-4 py-2">
+                              {canManageBudgetRounds ? (
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => handleRoundSave(round)} disabled={saving}>
+                                    {saving ? "Saving..." : "Save"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleRoundDelete(round)}
+                                    disabled={deleting}
+                                  >
+                                    {deleting ? "Removing..." : "Remove"}
+                                  </Button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-mute">Read only</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                          No rounds configured for {roundYear} yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {roundsError && <p className="text-xs text-rose-600">{roundsError}</p>}
+
+              {canManageBudgetRounds && (
+                <div className="border-t border-border pt-4 space-y-3">
+                  <p className="text-sm font-medium">Add a round</p>
+                  <div className="grid gap-3 md:grid-cols-5">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Round</label>
+                      <Select
+                        value={newRoundDraft.round_number}
+                        onChange={(event) =>
+                          setNewRoundDraft((prev) => ({ ...prev, round_number: event.target.value }))
+                        }
+                      >
+                        <option value="">Select</option>
+                        {ROUND_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            Round {option}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Start date</label>
+                      <Input
+                        type="date"
+                        value={newRoundDraft.start_date}
+                        onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, start_date: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">End date</label>
+                      <Input
+                        type="date"
+                        value={newRoundDraft.end_date}
+                        onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, end_date: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Slot budget</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={newRoundDraft.slot_budget}
+                        onChange={(event) => setNewRoundDraft((prev) => ({ ...prev, slot_budget: event.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button onClick={handleRoundCreate} disabled={roundSavingId === "new"}>
+                        {roundSavingId === "new" ? "Adding..." : "Add round"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ) : (
+            <Card className="p-4 text-sm text-mute">
+              Budget round setup is restricted to roles with Sponsorships &gt; Budget Rounds access. Existing rounds still appear in the wizard and case budgeting screens.
+            </Card>
+          )}
 
           <Card className="p-4">
             <div className="flex flex-wrap items-end gap-3">
@@ -2376,7 +2636,7 @@ export default function SponsorshipWorkspace() {
               </Button>
             </div>
             <p className="mt-3 text-xs text-mute">
-              Manage case-level slot allocations for the selected period.
+              Manage round assignments and slot requests. Used slots are consumed automatically when a case moves out of draft.
             </p>
           </Card>
 
@@ -2426,6 +2686,7 @@ export default function SponsorshipWorkspace() {
                     budgetCases.items.map((item) => {
                       const draft = getBudgetDraft(item);
                       const saving = budgetSavingId === item.id;
+                      const itemConsumesBudget = sponsorshipConsumesBudget(item.status);
                       return (
                         <tr key={item.id} className="border-t border-border/60">
                           <td className="px-4 py-2 font-medium">SP-{String(item.id).padStart(4, "0")}</td>
@@ -2443,13 +2704,20 @@ export default function SponsorshipWorkspace() {
                               value={draft.budget_round_id}
                               onChange={(event) => handleBudgetFieldChange(item.id, "budget_round_id", event.target.value)}
                             >
-                              <option value="">No round</option>
+                              <option value="" disabled={itemConsumesBudget}>No round</option>
                               {budgetRounds.map((round) => (
-                                <option key={round.id} value={String(round.id)}>
-                                  Round {round.round_number} ({round.year}) • {round.slot_budget} slots
+                                <option
+                                  key={round.id}
+                                  value={String(round.id)}
+                                  disabled={getAvailableSlotsForRound(round, item) <= 0 && String(round.id) !== draft.budget_round_id}
+                                >
+                                  Round {round.round_number} ({round.year}) • {getAvailableSlotsForRound(round, item)} remaining
                                 </option>
                               ))}
                             </Select>
+                            {itemConsumesBudget && (
+                              <p className="text-[11px] text-mute mt-1">This sponsorship must stay assigned to a round.</p>
+                            )}
                           </td>
                           <td className="px-4 py-2">
                             <Input
@@ -2460,12 +2728,8 @@ export default function SponsorshipWorkspace() {
                             />
                           </td>
                           <td className="px-4 py-2">
-                            <Input
-                              type="number"
-                              min={0}
-                              value={draft.used_slots}
-                              onChange={(event) => handleBudgetFieldChange(item.id, "used_slots", event.target.value)}
-                            />
+                            <span className="font-medium">{item.used_slots}</span>
+                            <p className="text-[11px] text-mute">System managed</p>
                           </td>
                           <td className="px-4 py-2">
                             <Button
@@ -2527,10 +2791,16 @@ export default function SponsorshipWorkspace() {
                     <div>
                       <label className="text-xs uppercase text-mute block mb-1">Co-sponsor search</label>
                     <Input
-                      placeholder="Search member by name"
+                      placeholder={canSearchSponsors ? "Search member by name" : "You do not have permission to search co-sponsors"}
                       value={sponsorSearch}
+                      disabled={!canSearchSponsors}
                       onChange={(event) => setSponsorSearch(event.target.value)}
                     />
+                    {!canSearchSponsors && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {sponsorSearchPermissionHint}
+                      </p>
+                    )}
                     {sponsorSearchLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
                     {!sponsorSearchLoading && sponsorSearchError && (
                       <p className="text-xs text-rose-600 mt-1">{sponsorSearchError}</p>
@@ -2713,58 +2983,103 @@ export default function SponsorshipWorkspace() {
                   <div className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-3">
                       <Card
-                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "newcomer_existing" ? "border-accent" : "border-border"}`}
-                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_existing" }))}
+                        className={`p-4 border-2 transition ${
+                          canSearchNewcomers
+                            ? `cursor-pointer ${wizardForm.beneficiary_mode === "newcomer_existing" ? "border-accent" : "border-border"}`
+                            : "cursor-not-allowed border-dashed border-slate-300 opacity-60"
+                        }`}
+                        onClick={() => {
+                          if (!canSearchNewcomers) return;
+                          setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_existing" }));
+                        }}
                       >
                         <p className="font-medium">Link existing newcomer</p>
-                        <p className="text-xs text-mute">Search and select a current newcomer.</p>
+                        <p className="text-xs text-mute">
+                          {canSearchNewcomers ? "Search and select a current newcomer." : existingNewcomerPermissionHint}
+                        </p>
                       </Card>
                       <Card
-                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "newcomer_create" ? "border-accent" : "border-border"}`}
-                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_create" }))}
+                        className={`p-4 border-2 transition ${
+                          canQuickCreateNewcomer
+                            ? `cursor-pointer ${wizardForm.beneficiary_mode === "newcomer_create" ? "border-accent" : "border-border"}`
+                            : "cursor-not-allowed border-dashed border-slate-300 opacity-60"
+                        }`}
+                        onClick={() => {
+                          if (!canQuickCreateNewcomer) return;
+                          setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_create" }));
+                        }}
                       >
                         <p className="font-medium">Create newcomer now</p>
-                        <p className="text-xs text-mute">Quick intake and link the case.</p>
+                        <p className="text-xs text-mute">
+                          {canQuickCreateNewcomer ? "Quick intake and link the case." : newcomerQuickCreateHint}
+                        </p>
                       </Card>
                       <Card
                         className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "member" || wizardForm.beneficiary_mode === "external" ? "border-accent" : "border-border"}`}
-                        onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}
+                        onClick={() =>
+                          setWizardForm((prev) => ({
+                            ...prev,
+                            beneficiary_mode: canSearchBeneficiaryMembers ? "member" : "external",
+                          }))
+                        }
                       >
                         <p className="font-medium">External or member</p>
-                        <p className="text-xs text-mute">Select a member or enter external immigrant.</p>
+                        <p className="text-xs text-mute">
+                          {canSearchBeneficiaryMembers
+                            ? "Select a member or enter external immigrant."
+                            : `Member search is not available to you here. Ask your admin to enable: ${membersReadPermission}.`}
+                        </p>
                       </Card>
                     </div>
+
+                    {(!canSearchNewcomers || !canQuickCreateNewcomer || !canSearchBeneficiaryMembers) && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-800">
+                        {beneficiaryOptionsPermissionHint}
+                      </div>
+                    )}
 
                     {wizardForm.beneficiary_mode === "newcomer_existing" && (
                       <div>
                         <label className="text-xs uppercase text-mute block mb-1">Search newcomer</label>
-                        <Input
-                          placeholder="Search by name"
-                          value={beneficiarySearch}
-                          onChange={(event) => setBeneficiarySearch(event.target.value)}
-                        />
-                        {beneficiaryLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
-                        {beneficiaryResults?.items?.length ? (
-                          <div className="mt-2 border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
-                            {beneficiaryResults.items.map((newcomer) => (
-                              <button
-                                key={newcomer.id}
-                                type="button"
-                                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
-                                  wizardForm.newcomer_id === newcomer.id ? "bg-accent/10" : ""
-                                }`}
-                                onClick={() => handleNewcomerSelect(newcomer)}
-                              >
-                                {newcomer.first_name} {newcomer.last_name} • {newcomer.status}
-                              </button>
-                            ))}
+                        {canSearchNewcomers ? (
+                          <>
+                            <Input
+                              placeholder="Search by name"
+                              value={beneficiarySearch}
+                              onChange={(event) => setBeneficiarySearch(event.target.value)}
+                            />
+                            {beneficiaryLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
+                            {beneficiaryResults?.items?.length ? (
+                              <div className="mt-2 border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
+                                {beneficiaryResults.items.map((newcomer) => (
+                                  <button
+                                    key={newcomer.id}
+                                    type="button"
+                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
+                                      wizardForm.newcomer_id === newcomer.id ? "bg-accent/10" : ""
+                                    }`}
+                                    onClick={() => handleNewcomerSelect(newcomer)}
+                                  >
+                                    {newcomer.first_name} {newcomer.last_name} • {newcomer.status}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-mute">
+                            {existingNewcomerPermissionHint}
                           </div>
-                        ) : null}
+                        )}
                       </div>
                     )}
 
                     {wizardForm.beneficiary_mode === "newcomer_create" && (
+                      canQuickCreateNewcomer ? (
                       <Card className="p-4 space-y-3">
+                        <div className="rounded-xl border border-border/70 bg-muted/10 px-4 py-3 text-xs text-mute">
+                          Only fields you have permission to edit are shown here. Other newcomer intake fields stay hidden so this form can submit cleanly.
+                        </div>
                         <div className="grid gap-3 md:grid-cols-2">
                           <div>
                             <Input
@@ -2796,22 +3111,28 @@ export default function SponsorshipWorkspace() {
                           </div>
                         </div>
                         <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <Input
-                              type="number"
-                              min={1}
-                              placeholder="Family size"
-                              value={newcomerForm.family_size}
-                              className={newcomerFieldClass("family_size")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({ ...prev, family_size: event.target.value }));
-                                clearNewcomerFieldError("family_size");
-                              }}
-                            />
-                            {newcomerFieldErrors.family_size && (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.family_size}</p>
-                            )}
-                          </div>
+                          {newcomerFieldAccess.family_size ? (
+                            <div>
+                              <Input
+                                type="number"
+                                min={1}
+                                placeholder="Family size"
+                                value={newcomerForm.family_size}
+                                className={newcomerFieldClass("family_size")}
+                                onChange={(event) => {
+                                  setNewcomerForm((prev) => ({ ...prev, family_size: event.target.value }));
+                                  clearNewcomerFieldError("family_size");
+                                }}
+                              />
+                              {newcomerFieldErrors.family_size && (
+                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.family_size}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-mute">
+                              {familySizePermissionHint}
+                            </div>
+                          )}
                           <Select
                             value={newcomerForm.county}
                             onChange={(event) => setNewcomerForm((prev) => ({ ...prev, county: event.target.value }))}
@@ -2836,62 +3157,95 @@ export default function SponsorshipWorkspace() {
                               </option>
                             ))}
                           </Select>
-                          <Select
-                            value={newcomerForm.preferred_language}
-                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
-                          >
-                            <option value="">Preferred language</option>
-                            {LANGUAGE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Select>
+                          {newcomerFieldAccess.preferred_language ? (
+                            <Select
+                              value={newcomerForm.preferred_language}
+                              onChange={(event) => setNewcomerForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
+                            >
+                              <option value="">Preferred language</option>
+                              {LANGUAGE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </Select>
+                          ) : (
+                            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-mute">
+                              {preferredLanguagePermissionHint}
+                            </div>
+                          )}
                         </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <Input
-                              type="tel"
-                              inputMode="tel"
-                              placeholder="Phone"
-                              value={newcomerForm.contact_phone}
-                              className={newcomerFieldClass("contact_phone")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({ ...prev, contact_phone: event.target.value }));
-                                clearNewcomerFieldError("contact_phone");
-                              }}
-                            />
-                            {newcomerFieldErrors.contact_phone && (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_phone}</p>
-                            )}
-                          </div>
-                          <div>
-                            <Input
-                              type="email"
-                              inputMode="email"
-                              placeholder="Email"
-                              value={newcomerForm.contact_email}
-                              className={newcomerFieldClass("contact_email")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }));
-                                clearNewcomerFieldError("contact_email");
-                              }}
-                            />
-                            {newcomerFieldErrors.contact_email && (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_email}</p>
-                            )}
-                          </div>
+                        <div className={`grid gap-3 ${newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email ? "md:grid-cols-2" : ""}`}>
+                          {newcomerFieldAccess.contact_phone && (
+                            <div>
+                              <label className="text-xs uppercase text-mute block mb-1">Phone</label>
+                              <PhoneInput
+                                value={newcomerForm.contact_phone}
+                                className={newcomerFieldClass("contact_phone")}
+                                onChange={(value) => {
+                                  setNewcomerForm((prev) => ({ ...prev, contact_phone: value }));
+                                  clearNewcomerFieldError("contact_phone");
+                                }}
+                              />
+                              {newcomerFieldErrors.contact_phone ? (
+                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_phone}</p>
+                              ) : (
+                                <p className="mt-1 text-xs text-mute">Use a Canadian number in +1 format.</p>
+                              )}
+                              {newcomerPhoneSnapSuggestion && (
+                                <button
+                                  type="button"
+                                  className="mt-2 text-xs font-medium text-accent underline underline-offset-2 hover:text-accent/80"
+                                  onClick={() => {
+                                    setNewcomerForm((prev) => ({ ...prev, contact_phone: newcomerPhoneSnapSuggestion }));
+                                    clearNewcomerFieldError("contact_phone");
+                                  }}
+                                >
+                                  Snap to valid Canadian format: {newcomerPhoneSnapSuggestion}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {newcomerFieldAccess.contact_email && (
+                            <div>
+                              <label className="text-xs uppercase text-mute block mb-1">Email</label>
+                              <Input
+                                type="email"
+                                inputMode="email"
+                                placeholder="name@example.com"
+                                value={newcomerForm.contact_email}
+                                className={newcomerFieldClass("contact_email")}
+                                onChange={(event) => {
+                                  setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }));
+                                  clearNewcomerFieldError("contact_email");
+                                }}
+                                onBlur={() =>
+                                  setNewcomerForm((prev) => ({
+                                    ...prev,
+                                    contact_email: prev.contact_email ? normalizeEmailInput(prev.contact_email) : "",
+                                  }))
+                                }
+                              />
+                              {newcomerFieldErrors.contact_email ? (
+                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_email}</p>
+                              ) : (
+                                <p className="mt-1 text-xs text-mute">Use a full email like `name@example.com`.</p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <label className="flex items-center gap-2 text-sm text-mute">
-                          <input
-                            type="checkbox"
-                            checked={newcomerForm.interpreter_required}
-                            onChange={(event) =>
-                              setNewcomerForm((prev) => ({ ...prev, interpreter_required: event.target.checked }))
-                            }
-                          />
-                          Interpreter required
-                        </label>
+                        {newcomerFieldAccess.interpreter_required && (
+                          <label className="flex items-center gap-2 text-sm text-mute">
+                            <input
+                              type="checkbox"
+                              checked={newcomerForm.interpreter_required}
+                              onChange={(event) =>
+                                setNewcomerForm((prev) => ({ ...prev, interpreter_required: event.target.checked }))
+                              }
+                            />
+                            Interpreter required
+                          </label>
+                        )}
                         <div className="grid gap-3 md:grid-cols-2">
                           <Input
                             placeholder="Temp address street"
@@ -2922,13 +3276,26 @@ export default function SponsorshipWorkspace() {
                               </option>
                             ))}
                           </Select>
-                          <Input
-                            placeholder="Postal code"
-                            value={newcomerForm.temporary_address_postal_code}
-                            onChange={(event) =>
-                              setNewcomerForm((prev) => ({ ...prev, temporary_address_postal_code: event.target.value }))
-                            }
-                          />
+                          <div>
+                            <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
+                            <Input
+                              placeholder="A1A 1A1"
+                              value={newcomerForm.temporary_address_postal_code}
+                              className={newcomerFieldClass("temporary_address_postal_code")}
+                              onChange={(event) => {
+                                setNewcomerForm((prev) => ({
+                                  ...prev,
+                                  temporary_address_postal_code: formatCanadianPostalCode(event.target.value),
+                                }));
+                                clearNewcomerFieldError("temporary_address_postal_code");
+                              }}
+                            />
+                            {newcomerFieldErrors.temporary_address_postal_code ? (
+                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.temporary_address_postal_code}</p>
+                            ) : (
+                              <p className="mt-1 text-xs text-mute">Optional. Use Canadian format A1A 1A1.</p>
+                            )}
+                          </div>
                         </div>
                         {wizardError && (
                           <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
@@ -2939,31 +3306,44 @@ export default function SponsorshipWorkspace() {
                           {wizardLoading ? "Saving..." : "Create newcomer"}
                         </Button>
                       </Card>
+                      ) : (
+                        <Card className="p-4 text-sm text-mute">
+                          {newcomerQuickCreateHint}
+                        </Card>
+                      )
                     )}
 
                     {wizardForm.beneficiary_mode === "member" && (
                       <div className="space-y-3">
                         <label className="text-xs uppercase text-mute block">Member search</label>
-                        <Input
-                          placeholder="Search member"
-                          value={memberSearch}
-                          onChange={(event) => setMemberSearch(event.target.value)}
-                        />
-                        {memberSearchLoading && <p className="text-xs text-mute">Searching...</p>}
-                        {memberResults.length > 0 && (
-                          <div className="border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
-                            {memberResults.map((member) => (
-                              <button
-                                key={member.id}
-                                type="button"
-                                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
-                                  wizardForm.beneficiary_member_id === member.id ? "bg-accent/10" : ""
-                                }`}
-                                onClick={() => handleMemberSelect(member)}
-                              >
-                                {member.first_name} {member.last_name} • {member.status}
-                              </button>
-                            ))}
+                        {canSearchBeneficiaryMembers ? (
+                          <>
+                            <Input
+                              placeholder="Search member"
+                              value={memberSearch}
+                              onChange={(event) => setMemberSearch(event.target.value)}
+                            />
+                            {memberSearchLoading && <p className="text-xs text-mute">Searching...</p>}
+                            {memberResults.length > 0 && (
+                              <div className="border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
+                                {memberResults.map((member) => (
+                                  <button
+                                    key={member.id}
+                                    type="button"
+                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
+                                      wizardForm.beneficiary_member_id === member.id ? "bg-accent/10" : ""
+                                    }`}
+                                    onClick={() => handleMemberSelect(member)}
+                                  >
+                                    {member.first_name} {member.last_name} • {member.status}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-mute">
+                            {memberLookupPermissionHint} You can still continue with an external beneficiary.
                           </div>
                         )}
                         <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "external" }))}>
@@ -2982,9 +3362,11 @@ export default function SponsorshipWorkspace() {
                             setWizardForm((prev) => ({ ...prev, beneficiary_name: event.target.value }))
                           }
                         />
-                        <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}>
-                          Switch to member selection
-                        </Button>
+                        {canSearchBeneficiaryMembers && (
+                          <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}>
+                            Switch to member selection
+                          </Button>
+                        )}
                       </div>
                     )}
 
@@ -3188,13 +3570,22 @@ export default function SponsorshipWorkspace() {
                         <Select
                           value={wizardForm.budget_round_id}
                           onChange={(event) =>
-                            setWizardForm((prev) => ({ ...prev, budget_round_id: event.target.value }))
+                            setWizardForm((prev) => ({
+                              ...prev,
+                              budget_round_id: event.target.value,
+                              budget_year: event.target.value ? roundYear : prev.budget_year,
+                              budget_slots: event.target.value ? prev.budget_slots || "1" : prev.budget_slots,
+                            }))
                           }
                         >
-                          <option value="">No round</option>
+                          <option value="">No round (draft only)</option>
                           {budgetRounds.map((round) => (
-                            <option key={round.id} value={String(round.id)}>
-                              Round {round.round_number} ({round.year}) • {round.used_slots}/{round.slot_budget} used
+                            <option
+                              key={round.id}
+                              value={String(round.id)}
+                              disabled={round.used_slots >= round.slot_budget && String(round.id) !== wizardForm.budget_round_id}
+                            >
+                              Round {round.round_number} ({round.year}) • {Math.max(round.slot_budget - round.used_slots, 0)} remaining
                             </option>
                           ))}
                         </Select>
@@ -3207,10 +3598,15 @@ export default function SponsorshipWorkspace() {
                     {!roundsLoading && !roundsError && !budgetRounds.length && (
                       <p className="text-xs text-mute">No budget rounds configured for {roundYear} yet.</p>
                     )}
+                    {!roundsLoading && !roundsError && allBudgetRoundsFull && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-800">
+                        All configured rounds for {roundYear} are full. Ask an admin to create the next round before submitting this sponsorship.
+                      </div>
+                    )}
                     {selectedWizardRound && (
                       <p className="text-xs text-mute">
                         Round capacity: {selectedWizardRound.used_slots}/{selectedWizardRound.slot_budget} used •{" "}
-                        {selectedWizardRound.utilization_percent}% utilized
+                        {selectedWizardRoundRemainingSlots ?? 0} remaining • {selectedWizardRound.utilization_percent}% utilized
                       </p>
                     )}
                     <div className="grid gap-3 md:grid-cols-3">
@@ -3240,14 +3636,24 @@ export default function SponsorshipWorkspace() {
                         value={wizardForm.budget_slots}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, budget_slots: event.target.value }))}
                       >
-                        <option value="">Budget slots</option>
-                        {SLOT_OPTIONS.map((slot) => (
+                        <option value="">{wizardForm.budget_round_id ? "Default 1 slot" : "Budget slots"}</option>
+                        {SLOT_OPTIONS.filter((slot) => {
+                          if (!selectedWizardRound) return true;
+                          const remainingSlots = Math.max(selectedWizardRound.slot_budget - selectedWizardRound.used_slots, 0);
+                          const currentSlots = Number(wizardForm.budget_slots || "0");
+                          return slot <= Math.max(remainingSlots, currentSlots);
+                        }).map((slot) => (
                           <option key={slot} value={String(slot)}>
                             {slot}
                           </option>
                         ))}
                       </Select>
                     </div>
+                    {wizardForm.budget_round_id && (
+                      <p className="text-xs text-mute">
+                        Submitted cases automatically consume the selected number of slots from the chosen round. Drafts do not.
+                      </p>
+                    )}
                     <div className="flex justify-between">
                       <Button variant="ghost" onClick={() => setWizardStep(1)}>
                         Back
@@ -3327,7 +3733,7 @@ export default function SponsorshipWorkspace() {
                           : "—"}
                       </p>
                       <p className="text-xs uppercase text-mute mt-3">Budget slots</p>
-                      <p className="font-medium">{wizardForm.budget_slots || "—"}</p>
+                      <p className="font-medium">{wizardForm.budget_round_id ? wizardForm.budget_slots || "1" : "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Notes</p>
                       <p className="text-sm text-mute whitespace-pre-line">{wizardForm.notes || "—"}</p>
                     </Card>

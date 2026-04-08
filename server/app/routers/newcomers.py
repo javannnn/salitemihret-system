@@ -25,7 +25,7 @@ from app.services import newcomers as newcomers_service
 router = APIRouter(prefix="/newcomers", tags=["newcomers"])
 
 READ_ROLES = ("PublicRelations", "SponsorshipCommittee", "Registrar", "Admin", "OfficeAdmin")
-WRITE_ROLES = ("PublicRelations", "Registrar", "Admin")
+WRITE_ROLES = ("PublicRelations", "Registrar", "Admin", "SponsorshipCommittee")
 CONVERT_ROLES = ("PublicRelations", "Registrar", "Admin", "SponsorshipCommittee")
 ADMIN_ROLES = ("Admin",)
 

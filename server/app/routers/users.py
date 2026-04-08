@@ -170,6 +170,25 @@ def _ensure_member_available(db: Session, member_id: int, *, current_user_id: in
     return member
 
 
+def _normalize_unique_email(
+    db: Session,
+    email: str,
+    *,
+    exclude_user_id: int | None = None,
+) -> str:
+    normalized = email.strip().lower()
+    existing_query = db.query(User).filter(func.lower(User.email) == normalized)
+    if exclude_user_id is not None:
+        existing_query = existing_query.filter(User.id != exclude_user_id)
+    existing_user = existing_query.first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with that email already exists",
+        )
+    return normalized
+
+
 @router.get("", response_model=UserListResponse)
 def list_users(
     search: str | None = Query(default=None, description="Search email, username, or name"),
@@ -285,10 +304,7 @@ def create_user(
     actor: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> UserProvisionResponse:
-    email = payload.email.lower()
-    existing_user = db.query(User).filter(func.lower(User.email) == email).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User with that email already exists")
+    email = _normalize_unique_email(db, str(payload.email))
 
     username = payload.username
     if username:
@@ -408,6 +424,11 @@ def update_user(
 ) -> UserAdminSummary:
     user = _load_user(db, user_id)
     changes: dict[str, Any] = {}
+    if payload.email is not None:
+        new_email = _normalize_unique_email(db, str(payload.email), exclude_user_id=user.id)
+        if new_email != user.email:
+            user.email = new_email
+            changes["email"] = new_email
     if payload.full_name is not None:
         user.full_name = payload.full_name
         changes["full_name"] = payload.full_name

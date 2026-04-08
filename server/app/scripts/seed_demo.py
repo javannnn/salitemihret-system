@@ -29,7 +29,7 @@ from app.models.schools import (
 )
 from app.models.tag import Tag
 from app.models.user import User
-from app.services.members_utils import apply_children, apply_spouse
+from app.services.members_utils import apply_children, apply_spouse, build_mock_member_email
 from app.schemas.payment import PaymentCreate
 from app.services import payments as payments_service
 from app.services.permissions import is_system_role_name
@@ -528,7 +528,7 @@ def ensure_members(db: Session, households: dict[str, Household], tags: dict[str
                 middle_name=data.get("middle_name"),
                 last_name=data["last_name"],
                 username=username,
-                email=data.get("email"),
+                email=data.get("email") or build_mock_member_email(username=username),
                 phone=data.get("phone"),
                 baptismal_name=data.get("baptismal_name"),
                 birth_date=data.get("birth_date"),
@@ -561,7 +561,7 @@ def ensure_members(db: Session, households: dict[str, Household], tags: dict[str
             db.flush()
         else:
             member.middle_name = data.get("middle_name")
-            member.email = data.get("email")
+            member.email = data.get("email") or build_mock_member_email(username=member.username, member_id=member.id)
             member.phone = data.get("phone")
             member.status = data["status"]
             member.gender = data.get("gender")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Iterable, List
 
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.member import Child, Member
 from app.models.member_audit import MemberAudit
-from app.services.members_utils import generate_username
+from app.services.members_utils import build_mock_member_email, generate_username
 from app.services.notifications import notify_child_turns_eighteen
 
 
@@ -74,7 +75,7 @@ def promote_child(
         middle_name=None,
         last_name=last_name,
         username=username,
-        email=None,
+        email=build_mock_member_email(username=username),
         phone=None,
         birth_date=child.birth_date,
         join_date=date.today(),
@@ -90,7 +91,8 @@ def promote_child(
         is_tither=False,
         pays_contribution=False,
         contribution_method=None,
-        contribution_amount=None,
+        contribution_amount=Decimal("75.00"),
+        contribution_currency="CAD",
         notes=f"Promoted from child of member #{parent.id}" if parent else "Promoted from child record",
         created_by_id=actor_id,
         updated_by_id=actor_id,

@@ -110,6 +110,7 @@ class InvitationResponse(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
+    email: EmailStr | None = None
     full_name: str | None = None
     username: str | None = None
     is_active: bool | None = None

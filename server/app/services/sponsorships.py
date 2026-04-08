@@ -57,6 +57,7 @@ VALID_PLEDGE_CHANNELS = set(get_args(SponsorshipPledgeChannel))
 VALID_REMINDER_CHANNELS = set(get_args(SponsorshipReminderChannel))
 VALID_MOTIVATIONS = set(get_args(SponsorshipMotivation))
 VALID_NOTES_TEMPLATES = set(get_args(SponsorshipNotesTemplate))
+BUDGET_CONSUMING_STATUSES = {"Submitted", "Approved", "Active", "Suspended", "Completed", "Closed"}
 
 
 def _coerce_literal(value: str | None) -> str | None:
@@ -195,11 +196,57 @@ def _load_priest(db: Session, priest_id: int) -> Priest:
     return priest
 
 
-def _load_budget_round(db: Session, round_id: int) -> SponsorshipBudgetRound:
-    budget_round = db.query(SponsorshipBudgetRound).filter(SponsorshipBudgetRound.id == round_id).first()
+def _load_budget_round(db: Session, round_id: int, *, for_update: bool = False) -> SponsorshipBudgetRound:
+    query = db.query(SponsorshipBudgetRound).filter(SponsorshipBudgetRound.id == round_id)
+    if for_update:
+        query = query.with_for_update()
+    budget_round = query.first()
     if not budget_round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget round not found")
     return budget_round
+
+
+def _status_consumes_budget(status_value: str | None) -> bool:
+    return _normalize_status(status_value) in BUDGET_CONSUMING_STATUSES
+
+
+def _round_used_slots(db: Session, round_id: int, *, exclude_sponsorship_id: int | None = None) -> int:
+    query = db.query(func.coalesce(func.sum(Sponsorship.used_slots), 0)).filter(Sponsorship.budget_round_id == round_id)
+    if exclude_sponsorship_id is not None:
+        query = query.filter(Sponsorship.id != exclude_sponsorship_id)
+    return int(query.scalar() or 0)
+
+
+def _round_label(budget_round: SponsorshipBudgetRound) -> str:
+    return f"Round {budget_round.round_number} ({budget_round.year})"
+
+
+def _assert_round_capacity(
+    db: Session,
+    *,
+    round_id: int,
+    slots_needed: int,
+    exclude_sponsorship_id: int | None = None,
+) -> SponsorshipBudgetRound:
+    budget_round = _load_budget_round(db, round_id, for_update=True)
+    used_slots = _round_used_slots(db, round_id, exclude_sponsorship_id=exclude_sponsorship_id)
+    remaining_slots = max(budget_round.slot_budget - used_slots, 0)
+    if slots_needed > remaining_slots:
+        detail = (
+            f"{_round_label(budget_round)} is full or does not have enough remaining slots. "
+            f"Requested {slots_needed}, remaining {remaining_slots}. "
+            "Ask an admin to create or open the next budget round before submitting more sponsorships."
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+    return budget_round
+
+
+def _require_budget_round_for_status(target_status: str) -> None:
+    action = "submit this sponsorship" if target_status == "Submitted" else f"move this sponsorship to {target_status}"
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Assign a budget round with remaining slots before you can {action}.",
+    )
 
 
 def _normalize_beneficiary_name(
@@ -264,6 +311,16 @@ def _log_newcomer_link(
             changed_by_id=actor_id,
         )
     )
+
+
+def _sync_newcomer_sponsor(db: Session, newcomer: Newcomer) -> None:
+    latest_sponsorship = (
+        db.query(Sponsorship)
+        .filter(Sponsorship.newcomer_id == newcomer.id)
+        .order_by(Sponsorship.updated_at.desc(), Sponsorship.id.desc())
+        .first()
+    )
+    newcomer.sponsored_by_member_id = latest_sponsorship.sponsor_member_id if latest_sponsorship else None
 
 
 def _serialize(db: Session, sponsorship: Sponsorship) -> SponsorshipOut:
@@ -591,6 +648,7 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
             budget_round_id = _load_budget_round(db, payload.budget_round_id).id
         else:
             budget_round_id = None
+    budget_slots = payload.budget_slots
 
     beneficiary_name = _normalize_beneficiary_name(
         beneficiary_name=payload.beneficiary_name,
@@ -632,9 +690,15 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
 
     submitted_at = None
     submitted_by_id = None
+    used_slots = 0
     if payload.status == "Submitted":
+        if budget_round_id is None:
+            _require_budget_round_for_status("Submitted")
         submitted_at = datetime.utcnow()
         submitted_by_id = actor_id
+        budget_slots = budget_slots or 1
+        _assert_round_capacity(db, round_id=budget_round_id, slots_needed=budget_slots)
+        used_slots = budget_slots
 
     sponsorship = Sponsorship(
         sponsor_member_id=sponsor.id,
@@ -664,8 +728,8 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         budget_month=payload.budget_month,
         budget_year=payload.budget_year,
         budget_round_id=budget_round_id,
-        budget_slots=payload.budget_slots,
-        used_slots=0,
+        budget_slots=budget_slots,
+        used_slots=used_slots,
         notes=payload.notes,
         notes_template=payload.notes_template,
         assigned_staff_id=payload.assigned_staff_id,
@@ -693,6 +757,8 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
             reason=f"Linked to sponsorship case #{sponsorship.id}",
             actor_id=actor_id,
         )
+        db.flush()
+        _sync_newcomer_sponsor(db, newcomer)
 
     db.commit()
     db.refresh(sponsorship)
@@ -725,11 +791,15 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
     sponsorship = _load_sponsorship(db, sponsorship_id)
     fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
     previous_start_date = sponsorship.start_date
+    budget_round_changed = "budget_round_id" in fields_set
+    budget_slots_changed = payload.budget_slots is not None
 
     if payload.status is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update sponsorship status via the status endpoint")
     if payload.rejection_reason is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update rejection reason via the status endpoint")
+    if payload.used_slots is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Used slots are managed automatically.")
 
     old_beneficiary_member = sponsorship.beneficiary_member
     old_newcomer = sponsorship.newcomer
@@ -815,10 +885,6 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         sponsorship.notes = payload.notes
     if payload.notes_template is not None:
         sponsorship.notes_template = payload.notes_template
-    if payload.used_slots is not None:
-        if sponsorship.budget_slots is not None and payload.used_slots > sponsorship.budget_slots:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Used slots cannot exceed budget slots")
-        sponsorship.used_slots = payload.used_slots
     if payload.volunteer_services is not None:
         stored = _dump_volunteer_services(payload.volunteer_services)
         sponsorship.volunteer_services = stored
@@ -832,6 +898,25 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         sponsorship.payment_information = payload.payment_information
     if payload.assigned_staff_id is not None:
         sponsorship.assigned_staff_id = payload.assigned_staff_id or None
+
+    if _status_consumes_budget(sponsorship.status):
+        if budget_round_changed and sponsorship.budget_round_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Submitted sponsorships must remain assigned to a budget round.",
+            )
+        if sponsorship.budget_round_id is not None and (budget_round_changed or budget_slots_changed):
+            desired_slots = sponsorship.budget_slots or 1
+            _assert_round_capacity(
+                db,
+                round_id=sponsorship.budget_round_id,
+                slots_needed=desired_slots,
+                exclude_sponsorship_id=sponsorship.id,
+            )
+            sponsorship.budget_slots = desired_slots
+            sponsorship.used_slots = desired_slots
+    else:
+        sponsorship.used_slots = 0
 
     _ensure_no_conflict(
         db,
@@ -909,6 +994,11 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
                 reason=f"Linked to sponsorship case #{sponsorship.id}",
                 actor_id=actor_id,
             )
+        db.flush()
+        if old_newcomer:
+            _sync_newcomer_sponsor(db, old_newcomer)
+        if newcomer:
+            _sync_newcomer_sponsor(db, newcomer)
 
     sponsorship.updated_by_id = actor_id
     db.commit()
@@ -958,6 +1048,24 @@ def transition_sponsorship_status(
 
     now = datetime.utcnow()
     action = "StatusChange"
+    current_consumes_budget = _status_consumes_budget(current)
+    target_consumes_budget = _status_consumes_budget(target)
+    if target_consumes_budget:
+        if not sponsorship.budget_round_id:
+            _require_budget_round_for_status(target)
+        desired_slots = sponsorship.budget_slots or 1
+        if not current_consumes_budget or (sponsorship.used_slots or 0) != desired_slots:
+            _assert_round_capacity(
+                db,
+                round_id=sponsorship.budget_round_id,
+                slots_needed=desired_slots,
+                exclude_sponsorship_id=sponsorship.id,
+            )
+            sponsorship.budget_slots = desired_slots
+            sponsorship.used_slots = desired_slots
+    elif current_consumes_budget and not target_consumes_budget:
+        sponsorship.used_slots = 0
+
     if target == "Submitted":
         sponsorship.submitted_at = now
         sponsorship.submitted_by_id = actor.id
@@ -1203,6 +1311,13 @@ def update_budget_round(db: Session, round_id: int, payload: SponsorshipBudgetRo
 
     if record.start_date and record.end_date and record.end_date < record.start_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after the start date")
+
+    current_used_slots = _round_used_slots(db, record.id)
+    if record.slot_budget < current_used_slots:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{_round_label(record)} already uses {current_used_slots} slots. Increase the limit or open a new round instead.",
+        )
 
     db.commit()
     db.refresh(record)

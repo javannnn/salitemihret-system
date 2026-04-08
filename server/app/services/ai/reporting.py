@@ -26,7 +26,7 @@ from app.services import reporting as reporting_service
 from app.services import sponsorships as sponsorship_service
 from app.services import sunday_school as sunday_school_service
 from app.services.members_query import build_members_query
-from app.services.permissions import has_module_permission
+from app.services.permissions import has_field_permission, has_module_permission
 
 REPORT_QA_MODULES: tuple[AIReportQAModule, ...] = (
     "members",
@@ -1380,8 +1380,8 @@ def _safe_float(value: Any) -> float:
 
 def _can_read_module(user: User, module: AIReportQAModule) -> bool:
     if module == "activity":
-        return has_module_permission(user, "reports", "read")
-    return has_module_permission(user, module, "read")
+        return has_field_permission(user, "reports", "overview", "read")
+    return has_field_permission(user, "reports", module, "read") and has_module_permission(user, module, "read")
 
 
 def _module_label(module: AIReportQAModule) -> str:

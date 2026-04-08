@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.deps import require_roles
+from app.config import MAX_IMPORT_FILE_SIZE_MB, MAX_IMPORT_ROWS
 from app.core.db import get_db
 from app.models.household import Household
 from app.models.member import Member
@@ -39,6 +40,7 @@ from app.schemas.member import (
     PriestOut,
     TagOut,
     MinistryOut,
+    MemberImportLimits,
 )
 from app.services.child_promotion import get_children_ready_for_promotion, promote_children_who_are_18
 from app.core.config import settings
@@ -333,6 +335,10 @@ def get_member_meta(
         ministries=ministries,
         households=households,
         father_confessors=priests,
+        import_limits=MemberImportLimits(
+            max_rows=MAX_IMPORT_ROWS,
+            max_file_size_mb=MAX_IMPORT_FILE_SIZE_MB,
+        ),
     )
 
 

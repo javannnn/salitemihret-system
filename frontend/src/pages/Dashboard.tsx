@@ -102,6 +102,12 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const isSuperAdmin = user?.is_super_admin ?? false;
   const isMobile = useMediaQuery("(max-width: 1023px)");
+  const showMembersUi = permissions.isModuleVisible("members");
+  const showPromotionsUi = permissions.isModuleVisible("promotions");
+  const showPaymentsUi = permissions.isModuleVisible("payments");
+  const showVolunteersUi = permissions.isModuleVisible("volunteers");
+  const showSponsorshipsUi = permissions.isModuleVisible("sponsorships");
+  const showUsersUi = permissions.isModuleVisible("users");
 
   useEffect(() => {
     if (!promotionModalOpen) return;
@@ -115,7 +121,7 @@ export default function Dashboard() {
   }, [promotionModalOpen]);
 
   useEffect(() => {
-    if (!permissions.viewMembers) {
+    if (!permissions.viewMembers || !showMembersUi) {
       setSummary(null);
       return;
     }
@@ -141,10 +147,10 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.viewMembers, toast]);
+  }, [permissions.viewMembers, showMembersUi, toast]);
 
   useEffect(() => {
-    if (!permissions.viewPromotions) {
+    if (!permissions.viewPromotions || !showPromotionsUi) {
       setPromotions(null);
       setPromotionsLoading(false);
       return;
@@ -166,10 +172,10 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.viewPromotions, toast]);
+  }, [permissions.viewPromotions, showPromotionsUi, toast]);
 
   useEffect(() => {
-    if (!permissions.viewPayments) {
+    if (!permissions.viewPayments || !showPaymentsUi) {
       setFinanceSummary(null);
       setFinanceLoading(false);
       return;
@@ -191,10 +197,10 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.viewPayments, toast]);
+  }, [permissions.viewPayments, showPaymentsUi, toast]);
 
   useEffect(() => {
-    if (!permissions.viewPayments) {
+    if (!permissions.viewPayments || !showPaymentsUi) {
       setRecentPayments([]);
       setRecentPaymentsStatus("restricted");
       return;
@@ -219,7 +225,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [permissions.viewPayments]);
+  }, [permissions.viewPayments, showPaymentsUi]);
 
   useEffect(() => {
     const term = searchTerm.trim();
@@ -231,7 +237,7 @@ export default function Dashboard() {
     }
     const normalizedTerm = term.toLowerCase();
     const tasks: Promise<SmartSearchResult[]>[] = [];
-    if (permissions.viewMembers) {
+    if (permissions.viewMembers && showMembersUi) {
       tasks.push(
         searchMembers(term, 5).then((rs) =>
           rs.items.map((member) => ({
@@ -257,7 +263,7 @@ export default function Dashboard() {
         )
       );
     }
-    if (isSuperAdmin) {
+    if (isSuperAdmin && showUsersUi) {
       tasks.push(
         listAdminUsers({ search: term, limit: 5 }).then((rs) =>
           rs.items.map((admin) => ({
@@ -271,7 +277,7 @@ export default function Dashboard() {
         )
       );
     }
-    if (permissions.viewPayments) {
+    if (permissions.viewPayments && showPaymentsUi) {
       tasks.push(
         listPayments({ page: 1, page_size: 20 }).then((response) =>
           response.items
@@ -292,7 +298,7 @@ export default function Dashboard() {
         )
       );
     }
-    if (permissions.viewVolunteers) {
+    if (permissions.viewVolunteers && showVolunteersUi) {
       tasks.push(
         listVolunteerWorkers({ page: 1, page_size: 5, q: term }).then((response) =>
           response.items.map((worker) => ({
@@ -377,7 +383,17 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [searchTerm, permissions.viewMembers, permissions.viewPayments, permissions.viewVolunteers, isSuperAdmin]);
+  }, [
+    searchTerm,
+    permissions.viewMembers,
+    permissions.viewPayments,
+    permissions.viewVolunteers,
+    isSuperAdmin,
+    showMembersUi,
+    showPaymentsUi,
+    showVolunteersUi,
+    showUsersUi,
+  ]);
 
   const completion = useMemo(() => {
     if (!summary) return 0;
@@ -532,21 +548,21 @@ export default function Dashboard() {
 
   const quickActions = useMemo(
     () => [
-      { label: "Add new member", href: "/members/new", enabled: permissions.createMembers, description: "Open the member intake form." },
-      { label: "Record a payment", href: "/payments", enabled: permissions.managePayments, description: "Post a new contribution." },
+      { label: "Add new member", href: "/members/new", enabled: showMembersUi && permissions.createMembers, description: "Open the member intake form." },
+      { label: "Record a payment", href: "/payments", enabled: showPaymentsUi && permissions.managePayments, description: "Post a new contribution." },
       {
         label: "Volunteer roster",
         href: "/volunteers",
-        enabled: permissions.viewVolunteers || permissions.manageVolunteers,
+        enabled: showVolunteersUi && (permissions.viewVolunteers || permissions.manageVolunteers),
         description: "Track teams and volunteer service.",
       },
       {
         label: "Open sponsorship board",
         href: "/sponsorships",
-        enabled: permissions.manageSponsorships || permissions.viewSponsorships,
+        enabled: showSponsorshipsUi && (permissions.manageSponsorships || permissions.viewSponsorships),
         description: "Review sponsorship cases.",
       },
-      { label: "User management", href: "/admin/users", enabled: isSuperAdmin, description: "Invite or manage admins." },
+      { label: "User management", href: "/admin/users", enabled: isSuperAdmin && showUsersUi, description: "Invite or manage admins." },
     ],
     [
       permissions.createMembers,
@@ -556,6 +572,11 @@ export default function Dashboard() {
       permissions.manageSponsorships,
       permissions.viewSponsorships,
       isSuperAdmin,
+      showMembersUi,
+      showPaymentsUi,
+      showVolunteersUi,
+      showSponsorshipsUi,
+      showUsersUi,
     ]
   ).filter((action) => action.enabled);
 

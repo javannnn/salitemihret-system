@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from datetime import datetime
 
 from datetime import date
@@ -50,6 +51,24 @@ class Payment(Base):
     recorded_by = relationship("User")
     correction_of = relationship("Payment", remote_side=[id], backref="corrections")
     receipts = relationship("PaymentReceipt", back_populates="payment", cascade="all, delete-orphan")
+
+    @property
+    def entry_kind(self) -> str:
+        if self.correction_of_id is None:
+            return "Original"
+        amount = Decimal(str(self.amount or 0))
+        return "Reversal" if amount < 0 else "Replacement"
+
+    @property
+    def has_adjustments(self) -> bool:
+        return bool(getattr(self, "corrections", []) or [])
+
+    @property
+    def net_effect_amount(self) -> Decimal:
+        total = Decimal(str(self.amount or 0))
+        for correction in getattr(self, "corrections", []) or []:
+            total += Decimal(str(correction.amount or 0))
+        return total
 
 
 class PaymentReceipt(Base):

@@ -10,7 +10,7 @@ export type WhoAmI = {
   full_name: string | null;
   must_change_password: boolean;
   permissions: {
-    modules: Record<string, { read: boolean; write: boolean }>;
+    modules: Record<string, { read: boolean; write: boolean; visible: boolean }>;
     fields: Record<string, Record<string, { read: boolean; write: boolean }>>;
     legacy: Record<string, boolean>;
   };

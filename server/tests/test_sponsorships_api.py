@@ -8,11 +8,29 @@ from app.models.member import Spouse
 from app.models.sponsorship import Sponsorship
 
 
+def _create_budget_round(client, authorize, user, *, slot_budget: int = 5, round_number: int = 1, year: int | None = None) -> int:
+    authorize(user)
+    budget_year = year or date.today().year
+    response = client.post(
+        "/sponsorships/budget-rounds",
+        json={
+            "year": budget_year,
+            "round_number": round_number,
+            "start_date": date(budget_year, 1, 1).isoformat(),
+            "end_date": date(budget_year, 1, 28).isoformat(),
+            "slot_budget": slot_budget,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
 def test_sponsorship_flow_with_newcomer_conversion(
     client,
     authorize,
     public_relations_user,
     sponsorship_user,
+    admin_user,
     sample_member,
 ):
     authorize(public_relations_user)
@@ -30,6 +48,8 @@ def test_sponsorship_flow_with_newcomer_conversion(
     newcomer_id = newcomer_resp.json()["id"]
 
     authorize(sponsorship_user)
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=10)
+    authorize(sponsorship_user)
     sponsorship_payload = {
         "sponsor_member_id": sample_member.id,
         "newcomer_id": newcomer_id,
@@ -37,6 +57,7 @@ def test_sponsorship_flow_with_newcomer_conversion(
         "start_date": date.today().isoformat(),
         "status": "Submitted",
         "frequency": "Monthly",
+        "budget_round_id": round_id,
         "program": "Education",
         "pledge_channel": "InPerson",
         "reminder_channel": "Email",
@@ -66,6 +87,93 @@ def test_sponsorship_flow_with_newcomer_conversion(
     assert detail["volunteer_services"] == ["HolyDayCleanup", "MealSupport"]
     assert detail["volunteer_service_other"] == "Weekend outreach"
     assert detail["last_sponsored_date"] is None
+
+
+def test_linked_sponsorship_sets_newcomer_sponsor_assignment(
+    client,
+    authorize,
+    public_relations_user,
+    sponsorship_user,
+    sample_member,
+):
+    authorize(public_relations_user)
+    newcomer_resp = client.post(
+        "/newcomers",
+        json={
+            "first_name": "Saron",
+            "last_name": "Bekele",
+            "contact_phone": "+16135550198",
+            "contact_email": "saron.bekele@example.com",
+            "arrival_date": date.today().isoformat(),
+        },
+    )
+    assert newcomer_resp.status_code == 201, newcomer_resp.text
+    newcomer_id = newcomer_resp.json()["id"]
+
+    authorize(sponsorship_user)
+    create_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "newcomer_id": newcomer_id,
+            "monthly_amount": "100.00",
+            "start_date": date.today().isoformat(),
+            "status": "Draft",
+            "frequency": "Monthly",
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+
+    authorize(public_relations_user)
+    detail_resp = client.get(f"/newcomers/{newcomer_id}")
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    expected_name = f"{sample_member.first_name} {sample_member.last_name}"
+    assert detail["sponsored_by_member_id"] == sample_member.id
+    assert detail["sponsored_by_member_name"] == expected_name
+    assert detail["assigned_owner_name"] == expected_name
+
+
+def test_newcomer_sponsor_assignment_can_be_updated_and_cleared(
+    client,
+    authorize,
+    public_relations_user,
+    sample_member,
+):
+    authorize(public_relations_user)
+    newcomer_resp = client.post(
+        "/newcomers",
+        json={
+            "first_name": "Mimi",
+            "last_name": "Tesfaye",
+            "contact_phone": "+16135550197",
+            "contact_email": "mimi.tesfaye@example.com",
+            "arrival_date": date.today().isoformat(),
+        },
+    )
+    assert newcomer_resp.status_code == 201, newcomer_resp.text
+    newcomer_id = newcomer_resp.json()["id"]
+
+    assign_resp = client.put(
+        f"/newcomers/{newcomer_id}",
+        json={"sponsored_by_member_id": sample_member.id},
+    )
+    assert assign_resp.status_code == 200, assign_resp.text
+    assigned = assign_resp.json()
+    expected_name = f"{sample_member.first_name} {sample_member.last_name}"
+    assert assigned["sponsored_by_member_id"] == sample_member.id
+    assert assigned["sponsored_by_member_name"] == expected_name
+    assert assigned["assigned_owner_name"] == expected_name
+
+    clear_resp = client.put(
+        f"/newcomers/{newcomer_id}",
+        json={"sponsored_by_member_id": None},
+    )
+    assert clear_resp.status_code == 200, clear_resp.text
+    cleared = clear_resp.json()
+    assert cleared["sponsored_by_member_id"] is None
+    assert cleared["sponsored_by_member_name"] is None
+    assert cleared["assigned_owner_name"] is None
 
 
 def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
@@ -188,6 +296,20 @@ def test_newcomer_requires_contact_info(client, authorize, public_relations_user
     assert resp.status_code == 422
 
 
+def test_sponsorship_committee_can_create_newcomer(client, authorize, sponsorship_user):
+    authorize(sponsorship_user)
+    payload = {
+        "first_name": "Samrawit",
+        "last_name": "Abebe",
+        "arrival_date": date.today().isoformat(),
+        "contact_phone": "+16135550177",
+        "contact_email": "samrawit.abebe@example.com",
+        "service_type": "Welcome",
+    }
+    resp = client.post("/newcomers", json=payload)
+    assert resp.status_code == 201, resp.text
+
+
 def test_newcomer_requires_email_even_when_phone_is_present(client, authorize, public_relations_user):
     authorize(public_relations_user)
     payload = {
@@ -238,7 +360,220 @@ def test_sponsorship_metrics_endpoint(client, authorize, sponsorship_user, sampl
     assert "alerts" in metrics
 
 
-def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, sample_member):
+def test_budget_round_creation_requires_explicit_permission(client, authorize, sponsorship_user):
+    authorize(sponsorship_user)
+    today = date.today()
+    round_resp = client.post(
+        "/sponsorships/budget-rounds",
+        json={
+            "year": today.year,
+            "round_number": 1,
+            "start_date": today.replace(day=1).isoformat(),
+            "end_date": today.isoformat(),
+            "slot_budget": 2,
+        },
+    )
+    assert round_resp.status_code == 403, round_resp.text
+
+
+def test_submitted_sponsorship_consumes_budget_round_slots(client, authorize, sponsorship_user, admin_user, sample_member):
+    authorize(sponsorship_user)
+    today = date.today()
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=2)
+    authorize(sponsorship_user)
+
+    create_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Budgeted Beneficiary",
+            "monthly_amount": "75.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    created = create_resp.json()
+    assert created["budget_round_id"] == round_id
+    assert created["budget_slots"] == 1
+    assert created["used_slots"] == 1
+
+    rounds_resp = client.get(f"/sponsorships/budget-rounds?year={today.year}")
+    assert rounds_resp.status_code == 200, rounds_resp.text
+    round_payload = rounds_resp.json()[0]
+    assert round_payload["slot_budget"] == 2
+    assert round_payload["used_slots"] == 1
+
+
+def test_submitted_sponsorship_requires_budget_round(client, authorize, sponsorship_user, sample_member):
+    authorize(sponsorship_user)
+    today = date.today()
+
+    create_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Missing Budget Round",
+            "monthly_amount": "75.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+        },
+    )
+    assert create_resp.status_code == 409, create_resp.text
+    assert "budget round" in create_resp.text
+
+
+def test_submitted_sponsorship_is_blocked_when_budget_round_is_full(client, authorize, sponsorship_user, admin_user, sample_member):
+    authorize(sponsorship_user)
+    today = date.today()
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=1)
+    authorize(sponsorship_user)
+
+    first_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Round Capacity A",
+            "monthly_amount": "80.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert first_resp.status_code == 201, first_resp.text
+
+    second_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Round Capacity B",
+            "monthly_amount": "80.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert second_resp.status_code == 409, second_resp.text
+    assert "remaining slots" in second_resp.text
+
+
+def test_draft_submission_requires_capacity_and_consumes_slots(client, authorize, sponsorship_user, admin_user, sample_member):
+    authorize(sponsorship_user)
+    today = date.today()
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=1)
+    authorize(sponsorship_user)
+
+    draft_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Draft Capacity Beneficiary",
+            "monthly_amount": "60.00",
+            "start_date": today.isoformat(),
+            "status": "Draft",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert draft_resp.status_code == 201, draft_resp.text
+    sponsorship_id = draft_resp.json()["id"]
+    assert draft_resp.json()["used_slots"] == 0
+
+    submit_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Submitted"},
+    )
+    assert submit_resp.status_code == 200, submit_resp.text
+    submitted = submit_resp.json()
+    assert submitted["budget_slots"] == 1
+    assert submitted["used_slots"] == 1
+
+
+def test_draft_submission_requires_budget_round(client, authorize, sponsorship_user, sample_member):
+    authorize(sponsorship_user)
+    today = date.today()
+
+    draft_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Draft Missing Round",
+            "monthly_amount": "60.00",
+            "start_date": today.isoformat(),
+            "status": "Draft",
+            "frequency": "Monthly",
+        },
+    )
+    assert draft_resp.status_code == 201, draft_resp.text
+    sponsorship_id = draft_resp.json()["id"]
+
+    submit_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Submitted"},
+    )
+    assert submit_resp.status_code == 409, submit_resp.text
+    assert "budget round" in submit_resp.text
+
+
+def test_rejecting_sponsorship_releases_budget_round_slots(
+    client,
+    authorize,
+    sponsorship_user,
+    admin_user,
+    sample_member,
+):
+    authorize(sponsorship_user)
+    today = date.today()
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=1)
+    authorize(sponsorship_user)
+
+    first_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Reject Round A",
+            "monthly_amount": "90.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert first_resp.status_code == 201, first_resp.text
+    sponsorship_id = first_resp.json()["id"]
+
+    authorize(admin_user)
+    reject_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Rejected", "reason": "Outside scope"},
+    )
+    assert reject_resp.status_code == 200, reject_resp.text
+    assert reject_resp.json()["used_slots"] == 0
+
+    authorize(sponsorship_user)
+    second_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Reject Round B",
+            "monthly_amount": "90.00",
+            "start_date": today.isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert second_resp.status_code == 201, second_resp.text
+
+
+def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, admin_user, sample_member):
+    authorize(sponsorship_user)
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=10)
     authorize(sponsorship_user)
     payload_a = {
         "sponsor_member_id": sample_member.id,
@@ -255,6 +590,7 @@ def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authoriz
         "start_date": date.today().isoformat(),
         "status": "Submitted",
         "frequency": "Monthly",
+        "budget_round_id": round_id,
     }
     a_resp = client.post("/sponsorships", json=payload_a)
     b_resp = client.post("/sponsorships", json=payload_b)
@@ -271,7 +607,9 @@ def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authoriz
     assert f"{b_id},Submitted" not in body
 
 
-def test_sponsorship_excel_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, sample_member):
+def test_sponsorship_excel_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, admin_user, sample_member):
+    authorize(sponsorship_user)
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=10)
     authorize(sponsorship_user)
     payload_a = {
         "sponsor_member_id": sample_member.id,
@@ -288,6 +626,7 @@ def test_sponsorship_excel_export_honors_filters_and_selected_ids(client, author
         "start_date": date.today().isoformat(),
         "status": "Submitted",
         "frequency": "Monthly",
+        "budget_round_id": round_id,
     }
     a_resp = client.post("/sponsorships", json=payload_a)
     b_resp = client.post("/sponsorships", json=payload_b)

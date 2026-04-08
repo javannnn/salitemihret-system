@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.member import (
     ALLOWED_CONTRIBUTION_EXCEPTION_REASONS,
     MemberCreate,
+    MemberPermanentDeleteImpact,
     MemberDetailOut,
     MemberDuplicateMatch,
     MemberDuplicateResponse,
@@ -35,8 +36,11 @@ from app.schemas.member import (
     MemberSundaySchoolPaymentOut,
     MemberChildSearchItem,
     MemberChildSearchResponse,
+    MemberTimelineResponse,
 )
 from app.services.audit import record_member_changes, snapshot_member
+from app.services.member_deletion import build_member_permanent_delete_impact, permanently_delete_member_record
+from app.services.member_timeline import list_member_timeline
 from app.services.members_query import apply_member_sort, build_members_query
 from app.services.members_utils import (
     apply_children,
@@ -81,6 +85,7 @@ OVERRIDE_ROLES = {"Admin", "PublicRelations", "FinanceAdmin"}
 
 DEFAULT_CONTRIBUTION_AMOUNT = Decimal("75.00")
 DEFAULT_CONTRIBUTION_CURRENCY = "CAD"
+AUDIT_ROLES = ("PublicRelations", "Registrar", "Admin")
 
 
 def _ensure_unique_contacts(
@@ -203,6 +208,25 @@ def _decimal_or_none(value) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _get_archived_member_or_404(db: Session, member_id: int) -> Member:
+    member = (
+        db.query(Member)
+        .filter(Member.id == member_id, Member.deleted_at.isnot(None))
+        .first()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archived member not found")
+    return member
+
+
+def _blocked_permanent_delete_message(impact: MemberPermanentDeleteImpact) -> str:
+    joined = ", ".join(f"{item.label} ({item.count})" for item in impact.blockers)
+    return (
+        "Permanent deletion is blocked because this archived member is still linked to "
+        f"{joined}. Restore the member or clean up those records first."
+    )
 
 
 @router.get("", response_model=MemberListResponse)
@@ -982,6 +1006,34 @@ def create_member_contribution(
     return ContributionPaymentOut.from_orm(payment)
 
 
+@router.get(
+    "/{member_id}/timeline",
+    response_model=MemberTimelineResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_member_timeline(
+    member_id: int,
+    limit: int = Query(100, ge=10, le=250),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*AUDIT_ROLES)),
+) -> MemberTimelineResponse:
+    return list_member_timeline(db, member_id, limit=limit)
+
+
+@router.get(
+    "/{member_id}/permanent-delete-impact",
+    response_model=MemberPermanentDeleteImpact,
+    status_code=status.HTTP_200_OK,
+)
+def get_member_permanent_delete_impact(
+    member_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*DELETE_ROLES)),
+) -> MemberPermanentDeleteImpact:
+    member = _get_archived_member_or_404(db, member_id)
+    return build_member_permanent_delete_impact(db, member)
+
+
 @router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_member(
     member_id: int,
@@ -1007,6 +1059,25 @@ def delete_member(
     db.commit()
 
     logger.info("member archived", extra={"actor": current_user.email, "member": member.username})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{member_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+def permanently_delete_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*DELETE_ROLES)),
+    current_user=Depends(get_current_user),
+) -> Response:
+    member = _get_archived_member_or_404(db, member_id)
+    impact = build_member_permanent_delete_impact(db, member)
+    if not impact.can_delete:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_blocked_permanent_delete_message(impact))
+
+    member_name = member.username
+    permanently_delete_member_record(db, member)
+    db.commit()
+    logger.info("member permanently deleted", extra={"actor": current_user.email, "member": member_name})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

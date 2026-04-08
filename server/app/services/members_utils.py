@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Iterable, Optional, Sequence
 
 from slugify import slugify
@@ -10,6 +11,9 @@ from app.models.household import Household
 from app.models.member import Child, Member, Spouse
 from app.models.priest import Priest
 
+MOCK_MEMBER_EMAIL_DOMAIN = "example.invalid"
+_MOCK_EMAIL_LOCAL_RE = re.compile(r"[^a-z0-9._-]+")
+
 
 def generate_username(db: Session, first_name: str, last_name: str) -> str:
     base = slugify(f"{first_name}.{last_name}", separator=".")
@@ -19,6 +23,17 @@ def generate_username(db: Session, first_name: str, last_name: str) -> str:
         candidate = f"{base}-{suffix}"
         suffix += 1
     return candidate
+
+
+def build_mock_member_email(*, username: str | None = None, member_id: int | None = None) -> str:
+    if member_id is not None:
+        return f"mock+member-{member_id}@{MOCK_MEMBER_EMAIL_DOMAIN}"
+
+    local_part = _MOCK_EMAIL_LOCAL_RE.sub("-", (username or "").strip().lower()).strip(".-")
+    if local_part:
+        return f"mock+{local_part}@{MOCK_MEMBER_EMAIL_DOMAIN}"
+
+    raise ValueError("username or member_id is required to build a mock member email")
 
 
 def ensure_household(db: Session, name: str) -> Household:

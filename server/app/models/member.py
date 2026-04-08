@@ -35,7 +35,7 @@ class Member(Base):
     middle_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=False)
     username = Column(String(150), unique=True, nullable=False, index=True)
-    email = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=False)
     phone = Column(String(25), nullable=True)
     birth_date = Column(Date, nullable=True)
     gender = Column(MemberGender, nullable=True)

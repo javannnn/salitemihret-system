@@ -10,8 +10,10 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.models.user import User
 from app.services.permissions import (
+    PermissionAction,
     forbidden_write_fields,
     has_any_custom_role,
+    has_field_permission,
     has_module_permission,
     infer_permission_target,
 )
@@ -129,6 +131,15 @@ def require_super_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_super_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super Admin privileges required")
     return user
+
+
+def require_field_permission(module: str, field: str, action: PermissionAction) -> Callable[..., User]:
+    def checker(user: User = Depends(get_current_user)) -> User:
+        if not has_field_permission(user, module, field, action):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Field access denied")
+        return user
+
+    return checker
 
 
 def get_current_active_user(

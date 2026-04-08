@@ -2,6 +2,14 @@ import { useMemo } from "react";
 
 import { useAuth } from "@/context/AuthContext";
 
+export type ReportPermissionKey =
+  | "overview"
+  | "members"
+  | "payments"
+  | "sponsorships"
+  | "newcomers"
+  | "schools";
+
 export type PermissionMap = {
   viewMembers: boolean;
   createMembers: boolean;
@@ -156,19 +164,31 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
 export function usePermissions(): PermissionMap & {
   hasRole: (role: string) => boolean;
   isSuperAdmin: boolean;
-  modules: Record<string, { read: boolean; write: boolean }>;
+  modules: Record<string, { read: boolean; write: boolean; visible: boolean }>;
+  isModuleVisible: (module: string) => boolean;
   canReadField: (module: string, field: string) => boolean;
   canWriteField: (module: string, field: string) => boolean;
+  canAccessReport: (report: ReportPermissionKey) => boolean;
 } {
   const { user } = useAuth();
 
   return useMemo(() => {
     const roles = user?.roles ?? [];
     const isSuperAdmin = Boolean(user?.is_super_admin);
-    const modules = user?.permissions?.modules ?? {};
+    const rawModules = user?.permissions?.modules ?? {};
     const fields = user?.permissions?.fields ?? {};
     const legacy = user?.permissions?.legacy;
     const merged: PermissionMap = { ...BASE_PERMISSIONS };
+    const modules = Object.fromEntries(
+      Object.entries(rawModules).map(([module, flags]) => [
+        module,
+        {
+          read: Boolean(flags.read),
+          write: Boolean(flags.write),
+          visible: Boolean((flags as { visible?: boolean }).visible ?? flags.read ?? flags.write),
+        },
+      ])
+    ) as Record<string, { read: boolean; write: boolean; visible: boolean }>;
 
     if (isSuperAdmin) {
       Object.keys(merged).forEach((key) => {
@@ -216,12 +236,23 @@ export function usePermissions(): PermissionMap & {
       return Boolean(entry.write);
     };
 
+    const isModuleVisible = (module: string) => {
+      if (isSuperAdmin) return true;
+      const entry = modules[module];
+      if (!entry) return false;
+      return Boolean(entry.visible ?? entry.read ?? entry.write);
+    };
+
+    const canAccessReport = (report: ReportPermissionKey) => canReadField("reports", report);
+
     return {
       ...merged,
       isSuperAdmin,
       modules,
+      isModuleVisible,
       canReadField,
       canWriteField,
+      canAccessReport,
       hasRole: (role: string) => roles.includes(role) || isSuperAdmin,
     };
   }, [user]);

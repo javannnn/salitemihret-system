@@ -19,14 +19,20 @@ export default function ReportsClient() {
     const [assistantOpen, setAssistantOpen] = useState(false);
     const permissions = usePermissions();
     const navigate = useNavigate();
+    const canViewOverviewReport = permissions.canAccessReport("overview");
+    const canViewMembersReport = permissions.viewMembers && permissions.canAccessReport("members");
+    const canViewNewcomersReport = permissions.viewNewcomers && permissions.canAccessReport("newcomers");
+    const canViewPaymentsReport = permissions.viewPayments && permissions.canAccessReport("payments");
+    const canViewSponsorshipsReport = permissions.viewSponsorships && permissions.canAccessReport("sponsorships");
+    const canViewSchoolsReport = permissions.viewSchools && permissions.canAccessReport("schools");
 
     const tabs = [
-        { id: "overview", label: "Overview", icon: LayoutDashboard, visible: true },
-        { id: "members", label: "Members", icon: Users, visible: permissions.viewMembers },
-        { id: "newcomers", label: "Newcomers", icon: UserPlus, visible: permissions.viewNewcomers },
-        { id: "payments", label: "Financials", icon: CreditCard, visible: permissions.viewPayments },
-        { id: "sponsorships", label: "Sponsorships", icon: Heart, visible: permissions.viewSponsorships || permissions.viewNewcomers },
-        { id: "schools", label: "Schools", icon: GraduationCap, visible: permissions.viewSchools },
+        { id: "overview", label: "Overview", icon: LayoutDashboard, visible: canViewOverviewReport },
+        { id: "members", label: "Members", icon: Users, visible: canViewMembersReport },
+        { id: "newcomers", label: "Newcomers", icon: UserPlus, visible: canViewNewcomersReport },
+        { id: "payments", label: "Financials", icon: CreditCard, visible: canViewPaymentsReport },
+        { id: "sponsorships", label: "Sponsorships", icon: Heart, visible: canViewSponsorshipsReport },
+        { id: "schools", label: "Schools", icon: GraduationCap, visible: canViewSchoolsReport },
     ] as const;
 
     const visibleTabs = tabs.filter(t => t.visible);
@@ -34,36 +40,40 @@ export default function ReportsClient() {
     const assistantModules = useMemo(() => {
         switch (activeTab) {
             case "members":
-                return permissions.viewMembers ? ["members"] as AIReportQAModule[] : [];
+                return canViewMembersReport ? ["members"] as AIReportQAModule[] : [];
             case "payments":
-                return permissions.viewPayments ? ["payments"] as AIReportQAModule[] : [];
+                return canViewPaymentsReport ? ["payments"] as AIReportQAModule[] : [];
             case "newcomers":
-                return permissions.viewNewcomers ? ["newcomers", "activity"] as AIReportQAModule[] : [];
+                return [
+                    ...(canViewNewcomersReport ? ["newcomers" as const] : []),
+                    ...(canViewOverviewReport ? ["activity" as const] : []),
+                ];
             case "sponsorships":
                 return [
-                    ...(permissions.viewSponsorships ? ["sponsorships" as const] : []),
-                    ...(permissions.viewNewcomers ? ["newcomers" as const] : []),
+                    ...(canViewSponsorshipsReport ? ["sponsorships" as const] : []),
+                    ...(canViewNewcomersReport ? ["newcomers" as const] : []),
                 ];
             case "schools":
-                return permissions.viewSchools ? ["schools"] as AIReportQAModule[] : [];
+                return canViewSchoolsReport ? ["schools"] as AIReportQAModule[] : [];
             case "overview":
             default:
                 return [
-                    ...(permissions.viewMembers ? ["members" as const] : []),
-                    ...(permissions.viewPayments ? ["payments" as const] : []),
-                    ...(permissions.viewSponsorships ? ["sponsorships" as const] : []),
-                    ...(permissions.viewNewcomers ? ["newcomers" as const] : []),
-                    ...(permissions.viewSchools ? ["schools" as const] : []),
-                    "activity" as const,
+                    ...(canViewMembersReport ? ["members" as const] : []),
+                    ...(canViewPaymentsReport ? ["payments" as const] : []),
+                    ...(canViewSponsorshipsReport ? ["sponsorships" as const] : []),
+                    ...(canViewNewcomersReport ? ["newcomers" as const] : []),
+                    ...(canViewSchoolsReport ? ["schools" as const] : []),
+                    ...(canViewOverviewReport ? ["activity" as const] : []),
                 ];
         }
     }, [
         activeTab,
-        permissions.viewMembers,
-        permissions.viewPayments,
-        permissions.viewSponsorships,
-        permissions.viewNewcomers,
-        permissions.viewSchools,
+        canViewMembersReport,
+        canViewNewcomersReport,
+        canViewOverviewReport,
+        canViewPaymentsReport,
+        canViewSchoolsReport,
+        canViewSponsorshipsReport,
     ]);
 
     const assistantConfig = useMemo(() => {
@@ -143,19 +153,19 @@ export default function ReportsClient() {
     const renderContent = () => {
         switch (activeTab) {
             case "overview":
-                return <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} />;
+                return canViewOverviewReport ? <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} /> : null;
             case "members":
-                return permissions.viewMembers ? <MembersReport /> : null;
+                return canViewMembersReport ? <MembersReport /> : null;
             case "newcomers":
-                return permissions.viewNewcomers ? <NewcomersReport /> : null;
+                return canViewNewcomersReport ? <NewcomersReport /> : null;
             case "payments":
-                return permissions.viewPayments ? <PaymentsReport /> : null;
+                return canViewPaymentsReport ? <PaymentsReport /> : null;
             case "sponsorships":
-                return (permissions.viewSponsorships || permissions.viewNewcomers) ? <SponsorshipsReport /> : null;
+                return canViewSponsorshipsReport ? <SponsorshipsReport /> : null;
             case "schools":
-                return permissions.viewSchools ? <SchoolsReport /> : null;
+                return canViewSchoolsReport ? <SchoolsReport /> : null;
             default:
-                return <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} />;
+                return canViewOverviewReport ? <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} /> : null;
         }
     };
 

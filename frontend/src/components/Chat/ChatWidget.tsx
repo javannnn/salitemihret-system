@@ -4,10 +4,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, X, Send, Paperclip, Image as ImageIcon, Smile, MoreVertical, Phone, Video, Search, ChevronLeft, Check, CheckCheck, Trash2 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
 
+const CHAT_WIDGET_HIDDEN_STORAGE_KEY = 'sm:chat-widget-hidden';
+
 export function ChatWidget() {
-    const { isOpen, toggleChat, conversations, activeConversationId, chatAvailable } = useChat();
+    const { isOpen, setIsOpen, toggleChat, conversations, activeConversationId, chatAvailable } = useChat();
     const unreadTotal = conversations.reduce((acc, curr) => acc + curr.unreadCount, 0);
     const [isBouncing, setIsBouncing] = useState(false);
+    const [isLauncherHidden, setIsLauncherHidden] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem(CHAT_WIDGET_HIDDEN_STORAGE_KEY) === '1';
+    });
+    const [showRestoreHint, setShowRestoreHint] = useState(false);
     const prevUnreadRef = useRef(unreadTotal);
 
     // Cute dance on new unread messages
@@ -20,63 +27,159 @@ export function ChatWidget() {
         prevUnreadRef.current = unreadTotal;
     }, [unreadTotal]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(CHAT_WIDGET_HIDDEN_STORAGE_KEY, isLauncherHidden ? '1' : '0');
+    }, [isLauncherHidden]);
+
+    useEffect(() => {
+        if (!showRestoreHint || typeof window === 'undefined') return;
+        const timer = window.setTimeout(() => {
+            setShowRestoreHint(false);
+        }, 4200);
+        return () => window.clearTimeout(timer);
+    }, [showRestoreHint]);
+
+    const handleHideLauncher = () => {
+        setIsOpen(false);
+        setIsLauncherHidden(true);
+        setShowRestoreHint(true);
+    };
+
+    const handleRestoreLauncher = () => {
+        setIsLauncherHidden(false);
+        setShowRestoreHint(false);
+    };
+
     return (
-        <motion.div
-            className="fixed bottom-6 right-6 z-[1000]"
-        >
-            <AnimatePresence>
-                {isOpen && (
-                    <ChatWindow />
-                )}
-            </AnimatePresence>
+        <AnimatePresence mode="wait" initial={false}>
+            {isLauncherHidden ? (
+                <motion.div
+                    key="chat-restore-marker"
+                    className="fixed bottom-5 left-4 z-[1000] flex flex-col items-start gap-2"
+                    initial={{ opacity: 0, x: -20, y: 16 }}
+                    animate={{ opacity: 1, x: 0, y: 0 }}
+                    exit={{ opacity: 0, x: -12, y: 12 }}
+                    transition={{ type: "spring", stiffness: 280, damping: 26 }}
+                >
+                    <AnimatePresence>
+                        {showRestoreHint && (
+                            <motion.div
+                                key="chat-restore-hint"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 6 }}
+                                className="ml-2"
+                            >
+                                <div className="relative rounded-2xl border border-indigo-200/60 bg-white/75 px-3 py-2 text-[11px] font-medium text-slate-700 shadow-lg shadow-indigo-500/10 backdrop-blur-md dark:border-indigo-400/20 dark:bg-slate-950/70 dark:text-slate-200">
+                                    Chat is here. Click the line to restore.
+                                    <span className="absolute -bottom-1 left-5 h-2.5 w-2.5 rotate-45 border-b border-r border-indigo-200/60 bg-white/75 dark:border-indigo-400/20 dark:bg-slate-950/70" />
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
-            <motion.button
-                className={`absolute bottom-0 right-0 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
-                    }`}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={chatAvailable ? toggleChat : undefined}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{
-                    scale: isBouncing ? [1, 1.12, 0.96, 1.05, 1] : 1,
-                    opacity: 1,
-                    rotate: isBouncing ? [0, -6, 6, -6, 0] : 0
-                }}
-                transition={{
-                    scale: isBouncing ? { duration: 0.7, ease: "easeInOut" } : { type: "spring", stiffness: 260, damping: 20 },
-                    opacity: { duration: 0.3 },
-                    rotate: { duration: 0.7, ease: "easeInOut" }
-                }}
-            >
-                <AnimatePresence mode="wait">
-                    {isOpen ? (
-                        <motion.div
-                            key="close"
-                            initial={{ rotate: -90, opacity: 0 }}
-                            animate={{ rotate: 0, opacity: 1 }}
-                            exit={{ rotate: 90, opacity: 0 }}
-                        >
-                            <X size={24} />
-                        </motion.div>
-                    ) : (
-                        <motion.div
-                            key="open"
-                            initial={{ rotate: 90, opacity: 0 }}
-                            animate={{ rotate: 0, opacity: 1 }}
-                            exit={{ rotate: -90, opacity: 0 }}
-                        >
-                            <MessageCircle size={24} />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                    <motion.button
+                        type="button"
+                        aria-label="Restore chat bubble"
+                        onClick={handleRestoreLauncher}
+                        className="group relative flex items-center gap-2 rounded-full px-1 py-2 focus:outline-none focus:ring-4 focus:ring-indigo-300/50 dark:focus:ring-indigo-900"
+                        whileHover={{ x: 2 }}
+                        whileTap={{ scale: 0.97 }}
+                    >
+                        <motion.span
+                            className="block h-2 w-16 rounded-full border border-indigo-300/40 bg-gradient-to-r from-sky-400/25 via-indigo-500/55 to-violet-500/35 shadow-[0_0_20px_rgba(99,102,241,0.28)] backdrop-blur-md dark:border-indigo-300/20"
+                            animate={{
+                                opacity: unreadTotal > 0 ? [0.7, 1, 0.7] : [0.55, 0.85, 0.55],
+                                scaleX: unreadTotal > 0 ? [1, 1.08, 1] : [1, 1.04, 1]
+                            }}
+                            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                        />
+                        {!isOpen && unreadTotal > 0 && (
+                            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-950">
+                                {unreadTotal}
+                            </span>
+                        )}
+                    </motion.button>
+                </motion.div>
+            ) : (
+                <motion.div
+                    key="chat-launcher"
+                    className="fixed bottom-6 right-6 z-[1000]"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 12 }}
+                    transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                >
+                    <AnimatePresence>
+                        {isOpen && (
+                            <ChatWindow />
+                        )}
+                    </AnimatePresence>
 
-                {!isOpen && unreadTotal > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white ring-2 ring-white">
-                        {unreadTotal}
-                    </span>
-                )}
-            </motion.button>
-        </motion.div>
+                    <div className="relative h-14 w-14">
+                        <button
+                            type="button"
+                            aria-label="Hide chat bubble"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                handleHideLauncher();
+                            }}
+                            className="absolute -left-2 -top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/95 text-indigo-600 shadow-lg shadow-indigo-500/15 transition hover:scale-105 hover:text-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300/50 dark:border-slate-700 dark:bg-slate-900/95 dark:text-indigo-300 dark:hover:text-indigo-200 dark:focus:ring-indigo-900"
+                        >
+                            <X size={14} />
+                        </button>
+
+                        <motion.button
+                            className={`flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-900 transition ${chatAvailable ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
+                                }`}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={chatAvailable ? toggleChat : undefined}
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{
+                                scale: isBouncing ? [1, 1.12, 0.96, 1.05, 1] : 1,
+                                opacity: 1,
+                                rotate: isBouncing ? [0, -6, 6, -6, 0] : 0
+                            }}
+                            transition={{
+                                scale: isBouncing ? { duration: 0.7, ease: "easeInOut" } : { type: "spring", stiffness: 260, damping: 20 },
+                                opacity: { duration: 0.3 },
+                                rotate: { duration: 0.7, ease: "easeInOut" }
+                            }}
+                        >
+                            <AnimatePresence mode="wait">
+                                {isOpen ? (
+                                    <motion.div
+                                        key="close"
+                                        initial={{ rotate: -90, opacity: 0 }}
+                                        animate={{ rotate: 0, opacity: 1 }}
+                                        exit={{ rotate: 90, opacity: 0 }}
+                                    >
+                                        <X size={24} />
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key="open"
+                                        initial={{ rotate: 90, opacity: 0 }}
+                                        animate={{ rotate: 0, opacity: 1 }}
+                                        exit={{ rotate: -90, opacity: 0 }}
+                                    >
+                                        <MessageCircle size={24} />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            {!isOpen && unreadTotal > 0 && (
+                                <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white ring-2 ring-white">
+                                    {unreadTotal}
+                                </span>
+                            )}
+                        </motion.button>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
     );
 }
 

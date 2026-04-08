@@ -25,6 +25,7 @@ from app.schemas.member import (
     ALLOWED_MEMBER_MARITAL_STATUSES,
     ALLOWED_MEMBER_STATUSES,
     normalize_member_phone,
+    normalize_required_member_email,
 )
 from app.services.audit import empty_member_snapshot, record_member_changes, snapshot_member
 from app.services.members_utils import apply_children, apply_spouse, ensure_priest, generate_username
@@ -130,17 +131,18 @@ def import_members_from_csv(db: Session, file_bytes: bytes, actor_id: int) -> Im
         raise ValueError("No recognized member headers found in CSV")
 
     report = ImportReport()
-    rows_processed = 0
+    prepared_rows: list[tuple[int, dict[str, str]]] = []
 
     for row_index, raw_row in enumerate(reader, start=2):
         normalized_row = _normalize_row(raw_row, header_map)
         if _row_is_empty(normalized_row.values()):
             continue
+        prepared_rows.append((row_index, normalized_row))
 
-        rows_processed += 1
-        if rows_processed > MAX_IMPORT_ROWS:
-            raise ValueError(f"CSV exceeds maximum allowed rows ({MAX_IMPORT_ROWS})")
+    if len(prepared_rows) > MAX_IMPORT_ROWS:
+        raise ValueError(f"CSV exceeds maximum allowed rows ({MAX_IMPORT_ROWS})")
 
+    for row_index, normalized_row in prepared_rows:
         try:
             cleaned = _clean_row(row_index, normalized_row)
             result = _upsert_member(db, row_index, cleaned, actor_id)
@@ -243,7 +245,14 @@ def _clean_row(row_number: int, row: dict[str, str]) -> dict[str, Any]:
     for key in string_fields:
         if key in row:
             value = _clean_string(row[key])
-            if key == "phone":
+            if key == "email":
+                if value is None:
+                    raise ImportRowError(row_number, "email cannot be empty")
+                try:
+                    cleaned[key] = normalize_required_member_email(value)
+                except ValueError as exc:
+                    raise ImportRowError(row_number, str(exc)) from exc
+            elif key == "phone":
                 if value is None:
                     raise ImportRowError(row_number, "phone cannot be empty")
                 try:
@@ -252,9 +261,6 @@ def _clean_row(row_number: int, row: dict[str, str]) -> dict[str, Any]:
                     raise ImportRowError(row_number, str(exc)) from exc
             else:
                 cleaned[key] = value
-
-    if "email" in cleaned and cleaned["email"]:
-        cleaned["email"] = cleaned["email"].lower()
 
     if "gender" in row:
         gender = _clean_string(row["gender"])
@@ -490,6 +496,9 @@ def _upsert_member(db: Session, row_number: int, data: dict[str, Any], actor_id:
     member = _locate_member(db, data)
     is_new = member is None
 
+    if not data.get("email"):
+        raise ImportRowError(row_number, "email is required for imported members")
+
     if is_new:
         first_name = data.get("first_name")
         last_name = data.get("last_name")
@@ -544,6 +553,9 @@ def _upsert_member(db: Session, row_number: int, data: dict[str, Any], actor_id:
 
     if member.has_father_confessor and member.father_confessor is None:
         raise ImportRowError(row_number, "Father confessor is required when marked as having one")
+
+    if not member.email or not str(member.email).strip():
+        raise ImportRowError(row_number, "email is required for imported members")
 
     member.updated_by_id = actor_id
     db.flush()

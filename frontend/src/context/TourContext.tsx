@@ -81,12 +81,13 @@ export function TourProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const filteredSteps = useMemo(() => {
-    const hasMembers = permissions.viewMembers;
-    const hasPayments = permissions.viewPayments;
+    const hasMembers = permissions.viewMembers && permissions.isModuleVisible("members");
+    const hasPayments = permissions.viewPayments && permissions.isModuleVisible("payments");
     const canRecordPayments = permissions.managePayments;
     const hasSponsorships =
-      permissions.manageSponsorships || permissions.viewSponsorships || permissions.manageNewcomers || permissions.viewNewcomers;
-    const hasSchools = permissions.viewSchools;
+      permissions.isModuleVisible("sponsorships") &&
+      (permissions.manageSponsorships || permissions.viewSponsorships || permissions.manageNewcomers || permissions.viewNewcomers);
+    const hasSchools = permissions.viewSchools && permissions.isModuleVisible("schools");
     const canManageSchools = permissions.manageSchools;
 
     const base: TourStep[] = [

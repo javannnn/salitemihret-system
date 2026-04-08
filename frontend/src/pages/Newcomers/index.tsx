@@ -9,19 +9,17 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
 import { getCache, setCache } from "@/lib/cache";
 import {
-  ApiCapabilities,
   ApiError,
+  Member,
   Newcomer,
   NewcomerInteraction,
   NewcomerMetrics,
   NewcomerListResponse,
-  StaffSummary,
   createNewcomer,
   createNewcomerInteraction,
-  getApiCapabilities,
   getNewcomerMetrics,
   listNewcomers,
-  listStaff,
+  searchMembers,
   transitionNewcomerStatus,
   updateNewcomer,
 } from "@/lib/api";
@@ -34,7 +32,9 @@ import {
   PROVINCE_OPTIONS,
 } from "@/lib/options";
 import {
+  formatCanadianPostalCode,
   getCanonicalCanadianPhone,
+  getCanadianPostalCodeValidationMessage,
   getCanadianPhoneSnapSuggestion,
   getCanadianPhoneValidationMessage,
   hasValidEmail,
@@ -131,6 +131,11 @@ function formatDate(value?: string | null) {
   return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
 }
 
+function memberFullName(member?: Pick<Member, "first_name" | "last_name"> | null) {
+  if (!member) return "";
+  return [member.first_name, member.last_name].filter(Boolean).join(" ").trim();
+}
+
 function allowedStatuses(current: Newcomer["status"]) {
   if (current === "Closed") {
     return STATUS_FLOW.filter((status) => status !== "Closed");
@@ -150,17 +155,14 @@ export default function NewcomersWorkspace() {
   const [metrics, setMetrics] = useState<NewcomerMetrics | null>(null);
   const [newcomers, setNewcomers] = useState<NewcomerListResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [apiCaps, setApiCaps] = useState<ApiCapabilities | null>(null);
   const [filters, setFilters] = useState({
     status: "",
     county: "",
-    assigned_owner_id: "",
     interpreter_required: "",
     inactive: "",
     q: "",
     page: 1,
   });
-  const [staff, setStaff] = useState<StaffSummary[]>([]);
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>(0);
@@ -175,7 +177,11 @@ export default function NewcomersWorkspace() {
   const [statusSubmitting, setStatusSubmitting] = useState(false);
 
   const [assignModal, setAssignModal] = useState<AssignModalState>({ open: false, newcomer: null });
-  const [assignStaffId, setAssignStaffId] = useState("");
+  const [assignSponsorId, setAssignSponsorId] = useState("");
+  const [assignSponsorName, setAssignSponsorName] = useState("");
+  const [assignSponsorQuery, setAssignSponsorQuery] = useState("");
+  const [assignSponsorResults, setAssignSponsorResults] = useState<Member[]>([]);
+  const [assignSponsorLoading, setAssignSponsorLoading] = useState(false);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
 
   const [interactionModal, setInteractionModal] = useState<InteractionModalState>({ open: false, newcomer: null });
@@ -184,12 +190,7 @@ export default function NewcomersWorkspace() {
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const listRequestRef = useRef(0);
   const debouncedQuery = useDebouncedValue(filters.q, 350);
-
-  useEffect(() => {
-    getApiCapabilities()
-      .then(setApiCaps)
-      .catch(() => setApiCaps({ supportsStaff: true, supportsSponsorContext: true, supportsSubmittedStatus: true }));
-  }, []);
+  const debouncedAssignSponsorQuery = useDebouncedValue(assignSponsorQuery, 300);
 
   const totalPages = useMemo(() => {
     if (!newcomers) return 1;
@@ -220,10 +221,6 @@ export default function NewcomersWorkspace() {
     if (filters.county) {
       chips.push(`Province: ${filters.county}`);
     }
-    if (filters.assigned_owner_id) {
-      const staffMember = staff.find((item) => item.id === Number(filters.assigned_owner_id));
-      chips.push(`Assigned: ${staffMember?.full_name || staffMember?.username || filters.assigned_owner_id}`);
-    }
     if (filters.interpreter_required) {
       chips.push(`Interpreter: ${filters.interpreter_required === "true" ? "Yes" : "No"}`);
     }
@@ -232,13 +229,12 @@ export default function NewcomersWorkspace() {
     }
     if (filters.q) chips.push(`Search: ${filters.q}`);
     return chips;
-  }, [filters, staff]);
+  }, [filters]);
 
   const listPayload = useMemo(
     () => ({
       status: filters.status || undefined,
       county: filters.county || undefined,
-      assigned_owner_id: filters.assigned_owner_id ? Number(filters.assigned_owner_id) : undefined,
       interpreter_required: filters.interpreter_required ? filters.interpreter_required === "true" : undefined,
       inactive: filters.inactive ? filters.inactive === "true" : undefined,
       q: debouncedQuery || undefined,
@@ -248,7 +244,6 @@ export default function NewcomersWorkspace() {
     [
       filters.status,
       filters.county,
-      filters.assigned_owner_id,
       filters.interpreter_required,
       filters.inactive,
       filters.page,
@@ -307,23 +302,39 @@ export default function NewcomersWorkspace() {
   }, [canView, toast]);
 
   useEffect(() => {
-    if (!canView) return;
-    if (!apiCaps) return;
-    if (!apiCaps.supportsStaff) return;
-    const cachedStaff = getCache<StaffSummary[]>("staff:list", 5 * 60_000);
-    if (cachedStaff) {
-      setStaff(cachedStaff);
+    if (!assignModal.open) {
+      setAssignSponsorResults([]);
+      setAssignSponsorLoading(false);
+      return;
     }
-    listStaff()
+    if (!debouncedAssignSponsorQuery.trim()) {
+      setAssignSponsorResults([]);
+      setAssignSponsorLoading(false);
+      return;
+    }
+    let active = true;
+    setAssignSponsorLoading(true);
+    searchMembers(debouncedAssignSponsorQuery.trim(), 6)
       .then((response) => {
-        setStaff(response.items);
-        setCache("staff:list", response.items);
+        if (active) {
+          setAssignSponsorResults(response.items.slice(0, 6));
+        }
       })
       .catch((error) => {
-        console.error(error);
-        toast.push("Unable to load staff list.");
+        if (active) {
+          console.error(error);
+          setAssignSponsorResults([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAssignSponsorLoading(false);
+        }
       });
-  }, [canView, toast, apiCaps]);
+    return () => {
+      active = false;
+    };
+  }, [assignModal.open, debouncedAssignSponsorQuery]);
 
   const refreshMetrics = () => {
     if (!canView) return;
@@ -434,6 +445,17 @@ export default function NewcomersWorkspace() {
       }
     }
 
+    if (steps.includes(2)) {
+      const postalCodeInput = wizardForm.temporary_address_postal_code.trim();
+      const postalCodeValidationMessage = postalCodeInput
+        ? getCanadianPostalCodeValidationMessage(postalCodeInput)
+        : null;
+
+      if (postalCodeValidationMessage) {
+        addFieldError(2, "temporary_address_postal_code", postalCodeValidationMessage);
+      }
+    }
+
     const formError =
       firstInvalidStep === 1
         ? "Phone and email are required before you can continue."
@@ -467,7 +489,7 @@ export default function NewcomersWorkspace() {
   };
 
   const handleCreateNewcomer = async () => {
-    const validation = validateWizardSteps([0, 1]);
+    const validation = validateWizardSteps([0, 1, 2]);
     if (!validation.isValid) {
       setWizardFieldErrors(validation.fieldErrors);
       setWizardError(validation.formError);
@@ -484,6 +506,7 @@ export default function NewcomersWorkspace() {
     const canonicalWhatsApp = wizardForm.contact_whatsapp
       ? getCanonicalCanadianPhone(wizardForm.contact_whatsapp)
       : null;
+    const formattedPostalCode = formatCanadianPostalCode(wizardForm.temporary_address_postal_code);
 
     setWizardSubmitting(true);
     setWizardError(null);
@@ -504,7 +527,7 @@ export default function NewcomersWorkspace() {
         temporary_address_street: wizardForm.temporary_address_street || undefined,
         temporary_address_city: wizardForm.temporary_address_city || undefined,
         temporary_address_province: wizardForm.temporary_address_province || undefined,
-        temporary_address_postal_code: wizardForm.temporary_address_postal_code || undefined,
+        temporary_address_postal_code: formattedPostalCode || undefined,
         past_profession: wizardForm.past_profession || undefined,
         notes: wizardForm.notes || undefined,
         arrival_date: new Date().toISOString().slice(0, 10),
@@ -560,7 +583,10 @@ export default function NewcomersWorkspace() {
   };
 
   const openAssignModal = (newcomer: Newcomer) => {
-    setAssignStaffId(newcomer.assigned_owner_id ? String(newcomer.assigned_owner_id) : "");
+    setAssignSponsorId(newcomer.sponsored_by_member_id ? String(newcomer.sponsored_by_member_id) : "");
+    setAssignSponsorName(newcomer.sponsored_by_member_name || "");
+    setAssignSponsorQuery("");
+    setAssignSponsorResults([]);
     setAssignModal({ open: true, newcomer });
   };
 
@@ -569,14 +595,14 @@ export default function NewcomersWorkspace() {
     setAssignSubmitting(true);
     try {
       await updateNewcomer(assignModal.newcomer.id, {
-        assigned_owner_id: assignStaffId ? Number(assignStaffId) : null,
+        sponsored_by_member_id: assignSponsorId ? Number(assignSponsorId) : null,
       });
-      toast.push("Assignment updated.");
+      toast.push("Sponsor assignment updated.");
       setAssignModal({ open: false, newcomer: null });
       setFilters((prev) => ({ ...prev }));
     } catch (error) {
       console.error(error);
-      toast.push("Unable to update assignment.");
+      toast.push("Unable to update sponsor assignment.");
     } finally {
       setAssignSubmitting(false);
     }
@@ -694,7 +720,7 @@ export default function NewcomersWorkspace() {
 
         <AnimatePresence>
           <motion.div
-            className="grid gap-3 md:grid-cols-3 xl:grid-cols-6"
+            className="grid gap-3 md:grid-cols-3 xl:grid-cols-4"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
@@ -709,20 +735,6 @@ export default function NewcomersWorkspace() {
                 {PROVINCE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs uppercase text-mute block mb-1">Assigned to</label>
-              <Select
-                value={filters.assigned_owner_id}
-                onChange={(event) => setFilters((prev) => ({ ...prev, assigned_owner_id: event.target.value, page: 1 }))}
-              >
-                <option value="">All</option>
-                {staff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name || member.username}
                   </option>
                 ))}
               </Select>
@@ -766,8 +778,7 @@ export default function NewcomersWorkspace() {
                 <th className="px-4 py-2 text-left">Primary contact</th>
                 <th className="px-4 py-2 text-left">Province</th>
                 <th className="px-4 py-2 text-left">Status</th>
-                <th className="px-4 py-2 text-left">Assigned to</th>
-                <th className="px-4 py-2 text-left">Sponsored by</th>
+                <th className="px-4 py-2 text-left">Assigned sponsor</th>
                 <th className="px-4 py-2 text-left">Sponsorship</th>
                 <th className="px-4 py-2 text-left">Last interaction</th>
                 <th className="px-4 py-2 text-left">Actions</th>
@@ -776,7 +787,7 @@ export default function NewcomersWorkspace() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
                     <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
                     Loading newcomers...
                   </td>
@@ -802,7 +813,6 @@ export default function NewcomersWorkspace() {
                         </Badge>
                       )}
                     </td>
-                    <td className="px-4 py-2">{item.assigned_owner_name || "-"}</td>
                     <td className="px-4 py-2">{item.sponsored_by_member_name || "-"}</td>
                     <td className="px-4 py-2">{item.latest_sponsorship_status || "-"}</td>
                     <td className="px-4 py-2">{formatDate(item.last_interaction_at)}</td>
@@ -813,7 +823,7 @@ export default function NewcomersWorkspace() {
                         </Button>
                         {canManage && (
                           <Button variant="ghost" size="sm" onClick={() => openAssignModal(item)}>
-                            Assign
+                            Assign sponsor
                           </Button>
                         )}
                         {canManage && (
@@ -832,7 +842,7 @@ export default function NewcomersWorkspace() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
                     No newcomers found.
                   </td>
                 </tr>
@@ -1125,9 +1135,22 @@ export default function NewcomersWorkspace() {
                     <div>
                       <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
                       <Input
+                        placeholder="A1A 1A1"
+                        className={fieldErrorClass("temporary_address_postal_code")}
                         value={wizardForm.temporary_address_postal_code}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, temporary_address_postal_code: event.target.value }))}
+                        onChange={(event) => {
+                          setWizardForm((prev) => ({
+                            ...prev,
+                            temporary_address_postal_code: formatCanadianPostalCode(event.target.value),
+                          }));
+                          clearWizardFieldError("temporary_address_postal_code");
+                        }}
                       />
+                      {wizardFieldErrors.temporary_address_postal_code ? (
+                        <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.temporary_address_postal_code}</p>
+                      ) : (
+                        <p className="mt-1 text-xs text-mute">Optional. Use Canadian format A1A 1A1.</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1234,21 +1257,66 @@ export default function NewcomersWorkspace() {
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <Card className="w-full max-w-md p-5 space-y-3">
-              <h3 className="text-lg font-semibold">Assign staff</h3>
-              <Select value={assignStaffId} onChange={(event) => setAssignStaffId(event.target.value)}>
-                <option value="">Unassigned</option>
-                {staff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name || member.username}
-                  </option>
-                ))}
-              </Select>
+              <h3 className="text-lg font-semibold">Assign sponsor</h3>
+              <div className="space-y-3">
+                <div className="text-sm text-mute">
+                  Current sponsor: <span className="font-medium text-ink">{assignSponsorName || "Unassigned"}</span>
+                </div>
+                <Input
+                  value={assignSponsorQuery}
+                  onChange={(event) => setAssignSponsorQuery(event.target.value)}
+                  placeholder="Search member by name"
+                />
+                {assignSponsorLoading && <p className="text-xs text-mute">Searching members...</p>}
+                {!assignSponsorLoading && assignSponsorQuery.trim() && assignSponsorResults.length === 0 && (
+                  <p className="text-xs text-mute">No matching members found.</p>
+                )}
+                {assignSponsorResults.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto rounded-xl border border-border">
+                    {assignSponsorResults.map((member) => {
+                      const name = memberFullName(member) || member.username;
+                      const selected = String(member.id) === assignSponsorId;
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${selected ? "bg-accent/10 text-accent" : "hover:bg-muted/50"}`}
+                          onClick={() => {
+                            setAssignSponsorId(String(member.id));
+                            setAssignSponsorName(name);
+                            setAssignSponsorQuery("");
+                            setAssignSponsorResults([]);
+                          }}
+                        >
+                          <span>{name}</span>
+                          {selected && <span className="text-xs font-medium">Selected</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {assignSponsorId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setAssignSponsorId("");
+                      setAssignSponsorName("");
+                      setAssignSponsorQuery("");
+                      setAssignSponsorResults([]);
+                    }}
+                  >
+                    Clear sponsor
+                  </Button>
+                )}
+              </div>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setAssignModal({ open: false, newcomer: null })}>
                   Cancel
                 </Button>
                 <Button onClick={handleAssign} disabled={assignSubmitting}>
-                  {assignSubmitting ? "Saving..." : "Save"}
+                  {assignSubmitting ? "Saving..." : "Save sponsor"}
                 </Button>
               </div>
             </Card>
