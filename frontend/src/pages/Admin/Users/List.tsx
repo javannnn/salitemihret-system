@@ -50,12 +50,14 @@ import {
   formatDateTime,
   formatRelativeTime,
   formatRoleLabel,
+  formatUserLifecycleLabel,
   getUserDisplayName,
+  getUserLifecycleTone,
   ToneBadge,
   UserAvatar,
 } from "./workspace";
 
-type StatusFilter = "any" | "active" | "inactive";
+type StatusFilter = "any" | "active" | "inactive" | "suspended" | "deleted";
 type LinkedFilter = "any" | "linked" | "unlinked";
 type SurfaceFilter = "all" | "attention" | "super" | "linked" | "unlinked";
 
@@ -90,7 +92,15 @@ function getInviteMemberFetchPrompt(member: AdminUserMemberSummary) {
 
 function getAttentionReasons(user: AdminUserSummary) {
   const reasons: string[] = [];
-  if (!user.is_active) {
+  if (user.lifecycle_status === "deleted") {
+    reasons.push("Soft-deleted account");
+  } else if (user.lifecycle_status === "suspended") {
+    reasons.push(
+      user.suspended_until
+        ? `Suspended until ${formatDateTime(user.suspended_until)}`
+        : "Suspended account",
+    );
+  } else if (!user.is_active) {
     reasons.push("Inactive account");
   }
   if (user.must_change_password) {
@@ -225,7 +235,10 @@ export default function UsersList() {
       search: search.trim() || undefined,
       role: role || undefined,
       is_active:
-        statusFilter === "any" ? undefined : statusFilter === "active",
+        statusFilter === "active" || statusFilter === "inactive"
+          ? statusFilter === "active"
+          : undefined,
+      lifecycle_status: statusFilter === "any" ? undefined : statusFilter,
       linked:
         linkedFilter === "any" ? undefined : linkedFilter === "linked",
     })
@@ -352,25 +365,25 @@ export default function UsersList() {
         tone: "neutral" as const,
       },
       {
-        label: "Active",
+        label: "Can sign in",
         value: data?.total_active ?? 0,
         detail: "Can sign in right now",
         tone: "success" as const,
       },
       {
-        label: "Attention",
-        value: surfaceCounts.attention,
-        detail: "Needs follow-up or setup",
+        label: "Suspended",
+        value: data?.total_suspended ?? 0,
+        detail: "Temporarily locked",
         tone: "warning" as const,
       },
       {
-        label: "Linked",
-        value: data?.total_linked ?? 0,
-        detail: "Connected to member records",
-        tone: "info" as const,
+        label: "Deleted",
+        value: data?.total_deleted ?? 0,
+        detail: "Soft-deleted accounts",
+        tone: "danger" as const,
       },
     ],
-    [data?.total, data?.total_active, data?.total_linked, surfaceCounts.attention],
+    [data?.total, data?.total_active, data?.total_deleted, data?.total_suspended],
   );
 
   const activeFilterChips = useMemo(() => {
@@ -382,7 +395,7 @@ export default function UsersList() {
       chips.push(`Role: ${formatRoleLabel(role)}`);
     }
     if (statusFilter !== "any") {
-      chips.push(`Status: ${statusFilter === "active" ? "Active" : "Inactive"}`);
+      chips.push(`Status: ${statusFilter[0].toUpperCase()}${statusFilter.slice(1)}`);
     }
     if (linkedFilter !== "any") {
       chips.push(
@@ -576,11 +589,10 @@ export default function UsersList() {
             </div>
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-[2.5rem]">
-                User management that behaves like a workspace, not a spreadsheet.
+                User Accounts
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                Find the right account fast, see what needs attention at a glance,
-                and create new users without sending admins through a long, error-prone form.
+                Search, filter, and manage all system accounts in one place.
               </p>
             </div>
           </div>
@@ -693,6 +705,8 @@ export default function UsersList() {
                   <option value="any">Any status</option>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="deleted">Deleted</option>
                 </Select>
               </div>
 
@@ -926,8 +940,8 @@ export default function UsersList() {
                             <div>Created {formatDateTime(entry.created_at)}</div>
                           </div>
                           <div className="flex flex-wrap gap-2 lg:justify-end">
-                            <ToneBadge tone={entry.is_active ? "success" : "danger"}>
-                              {entry.is_active ? "Active" : "Inactive"}
+                            <ToneBadge tone={getUserLifecycleTone(entry)}>
+                              {formatUserLifecycleLabel(entry)}
                             </ToneBadge>
                             <Button
                               variant="ghost"
@@ -1010,8 +1024,8 @@ export default function UsersList() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <ToneBadge tone={selectedPreview.is_active ? "success" : "danger"}>
-                        {selectedPreview.is_active ? "Active" : "Inactive"}
+                      <ToneBadge tone={getUserLifecycleTone(selectedPreview)}>
+                        {formatUserLifecycleLabel(selectedPreview)}
                       </ToneBadge>
                       {selectedPreview.must_change_password && (
                         <ToneBadge tone="warning">Password change required</ToneBadge>
@@ -1460,7 +1474,7 @@ export default function UsersList() {
                             if (
                               selectedInviteMember &&
                               nextValue.trim() !==
-                                `${selectedInviteMember.first_name} ${selectedInviteMember.last_name}`
+                              `${selectedInviteMember.first_name} ${selectedInviteMember.last_name}`
                             ) {
                               setSelectedInviteMember(null);
                             }
@@ -1526,56 +1540,56 @@ export default function UsersList() {
                       {memberSearchTerm.trim().length >= 2 &&
                         (!selectedInviteMember ||
                           memberSearchTerm.trim() !==
-                            `${selectedInviteMember.first_name} ${selectedInviteMember.last_name}`) && (
-                        <div className="mt-4 overflow-hidden rounded-[22px] border border-slate-200 dark:border-slate-800">
-                          {memberSearching ? (
-                            <div className="px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
-                              Searching members…
-                            </div>
-                          ) : memberResults.length ? (
-                            memberResults.map((member) => {
-                              const disabled = Boolean(member.linked_user_id);
-                              return (
-                                <button
-                                  key={member.id}
-                                  type="button"
-                                  onClick={() => handleSelectInviteMember(member)}
-                                  disabled={disabled}
-                                  className={cn(
-                                    "w-full border-b border-slate-200 px-4 py-3 text-left last:border-b-0 dark:border-slate-800",
-                                    disabled
-                                      ? "cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-slate-900/60 dark:text-slate-500"
-                                      : "bg-white hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900",
-                                  )}
-                                >
-                                  <div className="flex items-center justify-between gap-4">
-                                    <div>
-                                      <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                                        {member.first_name} {member.last_name}
-                                      </p>
-                                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                        ID {member.id}
-                                        {member.status ? ` • ${member.status}` : ""}
-                                        {member.email ? ` • ${member.email}` : ""}
-                                        {member.phone ? ` • ${member.phone}` : ""}
-                                      </p>
-                                    </div>
-                                    {disabled && (
-                                      <ToneBadge tone="warning">
-                                        Linked to {member.linked_username ?? "another user"}
-                                      </ToneBadge>
+                          `${selectedInviteMember.first_name} ${selectedInviteMember.last_name}`) && (
+                          <div className="mt-4 overflow-hidden rounded-[22px] border border-slate-200 dark:border-slate-800">
+                            {memberSearching ? (
+                              <div className="px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                Searching members…
+                              </div>
+                            ) : memberResults.length ? (
+                              memberResults.map((member) => {
+                                const disabled = Boolean(member.linked_user_id);
+                                return (
+                                  <button
+                                    key={member.id}
+                                    type="button"
+                                    onClick={() => handleSelectInviteMember(member)}
+                                    disabled={disabled}
+                                    className={cn(
+                                      "w-full border-b border-slate-200 px-4 py-3 text-left last:border-b-0 dark:border-slate-800",
+                                      disabled
+                                        ? "cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-slate-900/60 dark:text-slate-500"
+                                        : "bg-white hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900",
                                     )}
-                                  </div>
-                                </button>
-                              );
-                            })
-                          ) : (
-                            <div className="px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
-                              No matching member found.
-                            </div>
-                          )}
-                        </div>
-                      )}
+                                  >
+                                    <div className="flex items-center justify-between gap-4">
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                                          {member.first_name} {member.last_name}
+                                        </p>
+                                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                          ID {member.id}
+                                          {member.status ? ` • ${member.status}` : ""}
+                                          {member.email ? ` • ${member.email}` : ""}
+                                          {member.phone ? ` • ${member.phone}` : ""}
+                                        </p>
+                                      </div>
+                                      {disabled && (
+                                        <ToneBadge tone="warning">
+                                          Linked to {member.linked_username ?? "another user"}
+                                        </ToneBadge>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <div className="px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                No matching member found.
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </Card>
                   </div>
 

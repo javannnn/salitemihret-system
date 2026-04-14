@@ -17,6 +17,7 @@ from app.services.permissions import (
     has_module_permission,
     infer_permission_target,
 )
+from app.services.user_lifecycle import get_user_auth_block_reason
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -73,8 +74,12 @@ def get_current_user(
     if user is None:
         user = db.query(User).filter(User.email == str(subject)).first()
 
-    if not user or not user.is_active:
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+    block_reason = get_user_auth_block_reason(user)
+    if block_reason:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=block_reason)
 
     _enforce_session_activity(db, user)
 

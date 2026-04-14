@@ -7,6 +7,7 @@ from app.core.db import get_db
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.staff import StaffListResponse, StaffSummary
+from app.services.user_lifecycle import active_user_sql_clause
 
 router = APIRouter(prefix="/staff", tags=["staff"])
 
@@ -32,7 +33,7 @@ def list_staff(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> StaffListResponse:
-    query = db.query(User).options(joinedload(User.roles)).filter(User.is_active.is_(True))
+    query = db.query(User).options(joinedload(User.roles)).filter(active_user_sql_clause())
     if search:
         pattern = f"%{search.lower()}%"
         query = query.filter(

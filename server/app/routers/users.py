@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import timedelta
-from typing import Any
+from datetime import timedelta, timezone
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
@@ -37,10 +37,13 @@ from app.schemas.user_admin import (
     UserMemberLinkRequest,
     UserRolesUpdateRequest,
     UserUpdateRequest,
+    UserDeleteRequest,
     UserMemberSummary,
+    UserSuspendRequest,
     UserTemporaryCredentials,
 )
 from app.services.user_accounts import (
+    clear_temporary_password,
     ensure_unique_username,
     generate_temporary_password,
     generate_username_from_email,
@@ -56,6 +59,15 @@ from app.services.notifications import (
     send_admin_password_reset_email,
     send_provisioned_account_email,
     send_user_invitation_email,
+)
+from app.services.user_lifecycle import (
+    active_user_sql_clause,
+    can_user_sign_in,
+    deleted_user_sql_clause,
+    get_user_lifecycle_status,
+    inactive_user_sql_clause,
+    suspended_user_sql_clause,
+    user_is_suspended,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -92,6 +104,7 @@ def _serialize_user(user: User) -> UserAdminSummary:
     role_names = [role.name for role in user.roles]
     if user.is_super_admin:
         role_names = [SUPER_ADMIN_ROLE_NAME]
+    lifecycle_status = get_user_lifecycle_status(user)
     return UserAdminSummary(
         id=user.id,
         email=user.email,
@@ -99,6 +112,12 @@ def _serialize_user(user: User) -> UserAdminSummary:
         full_name=user.full_name,
         is_active=user.is_active,
         is_super_admin=user.is_super_admin,
+        lifecycle_status=lifecycle_status,
+        can_sign_in=can_user_sign_in(user),
+        suspended_until=user.suspended_until,
+        suspension_reason=user.suspension_reason,
+        deleted_at=user.deleted_at,
+        deletion_reason=user.deletion_reason,
         must_change_password=user.must_change_password,
         roles=role_names,
         last_login_at=user.last_login_at,
@@ -189,11 +208,55 @@ def _normalize_unique_email(
     return normalized
 
 
+def _ensure_user_not_deleted(user: User, *, action_label: str) -> None:
+    if user.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Restore the user before attempting to {action_label}.",
+        )
+
+
+def _count_other_sign_in_ready_super_admins(db: Session, *, exclude_user_id: int) -> int:
+    return (
+        db.query(func.count(User.id))
+        .filter(
+            User.id != exclude_user_id,
+            User.is_super_admin.is_(True),
+            active_user_sql_clause(),
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _guard_admin_access_loss(
+    db: Session,
+    *,
+    actor: User,
+    target: User,
+    future_is_super_admin: bool,
+    future_can_sign_in: bool,
+) -> None:
+    if actor.id == target.id and (not future_is_super_admin or not future_can_sign_in):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove your own admin access from this screen.",
+        )
+
+    if target.is_super_admin and can_user_sign_in(target) and (not future_is_super_admin or not future_can_sign_in):
+        if _count_other_sign_in_ready_super_admins(db, exclude_user_id=target.id) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one sign-in-ready super admin must remain.",
+            )
+
+
 @router.get("", response_model=UserListResponse)
 def list_users(
     search: str | None = Query(default=None, description="Search email, username, or name"),
     role: str | None = Query(default=None),
     is_active: bool | None = Query(default=None),
+    lifecycle_status: Literal["active", "inactive", "suspended", "deleted"] | None = Query(default=None),
     linked: bool | None = Query(default=None, description="Filter by member link status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -220,6 +283,14 @@ def list_users(
         query = query.join(User.roles).filter(Role.name == role)
     if is_active is not None:
         query = query.filter(User.is_active == is_active)
+    if lifecycle_status == "active":
+        query = query.filter(active_user_sql_clause())
+    elif lifecycle_status == "inactive":
+        query = query.filter(inactive_user_sql_clause())
+    elif lifecycle_status == "suspended":
+        query = query.filter(suspended_user_sql_clause())
+    elif lifecycle_status == "deleted":
+        query = query.filter(deleted_user_sql_clause())
     if linked is not None:
         query = query.outerjoin(User.member_link)
         if linked:
@@ -235,8 +306,10 @@ def list_users(
         .all()
     )
     total_users = db.query(func.count(User.id)).scalar() or 0
-    total_active = db.query(func.count(User.id)).filter(User.is_active.is_(True)).scalar() or 0
-    total_inactive = db.query(func.count(User.id)).filter(User.is_active.is_(False)).scalar() or 0
+    total_active = db.query(func.count(User.id)).filter(active_user_sql_clause()).scalar() or 0
+    total_inactive = db.query(func.count(User.id)).filter(inactive_user_sql_clause()).scalar() or 0
+    total_suspended = db.query(func.count(User.id)).filter(suspended_user_sql_clause()).scalar() or 0
+    total_deleted = db.query(func.count(User.id)).filter(deleted_user_sql_clause()).scalar() or 0
     total_linked = (
         db.query(func.count(User.id))
         .join(User.member_link)
@@ -252,6 +325,8 @@ def list_users(
         offset=offset,
         total_active=total_active,
         total_inactive=total_inactive,
+        total_suspended=total_suspended,
+        total_deleted=total_deleted,
         total_linked=total_linked,
         total_unlinked=total_unlinked,
     )
@@ -423,7 +498,18 @@ def update_user(
     db: Session = Depends(get_db),
 ) -> UserAdminSummary:
     user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="edit this account")
     changes: dict[str, Any] = {}
+    future_is_active = payload.is_active if payload.is_active is not None else user.is_active
+    future_is_super_admin = payload.is_super_admin if payload.is_super_admin is not None else user.is_super_admin
+    future_can_sign_in = future_is_active and not user_is_suspended(user)
+    _guard_admin_access_loss(
+        db,
+        actor=actor,
+        target=user,
+        future_is_super_admin=future_is_super_admin,
+        future_can_sign_in=future_can_sign_in,
+    )
     if payload.email is not None:
         new_email = _normalize_unique_email(db, str(payload.email), exclude_user_id=user.id)
         if new_email != user.email:
@@ -487,12 +573,20 @@ def update_user_roles(
     db: Session = Depends(get_db),
 ) -> UserAdminSummary:
     user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="change roles")
     try:
         super_requested = SUPER_ADMIN_ROLE_NAME in payload.roles
         filtered_roles = [] if super_requested else [role for role in payload.roles if role != SUPER_ADMIN_ROLE_NAME]
         roles = load_roles(db, filtered_roles)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    _guard_admin_access_loss(
+        db,
+        actor=actor,
+        target=user,
+        future_is_super_admin=super_requested,
+        future_can_sign_in=can_user_sign_in(user),
+    )
     user.roles = roles
     user.is_super_admin = super_requested
     try:
@@ -520,6 +614,7 @@ def link_member(
     db: Session = Depends(get_db),
 ) -> UserAdminSummary:
     user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="change the member link")
     if payload.member_id is None:
         if user.member_link:
             user.member_link = None
@@ -558,6 +653,153 @@ def link_member(
         target=user,
         action=UserAuditActionEnum.MEMBER_LINKED,
         payload={"member_id": member.id},
+    )
+    db.commit()
+    return _serialize_user(user)
+
+
+@router.post("/{user_id}/suspend", response_model=UserAdminSummary)
+def suspend_user(
+    user_id: int,
+    payload: UserSuspendRequest,
+    actor: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UserAdminSummary:
+    user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="suspend this account")
+
+    suspended_until = payload.suspended_until
+    if suspended_until.tzinfo is None:
+        suspended_until = suspended_until.replace(tzinfo=timezone.utc)
+    else:
+        suspended_until = suspended_until.astimezone(timezone.utc)
+    if suspended_until <= now_utc():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Suspension end time must be in the future.",
+        )
+
+    _guard_admin_access_loss(
+        db,
+        actor=actor,
+        target=user,
+        future_is_super_admin=user.is_super_admin,
+        future_can_sign_in=False,
+    )
+
+    reason = payload.reason.strip() if payload.reason else None
+    user.suspended_until = suspended_until
+    user.suspension_reason = reason
+    user.suspended_by_user_id = actor.id
+    user.updated_at = now_utc()
+    db.commit()
+    db.refresh(user)
+    _log_audit(
+        db,
+        actor=actor,
+        target=user,
+        action=UserAuditActionEnum.USER_SUSPENDED,
+        payload={"suspended_until": suspended_until.isoformat(), "reason": reason},
+    )
+    db.commit()
+    return _serialize_user(user)
+
+
+@router.post("/{user_id}/unsuspend", response_model=UserAdminSummary)
+def unsuspend_user(
+    user_id: int,
+    actor: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UserAdminSummary:
+    user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="lift the suspension")
+
+    previous_until = user.suspended_until.isoformat() if user.suspended_until else None
+    previous_reason = user.suspension_reason
+    user.suspended_until = None
+    user.suspension_reason = None
+    user.suspended_by_user_id = None
+    user.updated_at = now_utc()
+    db.commit()
+    db.refresh(user)
+    _log_audit(
+        db,
+        actor=actor,
+        target=user,
+        action=UserAuditActionEnum.USER_UNSUSPENDED,
+        payload={"previous_suspended_until": previous_until, "previous_reason": previous_reason},
+    )
+    db.commit()
+    return _serialize_user(user)
+
+
+@router.delete("/{user_id}", response_model=UserAdminSummary)
+def delete_user(
+    user_id: int,
+    payload: UserDeleteRequest | None = None,
+    actor: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UserAdminSummary:
+    user = _load_user(db, user_id)
+    if user.deleted_at is not None:
+        return _serialize_user(user)
+
+    _guard_admin_access_loss(
+        db,
+        actor=actor,
+        target=user,
+        future_is_super_admin=user.is_super_admin,
+        future_can_sign_in=False,
+    )
+
+    reason = payload.reason.strip() if payload and payload.reason else None
+    user.deleted_at = now_utc()
+    user.deletion_reason = reason
+    user.deleted_by_user_id = actor.id
+    user.is_active = False
+    user.suspended_until = None
+    user.suspension_reason = None
+    user.suspended_by_user_id = None
+    user.must_change_password = False
+    clear_temporary_password(user)
+    user.updated_at = now_utc()
+    db.commit()
+    db.refresh(user)
+    _log_audit(
+        db,
+        actor=actor,
+        target=user,
+        action=UserAuditActionEnum.USER_DELETED,
+        payload={"reason": reason},
+    )
+    db.commit()
+    return _serialize_user(user)
+
+
+@router.post("/{user_id}/restore", response_model=UserAdminSummary)
+def restore_user(
+    user_id: int,
+    actor: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UserAdminSummary:
+    user = _load_user(db, user_id)
+    if user.deleted_at is None:
+        return _serialize_user(user)
+
+    previous_deleted_at = user.deleted_at.isoformat()
+    previous_reason = user.deletion_reason
+    user.deleted_at = None
+    user.deletion_reason = None
+    user.deleted_by_user_id = None
+    user.updated_at = now_utc()
+    db.commit()
+    db.refresh(user)
+    _log_audit(
+        db,
+        actor=actor,
+        target=user,
+        action=UserAuditActionEnum.USER_RESTORED,
+        payload={"previous_deleted_at": previous_deleted_at, "previous_reason": previous_reason},
     )
     db.commit()
     return _serialize_user(user)
@@ -651,6 +893,7 @@ def reset_user_password(
     db: Session = Depends(get_db),
 ) -> UserPasswordResetResponse:
     user = _load_user(db, user_id)
+    _ensure_user_not_deleted(user, action_label="reset the password")
     temporary_password = generate_temporary_password()
     user.hashed_password = hash_password(temporary_password)
     store_temporary_password(user, temporary_password)

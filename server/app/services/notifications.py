@@ -18,6 +18,7 @@ from app.models.role import Role
 from app.models.user import User, UserInvitation
 from app.services.email_sender import get_email_sender
 from app.services import email_templates
+from app.services.user_lifecycle import active_user_sql_clause
 
 logger = logging.getLogger(__name__)
 BRAND_NAME = settings.EMAIL_FROM_NAME or "St. Mary EOTC Edmonton"
@@ -79,14 +80,14 @@ def _get_child_notification_recipients(db: Session) -> list[str]:
         rows = (
             db.query(User.email)
             .join(User.roles)
-            .filter(User.is_active.is_(True), Role.name.in_(role_filter))
+            .filter(active_user_sql_clause(), Role.name.in_(role_filter))
             .distinct()
             .all()
         )
         recipients.extend(email for (email,) in rows if email)
     super_admin_rows = (
         db.query(User.email)
-        .filter(User.is_active.is_(True), User.is_super_admin.is_(True))
+        .filter(active_user_sql_clause(), User.is_super_admin.is_(True))
         .all()
     )
     recipients.extend(email for (email,) in super_admin_rows if email)
@@ -102,14 +103,14 @@ def _get_sponsorship_notification_recipients(db: Session) -> list[str]:
         rows = (
             db.query(User.email)
             .join(User.roles)
-            .filter(User.is_active.is_(True), Role.name.in_(role_filter))
+            .filter(active_user_sql_clause(), Role.name.in_(role_filter))
             .distinct()
             .all()
         )
         recipients.extend(email for (email,) in rows if email)
     super_admin_rows = (
         db.query(User.email)
-        .filter(User.is_active.is_(True), User.is_super_admin.is_(True))
+        .filter(active_user_sql_clause(), User.is_super_admin.is_(True))
         .all()
     )
     recipients.extend(email for (email,) in super_admin_rows if email)
@@ -124,14 +125,14 @@ def _get_membership_status_notification_recipients(db: Session, actor: User | No
         rows = (
             db.query(User.email)
             .join(User.roles)
-            .filter(User.is_active.is_(True), Role.name.in_(role_filter))
+            .filter(active_user_sql_clause(), Role.name.in_(role_filter))
             .distinct()
             .all()
         )
         recipients.extend(email for (email,) in rows if email)
     super_admin_rows = (
         db.query(User.email)
-        .filter(User.is_active.is_(True), User.is_super_admin.is_(True))
+        .filter(active_user_sql_clause(), User.is_super_admin.is_(True))
         .all()
     )
     recipients.extend(email for (email,) in super_admin_rows if email)

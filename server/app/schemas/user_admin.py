@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -28,6 +28,12 @@ class UserAdminSummary(BaseModel):
     full_name: str | None = None
     is_active: bool
     is_super_admin: bool
+    lifecycle_status: Literal["active", "inactive", "suspended", "deleted"]
+    can_sign_in: bool
+    suspended_until: datetime | None = None
+    suspension_reason: str | None = None
+    deleted_at: datetime | None = None
+    deletion_reason: str | None = None
     must_change_password: bool = False
     roles: list[str]
     last_login_at: datetime | None = None
@@ -65,6 +71,8 @@ class UserListResponse(BaseModel):
     offset: int
     total_active: int
     total_inactive: int
+    total_suspended: int
+    total_deleted: int
     total_linked: int
     total_unlinked: int
 
@@ -142,3 +150,12 @@ class InvitationAcceptRequest(BaseModel):
     password: str
     full_name: str | None = None
     username: str | None = None
+
+
+class UserSuspendRequest(BaseModel):
+    suspended_until: datetime
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class UserDeleteRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

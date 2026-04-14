@@ -31,6 +31,12 @@ class User(Base):
     temporary_password_issued_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_super_admin = Column(Boolean, default=False, nullable=False)
+    suspended_until = Column(DateTime(timezone=True), nullable=True)
+    suspension_reason = Column(String(500), nullable=True)
+    suspended_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deletion_reason = Column(String(500), nullable=True)
+    deleted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_seen = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -86,6 +92,10 @@ class UserAuditActionEnum(str, enum.Enum):
     LINK_REQUESTED = "LINK_REQUESTED"
     SUPER_ADMIN_GRANTED = "SUPER_ADMIN_GRANTED"
     SUPER_ADMIN_REVOKED = "SUPER_ADMIN_REVOKED"
+    USER_SUSPENDED = "USER_SUSPENDED"
+    USER_UNSUSPENDED = "USER_UNSUSPENDED"
+    USER_DELETED = "USER_DELETED"
+    USER_RESTORED = "USER_RESTORED"
 
 
 # SQLAlchemy enum type for the column

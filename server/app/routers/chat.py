@@ -13,6 +13,7 @@ from app.auth.deps import get_current_active_user
 from app.models.user import User
 from app.models.chat import Message
 from app.schemas.chat import MessageCreate, MessageRead, ChatUser, MessageType
+from app.services.user_lifecycle import active_user_sql_clause
 from app.config import CHAT_UPLOAD_DIR
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -64,7 +65,7 @@ def send_message(
     if message.type != "text":
         raise HTTPException(status_code=400, detail="Only text messages are supported on this endpoint.")
 
-    recipient = db.query(User).filter(User.id == message.recipient_id).first()
+    recipient = db.query(User).filter(User.id == message.recipient_id).filter(active_user_sql_clause()).first()
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
 
@@ -88,7 +89,7 @@ def upload_message_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    recipient = db.query(User).filter(User.id == recipient_id).first()
+    recipient = db.query(User).filter(User.id == recipient_id).filter(active_user_sql_clause()).first()
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
 
@@ -199,7 +200,7 @@ def get_chat_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    users = db.query(User).filter(User.is_active == True).all()
+    users = db.query(User).filter(active_user_sql_clause()).all()
     
     # 5 minutes cutoff for online status
     cutoff = datetime.utcnow().timestamp() - 300

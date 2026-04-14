@@ -490,6 +490,8 @@ export type AdminUserMemberSummary = {
   linked_username?: string | null;
 };
 
+export type AdminUserLifecycleStatus = "active" | "inactive" | "suspended" | "deleted";
+
 export type AdminUserSummary = {
   id: number;
   email: string;
@@ -497,6 +499,12 @@ export type AdminUserSummary = {
   full_name?: string | null;
   is_active: boolean;
   is_super_admin: boolean;
+  lifecycle_status: AdminUserLifecycleStatus;
+  can_sign_in: boolean;
+  suspended_until?: string | null;
+  suspension_reason?: string | null;
+  deleted_at?: string | null;
+  deletion_reason?: string | null;
   must_change_password: boolean;
   roles: string[];
   last_login_at?: string | null;
@@ -531,6 +539,8 @@ export type AdminUserListResponse = {
   offset: number;
   total_active: number;
   total_inactive: number;
+  total_suspended: number;
+  total_deleted: number;
   total_linked: number;
   total_unlinked: number;
 };
@@ -612,6 +622,15 @@ export type AdminUserProvisionPayload = {
 export type AdminUserUpdatePayload = Partial<
   Pick<AdminUserSummary, "email" | "full_name" | "username" | "is_active" | "is_super_admin">
 >;
+
+export type AdminUserSuspendPayload = {
+  suspended_until: string;
+  reason?: string;
+};
+
+export type AdminUserDeletePayload = {
+  reason?: string;
+};
 
 export type AdminUserProvisionResponse = {
   user: AdminUserSummary;
@@ -2372,6 +2391,7 @@ export type ListAdminUsersParams = {
   search?: string;
   role?: string;
   is_active?: boolean;
+  lifecycle_status?: AdminUserLifecycleStatus;
   linked?: boolean;
   limit?: number;
   offset?: number;
@@ -2382,6 +2402,7 @@ export async function listAdminUsers(params: ListAdminUsersParams = {}): Promise
   if (params.search) search.set("search", params.search);
   if (params.role) search.set("role", params.role);
   if (typeof params.is_active === "boolean") search.set("is_active", String(params.is_active));
+  if (params.lifecycle_status) search.set("lifecycle_status", params.lifecycle_status);
   if (typeof params.linked === "boolean") search.set("linked", String(params.linked));
   if (typeof params.limit === "number") search.set("limit", String(params.limit));
   if (typeof params.offset === "number") search.set("offset", String(params.offset));
@@ -2451,6 +2472,28 @@ export async function provisionAdminUser(payload: AdminUserProvisionPayload): Pr
 
 export async function resetAdminUserPassword(userId: number): Promise<AdminUserPasswordResetResponse> {
   return api<AdminUserPasswordResetResponse>(`/users/${userId}/reset-password`, { method: "POST" });
+}
+
+export async function suspendAdminUser(userId: number, payload: AdminUserSuspendPayload): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}/suspend`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unsuspendAdminUser(userId: number): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}/unsuspend`, { method: "POST" });
+}
+
+export async function deleteAdminUser(userId: number, payload: AdminUserDeletePayload = {}): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}`, {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function restoreAdminUser(userId: number): Promise<AdminUserSummary> {
+  return api<AdminUserSummary>(`/users/${userId}/restore`, { method: "POST" });
 }
 
 export async function searchAdminMembers(query: string, limit = 8): Promise<AdminUserMemberSummary[]> {

@@ -16,6 +16,7 @@ from app.services.user_accounts import (
     now_utc,
     validate_password_strength,
 )
+from app.services.user_lifecycle import get_user_auth_block_reason
 from app.services.recaptcha import verify_recaptcha, RecaptchaError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -48,8 +49,11 @@ async def login(request: Request, payload: LoginRequest, db: Session = Depends(g
         )
         .first()
     )
-    if not user or not user.is_active:
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    block_reason = get_user_auth_block_reason(user)
+    if block_reason:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=block_reason)
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -79,6 +83,12 @@ def accept_invitation(token: str, payload: InvitationAcceptRequest, db: Session 
 
     existing_user = db.query(User).filter(User.email == invitation.email).first()
     if existing_user:
+        block_reason = get_user_auth_block_reason(existing_user)
+        if block_reason:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"This invitation cannot be accepted right now. {block_reason}",
+            )
         logged_in_at = now_utc()
         existing_user.hashed_password = hash_password(payload.password)
         existing_user.must_change_password = False

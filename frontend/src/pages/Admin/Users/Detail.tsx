@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowUpRight,
+  Ban,
   CheckCircle2,
   Clock3,
   History,
@@ -9,11 +10,13 @@ import {
   Link2,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Shield,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UserPlus,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -32,14 +35,19 @@ import {
   type AdminRoleSummary,
   type AdminUserAuditEntry,
   type AdminUserDetail,
+  type AdminUserLifecycleStatus,
   type AdminUserMemberSummary,
   type AdminUserPasswordResetResponse,
+  deleteAdminUser,
   getAdminUser,
   getAdminUserAudit,
   listAdminRoles,
   parseApiErrorMessage,
   resetAdminUserPassword,
+  restoreAdminUser,
   searchAdminMembers,
+  suspendAdminUser,
+  unsuspendAdminUser,
   updateAdminUser,
   updateAdminUserMemberLink,
   updateAdminUserRoles,
@@ -51,7 +59,9 @@ import {
   formatDateTime,
   formatRelativeTime,
   formatRoleLabel,
+  formatUserLifecycleLabel,
   getUserDisplayName,
+  getUserLifecycleTone,
   ToneBadge,
   UserAvatar,
 } from "./workspace";
@@ -100,7 +110,15 @@ function getMemberIdentityFetchPrompt(member: AdminUserMemberSummary) {
 
 function getAttentionReasons(user: AdminUserDetail) {
   const reasons: string[] = [];
-  if (!user.is_active) {
+  if (user.lifecycle_status === "deleted") {
+    reasons.push("This account is soft-deleted and cannot be used until it is restored.");
+  } else if (user.lifecycle_status === "suspended") {
+    reasons.push(
+      user.suspended_until
+        ? `This account is suspended until ${formatDateTime(user.suspended_until)}.`
+        : "This account is suspended.",
+    );
+  } else if (!user.is_active) {
     reasons.push("This account is inactive.");
   }
   if (user.must_change_password) {
@@ -116,6 +134,26 @@ function getAttentionReasons(user: AdminUserDetail) {
     reasons.push("No roles are assigned yet.");
   }
   return reasons;
+}
+
+function toDateTimeLocalInput(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function toIsoFromLocalInput(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
 }
 
 function getMemberSummary(member?: AdminUserMemberSummary | null) {
@@ -170,10 +208,14 @@ export default function UserDetail() {
   const [savingRoles, setSavingRoles] = useState(false);
   const [savingMemberLink, setSavingMemberLink] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false);
   const [passwordResetResult, setPasswordResetResult] =
     useState<AdminUserPasswordResetResponse | null>(null);
   const [roleSelection, setRoleSelection] = useState<string[]>([]);
   const [roles, setRoles] = useState<AdminRoleSummary[]>([]);
+  const [suspensionUntil, setSuspensionUntil] = useState("");
+  const [suspensionReason, setSuspensionReason] = useState("");
+  const [deletionReason, setDeletionReason] = useState("");
 
   useEffect(() => {
     if (!userId || !isSuperAdmin) {
@@ -196,6 +238,9 @@ export default function UserDetail() {
             : "",
         );
         setRoleSelection(details.roles);
+        setSuspensionUntil(toDateTimeLocalInput(details.suspended_until));
+        setSuspensionReason(details.suspension_reason ?? "");
+        setDeletionReason(details.deletion_reason ?? "");
         if (!details.temporary_credentials?.is_active) {
           setPasswordResetResult(null);
         }
@@ -339,6 +384,9 @@ export default function UserDetail() {
     passwordResetResult || user?.temporary_credentials?.is_active,
   );
   const attentionReasons = user ? getAttentionReasons(user) : [];
+  const lifecycleStatus: AdminUserLifecycleStatus | null = user?.lifecycle_status ?? null;
+  const isDeleted = lifecycleStatus === "deleted";
+  const isSuspended = lifecycleStatus === "suspended";
 
   const updateTab = (tab: DetailTab) => {
     setSearchParams((current) => {
@@ -508,6 +556,89 @@ export default function UserDetail() {
     }
   };
 
+  const handleSuspendUser = async () => {
+    if (!user) {
+      return;
+    }
+    const suspendedUntil = toIsoFromLocalInput(suspensionUntil);
+    if (!suspendedUntil) {
+      toast.push("Choose a valid suspension end date and time.");
+      return;
+    }
+    if (new Date(suspendedUntil).getTime() <= Date.now()) {
+      toast.push("Suspension end time must be in the future.");
+      return;
+    }
+    setLifecycleSubmitting(true);
+    try {
+      await suspendAdminUser(user.id, {
+        suspended_until: suspendedUntil,
+        reason: suspensionReason.trim() || undefined,
+      });
+      toast.push("User suspended");
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      console.error(error);
+      toast.push(parseApiErrorMessage(error, "Failed to suspend user"));
+    } finally {
+      setLifecycleSubmitting(false);
+    }
+  };
+
+  const handleUnsuspendUser = async () => {
+    if (!user) {
+      return;
+    }
+    setLifecycleSubmitting(true);
+    try {
+      await unsuspendAdminUser(user.id);
+      toast.push("Suspension lifted");
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      console.error(error);
+      toast.push(parseApiErrorMessage(error, "Failed to lift suspension"));
+    } finally {
+      setLifecycleSubmitting(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!user) {
+      return;
+    }
+    if (!window.confirm(`Soft-delete ${getUserDisplayName(user)}? The account will be preserved for audit and can be restored later.`)) {
+      return;
+    }
+    setLifecycleSubmitting(true);
+    try {
+      await deleteAdminUser(user.id, { reason: deletionReason.trim() || undefined });
+      toast.push("User soft-deleted");
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      console.error(error);
+      toast.push(parseApiErrorMessage(error, "Failed to delete user"));
+    } finally {
+      setLifecycleSubmitting(false);
+    }
+  };
+
+  const handleRestoreUser = async () => {
+    if (!user) {
+      return;
+    }
+    setLifecycleSubmitting(true);
+    try {
+      await restoreAdminUser(user.id);
+      toast.push("User restored. Reactivate sign-in when ready.");
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      console.error(error);
+      toast.push(parseApiErrorMessage(error, "Failed to restore user"));
+    } finally {
+      setLifecycleSubmitting(false);
+    }
+  };
+
   if (!userId) {
     return <div className="text-sm text-mute">Invalid user id.</div>;
   }
@@ -552,14 +683,17 @@ export default function UserDetail() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <ToneBadge tone={user.is_active ? "success" : "danger"}>
-                  {user.is_active ? "Active" : "Inactive"}
+                <ToneBadge tone={getUserLifecycleTone(user)}>
+                  {formatUserLifecycleLabel(user)}
                 </ToneBadge>
                 {user.must_change_password && (
                   <ToneBadge tone="warning">Password change required</ToneBadge>
                 )}
                 {user.is_super_admin && (
                   <ToneBadge tone="info">Super admin</ToneBadge>
+                )}
+                {user.suspended_until && user.lifecycle_status === "suspended" && (
+                  <ToneBadge tone="warning">Until {formatDateTime(user.suspended_until)}</ToneBadge>
                 )}
                 {user.roles.map((roleName) => (
                   <ToneBadge key={roleName}>{formatRoleLabel(roleName)}</ToneBadge>
@@ -657,7 +791,7 @@ export default function UserDetail() {
                         Keep the sign-in identity clear, consistent, and intentionally scoped.
                       </p>
                     </div>
-                    <Button onClick={handleIdentitySave} disabled={!identityDirty || savingIdentity}>
+                    <Button onClick={handleIdentitySave} disabled={isDeleted || !identityDirty || savingIdentity}>
                       {savingIdentity ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -681,6 +815,7 @@ export default function UserDetail() {
                         type="email"
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={email}
+                        disabled={isDeleted}
                         onChange={(event) => setEmail(event.target.value)}
                       />
                     </div>
@@ -691,6 +826,7 @@ export default function UserDetail() {
                       <Input
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={fullName}
+                        disabled={isDeleted}
                         onChange={(event) => setFullName(event.target.value)}
                       />
                     </div>
@@ -701,6 +837,7 @@ export default function UserDetail() {
                       <Input
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={username}
+                        disabled={isDeleted}
                         onChange={(event) => setUsername(event.target.value.toLowerCase())}
                       />
                       <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -709,16 +846,20 @@ export default function UserDetail() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                        Status
+                        Activation
                       </label>
                       <Select
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={isActive ? "active" : "inactive"}
+                        disabled={isDeleted}
                         onChange={(event) => setIsActive(event.target.value === "active")}
                       >
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
                       </Select>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Use this for indefinite activation. Timed lockouts are managed below.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
@@ -727,6 +868,7 @@ export default function UserDetail() {
                       <Select
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={superAdmin ? "yes" : "no"}
+                        disabled={isDeleted}
                         onChange={(event) => setSuperAdmin(event.target.value === "yes")}
                       >
                         <option value="no">Standard admin</option>
@@ -783,6 +925,183 @@ export default function UserDetail() {
                     </div>
                   </div>
                 </Card>
+
+                <Card className="rounded-[26px] border border-slate-200/80 bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-950/80">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Lifecycle
+                      </p>
+                      <h2 className="mt-2 text-xl font-semibold text-slate-950 dark:text-white">
+                        Suspension, restoration, and archival controls
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Use suspension for timed lockouts and soft-delete for removal with audit retention.
+                      </p>
+                    </div>
+                    <ToneBadge tone={getUserLifecycleTone(user)}>
+                      {formatUserLifecycleLabel(user)}
+                    </ToneBadge>
+                  </div>
+
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/80">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Sign-in state
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-950 dark:text-white">
+                        {user.can_sign_in ? "Allowed" : "Blocked"}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {user.lifecycle_status === "suspended" && user.suspended_until
+                          ? `Blocked until ${formatDateTime(user.suspended_until)}.`
+                          : user.lifecycle_status === "deleted"
+                            ? "Blocked until the account is restored and reactivated."
+                            : user.lifecycle_status === "inactive"
+                              ? "Blocked until the account is reactivated."
+                              : "This account can sign in right now."}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/80">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Archive state
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-slate-950 dark:text-white">
+                        {user.deleted_at ? formatDateTime(user.deleted_at) : "Not deleted"}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {user.deletion_reason || "Soft-delete keeps the record and audit history intact."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+                    <div className="space-y-4 rounded-[24px] border border-slate-200 p-5 dark:border-slate-800">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                          Timed suspension
+                        </p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Block sign-in until a specific date and time without deleting the account.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Suspend until
+                        </label>
+                        <Input
+                          type="datetime-local"
+                          className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
+                          value={suspensionUntil}
+                          disabled={isDeleted}
+                          onChange={(event) => setSuspensionUntil(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Reason
+                        </label>
+                        <Textarea
+                          rows={3}
+                          className="rounded-[22px] border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
+                          value={suspensionReason}
+                          disabled={isDeleted}
+                          onChange={(event) => setSuspensionReason(event.target.value)}
+                          placeholder="Optional note for admins and audit history"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <Button onClick={handleSuspendUser} disabled={isDeleted || lifecycleSubmitting}>
+                          {lifecycleSubmitting ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Saving…
+                            </>
+                          ) : (
+                            <>
+                              <Ban className="h-4 w-4" />
+                              Suspend user
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={handleUnsuspendUser}
+                          disabled={isDeleted || lifecycleSubmitting || !isSuspended}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Lift suspension
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 rounded-[24px] border border-rose-200 bg-rose-50/50 p-5 dark:border-rose-500/30 dark:bg-rose-500/10">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                          Soft delete and restore
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                          Deleted users stay in the system for audit, but cannot sign in or receive normal access actions.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Deletion note
+                        </label>
+                        <Textarea
+                          rows={3}
+                          className="rounded-[22px] border-rose-200 bg-white dark:border-rose-500/30 dark:bg-slate-950"
+                          value={deletionReason}
+                          onChange={(event) => setDeletionReason(event.target.value)}
+                          placeholder="Optional note explaining why the account is being archived"
+                        />
+                      </div>
+                      {user.deleted_at && (
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          Deleted {formatDateTime(user.deleted_at)}
+                          {user.deletion_reason ? ` • ${user.deletion_reason}` : ""}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-3">
+                        {isDeleted ? (
+                          <Button onClick={handleRestoreUser} disabled={lifecycleSubmitting}>
+                            {lifecycleSubmitting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Saving…
+                              </>
+                            ) : (
+                              <>
+                                <RotateCcw className="h-4 w-4" />
+                                Restore user
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            className="border-rose-200 bg-rose-100 text-rose-700 hover:border-rose-300 hover:bg-rose-200 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100 dark:hover:bg-rose-500/20"
+                            onClick={handleDeleteUser}
+                            disabled={lifecycleSubmitting}
+                          >
+                            {lifecycleSubmitting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Saving…
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="h-4 w-4" />
+                                Soft delete user
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
               </>
             )}
 
@@ -809,7 +1128,7 @@ export default function UserDetail() {
                         Open role manager
                         <ArrowUpRight className="h-4 w-4" />
                       </Button>
-                      <Button onClick={handleRolesSave} disabled={!rolesDirty || savingRoles}>
+                      <Button onClick={handleRolesSave} disabled={isDeleted || !rolesDirty || savingRoles}>
                         {savingRoles ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -835,10 +1154,13 @@ export default function UserDetail() {
                           onClick={() => toggleRole(roleName)}
                           className={cn(
                             "rounded-full border px-4 py-2 text-sm font-medium transition",
-                            selected
+                            isDeleted
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600"
+                              : selected
                               ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
                               : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800",
                           )}
+                          disabled={isDeleted}
                         >
                           {formatRoleLabel(roleName)}
                         </button>
@@ -857,7 +1179,7 @@ export default function UserDetail() {
                         Support sign-in without guesswork
                       </h2>
                     </div>
-                    <Button variant="ghost" onClick={handleResetPassword} disabled={resettingPassword}>
+                    <Button variant="ghost" onClick={handleResetPassword} disabled={isDeleted || resettingPassword}>
                       {resettingPassword ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -960,12 +1282,12 @@ export default function UserDetail() {
                       <Button
                         variant="ghost"
                         onClick={() => handleMemberLink(null)}
-                        disabled={savingMemberLink}
+                        disabled={isDeleted || savingMemberLink}
                       >
                         Unlink
                       </Button>
                     )}
-                    <Button onClick={handleMemberLinkSubmit} disabled={!memberDirty || savingMemberLink}>
+                    <Button onClick={handleMemberLinkSubmit} disabled={isDeleted || !memberDirty || savingMemberLink}>
                       {savingMemberLink ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -1022,6 +1344,7 @@ export default function UserDetail() {
                       <Input
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 pl-10 dark:border-slate-700 dark:bg-slate-900"
                         value={memberSearchTerm}
+                        disabled={isDeleted}
                         onChange={(event) => {
                           setMemberSearchTerm(event.target.value);
                           if (!event.target.value.trim()) {
@@ -1052,7 +1375,7 @@ export default function UserDetail() {
                             <button
                               key={member.id}
                               type="button"
-                              disabled={disabled}
+                              disabled={isDeleted || disabled}
                               onClick={() => handleSelectMemberResult(member)}
                               className={cn(
                                 "w-full border-b border-slate-200 px-4 py-3 text-left last:border-b-0 dark:border-slate-800",
@@ -1103,6 +1426,7 @@ export default function UserDetail() {
                       <Input
                         className="h-12 rounded-2xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={memberInput}
+                        disabled={isDeleted}
                         onChange={(event) => setMemberInput(event.target.value)}
                         placeholder="Enter numeric ID"
                       />
@@ -1115,6 +1439,7 @@ export default function UserDetail() {
                         rows={3}
                         className="rounded-[22px] border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
                         value={memberNotes}
+                        disabled={isDeleted}
                         onChange={(event) => setMemberNotes(event.target.value)}
                         placeholder="Optional note for the audit log"
                       />
@@ -1184,14 +1509,14 @@ export default function UserDetail() {
                   Account health
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <ToneBadge tone={user.is_active ? "success" : "danger"}>
-                    {user.is_active ? "Active" : "Inactive"}
+                  <ToneBadge tone={getUserLifecycleTone(user)}>
+                    {formatUserLifecycleLabel(user)}
                   </ToneBadge>
                   <ToneBadge tone={user.member ? "success" : "warning"}>
                     {user.member ? "Member linked" : "Missing member link"}
                   </ToneBadge>
-                  <ToneBadge tone={user.last_login_at ? "info" : "warning"}>
-                    {user.last_login_at ? "Has signed in" : "No sign-in yet"}
+                  <ToneBadge tone={user.can_sign_in ? "success" : "warning"}>
+                    {user.can_sign_in ? "Sign-in allowed" : "Sign-in blocked"}
                   </ToneBadge>
                 </div>
               </div>

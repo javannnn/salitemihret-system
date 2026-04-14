@@ -8,6 +8,10 @@ type UserIdentityLike = {
   username: string;
 };
 
+type UserLifecycleLike = {
+  lifecycle_status: "active" | "inactive" | "suspended" | "deleted";
+};
+
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
 const toneClasses: Record<Tone, string> = {
@@ -37,6 +41,32 @@ export function cn(...classNames: Array<string | false | null | undefined>) {
 
 export function formatRoleLabel(roleName: string) {
   return ROLE_LABELS[roleName] || roleName;
+}
+
+export function formatUserLifecycleLabel(user: UserLifecycleLike) {
+  switch (user.lifecycle_status) {
+    case "suspended":
+      return "Suspended";
+    case "deleted":
+      return "Deleted";
+    case "inactive":
+      return "Inactive";
+    default:
+      return "Active";
+  }
+}
+
+export function getUserLifecycleTone(user: UserLifecycleLike): Tone {
+  switch (user.lifecycle_status) {
+    case "suspended":
+      return "warning";
+    case "deleted":
+      return "danger";
+    case "inactive":
+      return "neutral";
+    default:
+      return "success";
+  }
 }
 
 export function formatDateTime(value?: string | null, fallback = "Never") {
