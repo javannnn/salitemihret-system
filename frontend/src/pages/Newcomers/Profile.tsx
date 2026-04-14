@@ -92,6 +92,7 @@ type NewcomerDetailsForm = {
   last_name: string;
   household_type: Newcomer["household_type"];
   family_size: string;
+  arrival_date: string;
   preferred_language: string;
   interpreter_required: boolean;
   contact_phone: string;
@@ -108,11 +109,20 @@ type NewcomerDetailsForm = {
 
 type NewcomerDetailFieldErrors = Partial<Record<keyof NewcomerDetailsForm, string>>;
 
+function getTodayDateInputValue() {
+  const today = new Date();
+  const year = String(today.getFullYear());
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 const emptyDetailsForm = (): NewcomerDetailsForm => ({
   first_name: "",
   last_name: "",
   household_type: "Individual",
   family_size: "",
+  arrival_date: "",
   preferred_language: "",
   interpreter_required: false,
   contact_phone: "",
@@ -133,6 +143,7 @@ function detailsFormFromNewcomer(newcomer: Newcomer): NewcomerDetailsForm {
     last_name: newcomer.last_name ?? "",
     household_type: newcomer.household_type ?? "Individual",
     family_size: newcomer.family_size != null ? String(newcomer.family_size) : "",
+    arrival_date: newcomer.arrival_date ? newcomer.arrival_date.slice(0, 10) : "",
     preferred_language: newcomer.preferred_language ?? "",
     interpreter_required: Boolean(newcomer.interpreter_required),
     contact_phone: newcomer.contact_phone ?? "",
@@ -321,7 +332,7 @@ export default function NewcomerProfile() {
     }
     let active = true;
     setSponsorSearchLoading(true);
-    searchMembers(debouncedSponsorSearchQuery.trim(), 6)
+    searchMembers(debouncedSponsorSearchQuery.trim(), 6, { status: "Active" })
       .then((response) => {
         if (active) {
           setSponsorSearchResults(response.items.slice(0, 6));
@@ -421,6 +432,10 @@ export default function NewcomerProfile() {
       fieldErrors.contact_email = "Enter a valid email address in the format name@example.com.";
     }
 
+    if (detailsForm.arrival_date && detailsForm.arrival_date > getTodayDateInputValue()) {
+      fieldErrors.arrival_date = "Arrival date cannot be in the future.";
+    }
+
     return {
       fieldErrors,
       isValid: Object.keys(fieldErrors).length === 0,
@@ -456,6 +471,7 @@ export default function NewcomerProfile() {
         last_name: detailsForm.last_name.trim(),
         household_type: detailsForm.household_type,
         family_size: detailsForm.family_size.trim() ? Number(detailsForm.family_size.trim()) : undefined,
+        arrival_date: detailsForm.arrival_date || undefined,
         preferred_language: detailsForm.preferred_language.trim() || undefined,
         interpreter_required: detailsForm.interpreter_required,
         contact_phone: normalizedPhone || undefined,
@@ -771,12 +787,12 @@ export default function NewcomerProfile() {
                 <Input
                   value={sponsorSearchQuery}
                   onChange={(event) => setSponsorSearchQuery(event.target.value)}
-                  placeholder="Search member by name"
+                  placeholder="Search active member by name"
                   disabled={!canManage}
                 />
-                {sponsorSearchLoading && <p className="text-xs text-mute">Searching members...</p>}
+                {sponsorSearchLoading && <p className="text-xs text-mute">Searching active members...</p>}
                 {!sponsorSearchLoading && sponsorSearchQuery.trim() && sponsorSearchResults.length === 0 && (
-                  <p className="text-xs text-mute">No matching members found.</p>
+                  <p className="text-xs text-mute">No active members found.</p>
                 )}
                 {sponsorSearchResults.length > 0 && (
                   <div className="max-h-56 overflow-y-auto rounded-xl border border-border">
@@ -887,6 +903,7 @@ export default function NewcomerProfile() {
             {activeTab === "Overview" && (
               <Card className="p-4 space-y-2">
                 <div className="text-sm text-mute">Last interaction: {formatDate(newcomer.last_interaction_at)}</div>
+                <div className="text-sm text-mute">Arrival date: {formatDate(newcomer.arrival_date)}</div>
                 <div className="text-sm text-mute">Preferred languages: {newcomer.preferred_language || "-"}</div>
                 <div className="text-sm text-mute">Follow-up due: {formatDate(newcomer.followup_due_date)}</div>
                 <div className="text-sm text-mute">Current status: {newcomer.status}</div>
@@ -1139,7 +1156,7 @@ export default function NewcomerProfile() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-4">
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">Household type</label>
                     <Select
@@ -1169,6 +1186,22 @@ export default function NewcomerProfile() {
                     />
                     {detailsFieldErrors.family_size && (
                       <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.family_size}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Arrival date</label>
+                    <Input
+                      type="date"
+                      max={getTodayDateInputValue()}
+                      value={detailsForm.arrival_date}
+                      className={detailsFieldClass("arrival_date")}
+                      onChange={(event) => {
+                        setDetailsForm((prev) => ({ ...prev, arrival_date: event.target.value }));
+                        clearDetailsFieldError("arrival_date");
+                      }}
+                    />
+                    {detailsFieldErrors.arrival_date && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.arrival_date}</p>
                     )}
                   </div>
                   <div>

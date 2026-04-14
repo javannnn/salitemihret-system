@@ -94,6 +94,15 @@ def _user_name(user: User | None) -> str | None:
     return user.full_name or user.username or user.email
 
 
+def _get_active_sponsor_member(db: Session, member_id: int) -> Member:
+    sponsor = db.query(Member).filter(Member.id == member_id, Member.deleted_at.is_(None)).first()
+    if not sponsor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor member not found")
+    if sponsor.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sponsor must be an active member")
+    return sponsor
+
+
 def _to_schema(
     record: Newcomer,
     *,
@@ -322,9 +331,7 @@ def get_newcomer_metrics(db: Session) -> NewcomerMetrics:
 
 def create_newcomer(db: Session, payload: NewcomerCreate) -> NewcomerOut:
     if payload.sponsored_by_member_id is not None:
-        sponsor = db.query(Member).filter(Member.id == payload.sponsored_by_member_id).first()
-        if not sponsor:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor member not found")
+        _get_active_sponsor_member(db, payload.sponsored_by_member_id)
 
     followup_due = payload.followup_due_date or payload.arrival_date + timedelta(days=7)
     record = Newcomer(
@@ -460,9 +467,7 @@ def update_newcomer(db: Session, newcomer_id: int, payload: NewcomerUpdate, acto
         previous_sponsor_name = _member_name(record.sponsored_by_member)
         next_sponsor_id = payload.sponsored_by_member_id or None
         if next_sponsor_id is not None:
-            sponsor = db.query(Member).filter(Member.id == next_sponsor_id).first()
-            if not sponsor:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sponsor member not found")
+            sponsor = _get_active_sponsor_member(db, next_sponsor_id)
             next_sponsor_name = _member_name(sponsor)
         else:
             next_sponsor_name = None

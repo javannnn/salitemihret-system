@@ -165,8 +165,9 @@ def test_create_member_rejects_contribution_below_minimum_without_exception(clie
     assert "at least 75.00 CAD" in response.text
 
 
-def test_update_member_regenerates_username(client, authorize, registrar_user, sample_member, db_session):
+def test_update_member_preserves_existing_username(client, authorize, registrar_user, sample_member, db_session):
     authorize(registrar_user)
+    original_username = sample_member.username
     response = client.put(
         f"/members/{sample_member.id}",
         json={"first_name": "Selam", "last_name": "Kebede"},
@@ -174,7 +175,7 @@ def test_update_member_regenerates_username(client, authorize, registrar_user, s
     assert response.status_code == 200, response.text
     db_session.expire_all()
     member = db_session.get(Member, sample_member.id)
-    assert member.username.startswith("selam.kebede")
+    assert member.username == original_username
 
 
 def test_patch_member_updates_status(client, authorize, admin_user, sample_member, db_session):

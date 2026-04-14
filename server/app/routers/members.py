@@ -826,7 +826,7 @@ def update_member(
     if payload.ministry_ids is not None:
         _set_ministries(db, member, payload.ministry_ids)
 
-    if member.username is None or payload.first_name or payload.last_name:
+    if member.username is None:
         member.username = generate_username(db, member.first_name, member.last_name)
 
     if member.marital_status == "Married" and member.spouse is None:

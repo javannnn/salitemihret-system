@@ -2221,9 +2221,14 @@ export async function updateMemberSpouse(
   });
 }
 
-export async function searchMembers(query: string, limit = 5): Promise<Page<Member>> {
+export async function searchMembers(
+  query: string,
+  limit = 5,
+  options?: { status?: MemberStatus }
+): Promise<Page<Member>> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
+  if (options?.status) params.set("status", options.status);
   params.set("page_size", String(limit));
   params.set("sort", "-updated_at");
   return api<Page<Member>>(`/members?${params.toString()}`);

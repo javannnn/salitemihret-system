@@ -7,7 +7,7 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
-import { getCache, setCache } from "@/lib/cache";
+import { clearCache, getCache, setCache } from "@/lib/cache";
 import {
   ApiError,
   Member,
@@ -44,12 +44,13 @@ import {
   normalizeEmailInput,
 } from "@/lib/validation";
 
-type WizardStep = 0 | 1 | 2 | 3;
+type WizardStep = 0 | 1 | 2 | 3 | 4;
 
 type NewcomerWizardForm = {
   household_type: Newcomer["household_type"];
   first_name: string;
   last_name: string;
+  arrival_date: string;
   family_size: string;
   preferred_language: string[];
   interpreter_required: boolean;
@@ -61,6 +62,8 @@ type NewcomerWizardForm = {
   temporary_address_city: string;
   temporary_address_province: string;
   temporary_address_postal_code: string;
+  sponsored_by_member_id: string;
+  sponsored_by_member_name: string;
   past_profession: string;
   notes: string;
 };
@@ -109,10 +112,19 @@ const INTERACTION_TYPES: NewcomerInteraction["interaction_type"][] = [
 
 const PAGE_SIZE = 12;
 
+function getTodayDateInputValue() {
+  const today = new Date();
+  const year = String(today.getFullYear());
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 const emptyWizardForm = (): NewcomerWizardForm => ({
   household_type: "Individual",
   first_name: "",
   last_name: "",
+  arrival_date: getTodayDateInputValue(),
   family_size: "",
   preferred_language: [],
   interpreter_required: false,
@@ -124,6 +136,8 @@ const emptyWizardForm = (): NewcomerWizardForm => ({
   temporary_address_city: "",
   temporary_address_province: "",
   temporary_address_postal_code: "",
+  sponsored_by_member_id: "",
+  sponsored_by_member_name: "",
   past_profession: "",
   notes: "",
 });
@@ -171,6 +185,9 @@ export default function NewcomersWorkspace() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(0);
   const [wizardForm, setWizardForm] = useState<NewcomerWizardForm>(emptyWizardForm);
   const [wizardPastProfessionSelection, setWizardPastProfessionSelection] = useState<string>("");
+  const [wizardSponsorQuery, setWizardSponsorQuery] = useState("");
+  const [wizardSponsorResults, setWizardSponsorResults] = useState<Member[]>([]);
+  const [wizardSponsorLoading, setWizardSponsorLoading] = useState(false);
   const [wizardSubmitting, setWizardSubmitting] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [wizardFieldErrors, setWizardFieldErrors] = useState<NewcomerFieldErrors>({});
@@ -193,8 +210,11 @@ export default function NewcomersWorkspace() {
   const [interactionNote, setInteractionNote] = useState("");
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const listRequestRef = useRef(0);
+  const skipNextListCacheRef = useRef(false);
+  const [listRefreshNonce, setListRefreshNonce] = useState(0);
   const debouncedQuery = useDebouncedValue(filters.q, 350);
   const debouncedAssignSponsorQuery = useDebouncedValue(assignSponsorQuery, 300);
+  const debouncedWizardSponsorQuery = useDebouncedValue(wizardSponsorQuery, 300);
 
   const totalPages = useMemo(() => {
     if (!newcomers) return 1;
@@ -262,12 +282,19 @@ export default function NewcomersWorkspace() {
 
   useEffect(() => {
     if (!canView) return;
-    const cached = getCache<NewcomerListResponse>(listCacheKey);
-    if (cached) {
-      setNewcomers(cached);
-      setLoading(false);
-    } else {
+    const skipCache = skipNextListCacheRef.current;
+    if (skipCache) {
+      skipNextListCacheRef.current = false;
+      clearCache(listCacheKey);
       setLoading(true);
+    } else {
+      const cached = getCache<NewcomerListResponse>(listCacheKey);
+      if (cached) {
+        setNewcomers(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
     }
     const requestId = ++listRequestRef.current;
     listNewcomers(listPayload)
@@ -286,7 +313,7 @@ export default function NewcomersWorkspace() {
           setLoading(false);
         }
       });
-  }, [listPayload, listCacheKey, canView, toast]);
+  }, [listPayload, listCacheKey, listRefreshNonce, canView, toast]);
 
   useEffect(() => {
     if (!canView) return;
@@ -318,7 +345,7 @@ export default function NewcomersWorkspace() {
     }
     let active = true;
     setAssignSponsorLoading(true);
-    searchMembers(debouncedAssignSponsorQuery.trim(), 6)
+    searchMembers(debouncedAssignSponsorQuery.trim(), 6, { status: "Active" })
       .then((response) => {
         if (active) {
           setAssignSponsorResults(response.items.slice(0, 6));
@@ -339,6 +366,41 @@ export default function NewcomersWorkspace() {
       active = false;
     };
   }, [assignModal.open, debouncedAssignSponsorQuery]);
+
+  useEffect(() => {
+    if (!wizardOpen || wizardStep !== 3) {
+      setWizardSponsorResults([]);
+      setWizardSponsorLoading(false);
+      return;
+    }
+    if (!debouncedWizardSponsorQuery.trim()) {
+      setWizardSponsorResults([]);
+      setWizardSponsorLoading(false);
+      return;
+    }
+    let active = true;
+    setWizardSponsorLoading(true);
+    searchMembers(debouncedWizardSponsorQuery.trim(), 6, { status: "Active" })
+      .then((response) => {
+        if (active) {
+          setWizardSponsorResults(response.items.slice(0, 6));
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.error(error);
+          setWizardSponsorResults([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setWizardSponsorLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [wizardOpen, wizardStep, debouncedWizardSponsorQuery]);
 
   const refreshMetrics = () => {
     if (!canView) return;
@@ -372,8 +434,19 @@ export default function NewcomersWorkspace() {
     setWizardStep(0);
     setWizardForm(emptyWizardForm());
     setWizardPastProfessionSelection("");
+    setWizardSponsorQuery("");
+    setWizardSponsorResults([]);
+    setWizardSponsorLoading(false);
     setWizardError(null);
     setWizardFieldErrors({});
+  };
+
+  const refreshNewcomerList = ({ resetPage = false }: { resetPage?: boolean } = {}) => {
+    skipNextListCacheRef.current = true;
+    if (resetPage && filters.page !== 1) {
+      setFilters((prev) => ({ ...prev, page: 1 }));
+    }
+    setListRefreshNonce((prev) => prev + 1);
   };
 
   const togglePreferredLanguage = (language: string) => {
@@ -404,6 +477,11 @@ export default function NewcomersWorkspace() {
       }
       if (!wizardForm.last_name.trim()) {
         addFieldError(0, "last_name", "Last name is required.");
+      }
+      if (!wizardForm.arrival_date) {
+        addFieldError(0, "arrival_date", "Arrival date is required.");
+      } else if (wizardForm.arrival_date > getTodayDateInputValue()) {
+        addFieldError(0, "arrival_date", "Arrival date cannot be in the future.");
       }
       if (wizardForm.family_size) {
         const size = Number(wizardForm.family_size);
@@ -494,7 +572,7 @@ export default function NewcomersWorkspace() {
   };
 
   const handleCreateNewcomer = async () => {
-    const validation = validateWizardSteps([0, 1, 2]);
+    const validation = validateWizardSteps([0, 1, 2, 3]);
     if (!validation.isValid) {
       setWizardFieldErrors(validation.fieldErrors);
       setWizardError(validation.formError);
@@ -533,14 +611,15 @@ export default function NewcomersWorkspace() {
         temporary_address_city: wizardForm.temporary_address_city || undefined,
         temporary_address_province: wizardForm.temporary_address_province || undefined,
         temporary_address_postal_code: formattedPostalCode || undefined,
+        sponsored_by_member_id: wizardForm.sponsored_by_member_id ? Number(wizardForm.sponsored_by_member_id) : undefined,
         past_profession: wizardForm.past_profession.trim() || undefined,
         notes: wizardForm.notes || undefined,
-        arrival_date: new Date().toISOString().slice(0, 10),
+        arrival_date: wizardForm.arrival_date,
       });
       toast.push("Newcomer created.");
       handleWizardClose();
       refreshMetrics();
-      setFilters((prev) => ({ ...prev, page: 1 }));
+      refreshNewcomerList({ resetPage: true });
     } catch (error) {
       console.error(error);
       const parsed = parseApiFieldErrors(error);
@@ -578,7 +657,7 @@ export default function NewcomersWorkspace() {
       toast.push("Status updated.");
       setStatusModal({ open: false, newcomer: null });
       refreshMetrics();
-      setFilters((prev) => ({ ...prev }));
+      refreshNewcomerList();
     } catch (error) {
       console.error(error);
       toast.push("Unable to update status.");
@@ -604,7 +683,7 @@ export default function NewcomersWorkspace() {
       });
       toast.push("Sponsor assignment updated.");
       setAssignModal({ open: false, newcomer: null });
-      setFilters((prev) => ({ ...prev }));
+      refreshNewcomerList();
     } catch (error) {
       console.error(error);
       toast.push("Unable to update sponsor assignment.");
@@ -629,7 +708,7 @@ export default function NewcomersWorkspace() {
       });
       toast.push("Interaction logged.");
       setInteractionModal({ open: false, newcomer: null });
-      setFilters((prev) => ({ ...prev }));
+      refreshNewcomerList();
     } catch (error) {
       console.error(error);
       toast.push("Unable to log interaction.");
@@ -885,7 +964,7 @@ export default function NewcomersWorkspace() {
             <div className="p-6 border-b border-border flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold">Newcomer intake</h2>
-                <p className="text-sm text-mute">Step {wizardStep + 1} of 4</p>
+                <p className="text-sm text-mute">Step {wizardStep + 1} of 5</p>
               </div>
               <Button variant="ghost" onClick={handleWizardClose}>
                 Close
@@ -978,6 +1057,22 @@ export default function NewcomersWorkspace() {
                       </div>
                       <p className="mt-2 text-xs text-mute">Select all languages that apply.</p>
                     </div>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Arrival date</label>
+                    <Input
+                      type="date"
+                      max={getTodayDateInputValue()}
+                      value={wizardForm.arrival_date}
+                      className={fieldErrorClass("arrival_date")}
+                      onChange={(event) => {
+                        setWizardForm((prev) => ({ ...prev, arrival_date: event.target.value }));
+                        clearWizardFieldError("arrival_date");
+                      }}
+                    />
+                    {wizardFieldErrors.arrival_date && (
+                      <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.arrival_date}</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <input
@@ -1163,6 +1258,75 @@ export default function NewcomersWorkspace() {
 
               {wizardStep === 3 && (
                 <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Sponsored by</label>
+                      <Input
+                        value={wizardSponsorQuery}
+                        placeholder="Search active member by name, phone, or email"
+                        onChange={(event) => setWizardSponsorQuery(event.target.value)}
+                      />
+                      <p className="mt-1 text-xs text-mute">Optional. Suggestions only include active members.</p>
+                    </div>
+                    {wizardSponsorLoading && <p className="text-xs text-mute">Searching active members...</p>}
+                    {!wizardSponsorLoading && wizardSponsorQuery.trim() && wizardSponsorResults.length === 0 && (
+                      <p className="text-xs text-mute">No active members found.</p>
+                    )}
+                    {wizardSponsorResults.length > 0 && (
+                      <div className="max-h-56 overflow-y-auto rounded-xl border border-border">
+                        {wizardSponsorResults.map((member) => {
+                          const name = memberFullName(member) || member.username;
+                          const selected = String(member.id) === wizardForm.sponsored_by_member_id;
+                          return (
+                            <button
+                              key={member.id}
+                              type="button"
+                              className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                                selected ? "bg-accent/10 text-accent" : "hover:bg-muted/50"
+                              }`}
+                              onClick={() => {
+                                setWizardForm((prev) => ({
+                                  ...prev,
+                                  sponsored_by_member_id: String(member.id),
+                                  sponsored_by_member_name: name,
+                                }));
+                                setWizardSponsorQuery("");
+                                setWizardSponsorResults([]);
+                              }}
+                            >
+                              <span>{name}</span>
+                              {selected && <span className="text-xs font-medium">Selected</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {wizardForm.sponsored_by_member_id && (
+                      <div className="rounded-xl border border-border bg-card/60 px-3 py-2 text-sm">
+                        <div className="font-medium text-ink">{wizardForm.sponsored_by_member_name}</div>
+                        <div className="mt-1 text-xs text-mute">Selected sponsor</div>
+                        <div className="mt-2">
+                          <Button
+                            variant="ghost"
+                            onClick={() =>
+                              setWizardForm((prev) => ({
+                                ...prev,
+                                sponsored_by_member_id: "",
+                                sponsored_by_member_name: "",
+                              }))
+                            }
+                          >
+                            Clear sponsor
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 4 && (
+                <div className="space-y-4">
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">Past profession / service</label>
                     <Select
@@ -1227,7 +1391,7 @@ export default function NewcomersWorkspace() {
               >
                 Back
               </Button>
-              {wizardStep < 3 ? (
+              {wizardStep < 4 ? (
                 <Button
                   onClick={handleWizardContinue}
                   disabled={wizardSubmitting}
@@ -1309,11 +1473,11 @@ export default function NewcomersWorkspace() {
                 <Input
                   value={assignSponsorQuery}
                   onChange={(event) => setAssignSponsorQuery(event.target.value)}
-                  placeholder="Search member by name"
+                  placeholder="Search active member by name"
                 />
-                {assignSponsorLoading && <p className="text-xs text-mute">Searching members...</p>}
+                {assignSponsorLoading && <p className="text-xs text-mute">Searching active members...</p>}
                 {!assignSponsorLoading && assignSponsorQuery.trim() && assignSponsorResults.length === 0 && (
-                  <p className="text-xs text-mute">No matching members found.</p>
+                  <p className="text-xs text-mute">No active members found.</p>
                 )}
                 {assignSponsorResults.length > 0 && (
                   <div className="max-h-56 overflow-y-auto rounded-xl border border-border">

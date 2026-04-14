@@ -4,6 +4,7 @@ from datetime import date
 import io
 import zipfile
 
+from app.models.member import Member
 from app.models.member import Spouse
 from app.models.sponsorship import Sponsorship
 
@@ -174,6 +175,81 @@ def test_newcomer_sponsor_assignment_can_be_updated_and_cleared(
     assert cleared["sponsored_by_member_id"] is None
     assert cleared["sponsored_by_member_name"] is None
     assert cleared["assigned_owner_name"] is None
+
+
+def test_newcomer_create_rejects_inactive_sponsor_member(
+    client,
+    authorize,
+    public_relations_user,
+    db_session,
+):
+    inactive_member = Member(
+        first_name="Inactive",
+        last_name="Sponsor",
+        username="inactive.sponsor",
+        email="inactive.sponsor@example.com",
+        status="Inactive",
+        phone="+16135550170",
+        pays_contribution=True,
+    )
+    db_session.add(inactive_member)
+    db_session.commit()
+
+    authorize(public_relations_user)
+    response = client.post(
+        "/newcomers",
+        json={
+            "first_name": "Saba",
+            "last_name": "Kidane",
+            "contact_phone": "+16135550171",
+            "contact_email": "saba.kidane@example.com",
+            "arrival_date": date.today().isoformat(),
+            "sponsored_by_member_id": inactive_member.id,
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "active member" in response.text
+
+
+def test_newcomer_update_rejects_inactive_sponsor_member(
+    client,
+    authorize,
+    public_relations_user,
+    db_session,
+):
+    inactive_member = Member(
+        first_name="Dormant",
+        last_name="Sponsor",
+        username="dormant.sponsor",
+        email="dormant.sponsor@example.com",
+        status="Inactive",
+        phone="+16135550172",
+        pays_contribution=True,
+    )
+    db_session.add(inactive_member)
+    db_session.commit()
+
+    authorize(public_relations_user)
+    newcomer_resp = client.post(
+        "/newcomers",
+        json={
+            "first_name": "Bethlehem",
+            "last_name": "Assefa",
+            "contact_phone": "+16135550173",
+            "contact_email": "bethlehem.assefa@example.com",
+            "arrival_date": date.today().isoformat(),
+        },
+    )
+    assert newcomer_resp.status_code == 201, newcomer_resp.text
+
+    update_resp = client.put(
+        f"/newcomers/{newcomer_resp.json()['id']}",
+        json={"sponsored_by_member_id": inactive_member.id},
+    )
+
+    assert update_resp.status_code == 400, update_resp.text
+    assert "active member" in update_resp.text
 
 
 def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
