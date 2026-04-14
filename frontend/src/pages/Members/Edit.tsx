@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type RefObject } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
@@ -715,7 +715,7 @@ function MemberTimelineCard({
   );
 }
 
-type SectionCardProps = {
+type SectionCardProps = ComponentPropsWithoutRef<"section"> & {
   id: string;
   title: string;
   subtitle?: string;
@@ -725,12 +725,17 @@ type SectionCardProps = {
   children: ReactNode;
 };
 
-const SectionCard = forwardRef<HTMLDivElement, SectionCardProps>(function SectionCardComponent(
-  { id, title, subtitle, collapsed = false, onToggle, actions, children }: SectionCardProps,
+const SectionCard = forwardRef<HTMLElement, SectionCardProps>(function SectionCardComponent(
+  { id, title, subtitle, collapsed = false, onToggle, actions, children, className, ...rest }: SectionCardProps,
   ref
 ) {
   return (
-    <section ref={ref} id={id} className="rounded-2xl border border-border bg-card shadow-sm">
+    <section
+      ref={ref}
+      id={id}
+      className={["rounded-2xl border border-border bg-card shadow-sm", className].filter(Boolean).join(" ")}
+      {...rest}
+    >
       <div className="flex items-start justify-between gap-3 px-5 py-4">
         <div>
           <h3 className="text-sm font-semibold tracking-wide text-slate-700">{title}</h3>
@@ -866,7 +871,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     ministries: false,
     notes: false,
   });
-  const sectionRefs = useRef<Record<SectionId, HTMLDivElement | null>>({
+  const sectionRefs = useRef<Record<SectionId, HTMLElement | null>>({
     identity: null,
     membership: null,
     sundaySchool: null,
@@ -879,7 +884,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     notes: null,
   });
   const setSectionRef = useCallback(
-    (id: SectionId) => (node: HTMLDivElement | null) => {
+    (id: SectionId) => (node: HTMLElement | null) => {
       sectionRefs.current[id] = node;
     },
     []

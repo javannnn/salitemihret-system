@@ -507,7 +507,7 @@ export default function AppShell() {
               <BetaBadge subtle />
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div data-tour="topbar-controls" className="flex items-center gap-3">
             <ThemeToggle />
             <button
               data-tour="avatar-menu"

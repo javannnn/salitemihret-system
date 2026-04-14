@@ -84,9 +84,13 @@ export function TourProvider({ children }: { children: ReactNode }) {
     const hasMembers = permissions.viewMembers && permissions.isModuleVisible("members");
     const hasPayments = permissions.viewPayments && permissions.isModuleVisible("payments");
     const canRecordPayments = permissions.managePayments;
+    const canCreateMembers = permissions.createMembers && hasMembers;
+    const canEditMemberCore = permissions.editCore && hasMembers;
+    const canViewMemberPayments = permissions.viewPayments && canCreateMembers;
     const hasSponsorships =
       permissions.isModuleVisible("sponsorships") &&
       (permissions.manageSponsorships || permissions.viewSponsorships || permissions.manageNewcomers || permissions.viewNewcomers);
+    const canManageSponsorships = permissions.manageSponsorships && permissions.isModuleVisible("sponsorships");
     const hasSchools = permissions.viewSchools && permissions.isModuleVisible("schools");
     const canManageSchools = permissions.manageSchools;
 
@@ -102,7 +106,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
         id: "topbar",
         title: "Theme & profile controls",
         description: "Toggle light/dark mode or open your profile from the top bar avatar.",
-        selector: '[data-tour="theme-toggle"]',
+        selector: '[data-tour="topbar-controls"]',
         route: "/dashboard",
       },
       {
@@ -191,16 +195,16 @@ export function TourProvider({ children }: { children: ReactNode }) {
       },
       {
         id: "household-drawer",
-        title: "Manage household",
-        description: "Use the Household drawer to assign or create households in bulk or per member.",
-        selector: '[data-tour="household-drawer"]',
+        title: "Household tools",
+        description: "Open a member row menu, then choose Manage household to assign or create a household.",
+        selector: '[data-tour="members-row-menu"]',
         route: "/members",
       },
       {
         id: "spouse-drawer",
-        title: "Manage spouse",
-        description: "Open the Spouse drawer from the member list actions to add or edit spouse details.",
-        selector: '[data-tour="spouse-drawer"]',
+        title: "Spouse tools",
+        description: "Open a member row menu, then choose Manage spouse to add or edit spouse details.",
+        selector: '[data-tour="members-row-menu"]',
         route: "/members",
       },
       {
@@ -213,8 +217,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
       {
         id: "payment-timeline",
         title: "Payment timeline",
-        description: "Open the member-specific payment timeline for detailed ledger events.",
-        selector: '[data-tour="payment-timeline"]',
+        description: "From the Financial activity section, jump into the full payment timeline after the member profile is saved.",
+        selector: '[data-tour="member-payments"]',
         route: "/members/new",
       },
       {
@@ -306,8 +310,15 @@ export function TourProvider({ children }: { children: ReactNode }) {
     return base.filter((step) => {
       if (step.id.startsWith("members") && !hasMembers) return false;
       if (step.id.startsWith("payments") && !hasPayments) return false;
+      if (step.id === "member-create" && !canCreateMembers) return false;
+      if (["member-detail-nav", "member-save", "member-contact", "member-household", "member-giving", "member-audit"].includes(step.id) && !canCreateMembers) {
+        return false;
+      }
+      if (["household-drawer", "spouse-drawer"].includes(step.id) && !canEditMemberCore) return false;
+      if (["member-payments", "payment-timeline"].includes(step.id) && !canViewMemberPayments) return false;
       if (step.id === "payments-record" && !canRecordPayments) return false;
       if (step.id.startsWith("sponsorship") && !hasSponsorships) return false;
+      if (step.id === "sponsorship-wizard" && !canManageSponsorships) return false;
       if (step.id.startsWith("schools") && !hasSchools) return false;
       if (step.id === "schools-enrollment" && !canManageSchools) return false;
       return true;

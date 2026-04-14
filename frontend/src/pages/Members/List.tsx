@@ -47,6 +47,7 @@ import {
   searchMembers,
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useTour } from "@/context/TourContext";
 import { useToast } from "@/components/Toast";
 import { getCache, setCache } from "@/lib/cache";
 import ImportWizard from "./ImportWizard";
@@ -150,6 +151,7 @@ export default function MembersList() {
   const toast = useToast();
   const { user, token } = useAuth();
   const permissions = usePermissions();
+  const tour = useTour();
   const isMobile = useMediaQuery("(max-width: 1023px)");
 
   const canManage = permissions.editCore || permissions.editFinance || permissions.editSpiritual;
@@ -1091,6 +1093,14 @@ export default function MembersList() {
     autoOpenedPriest,
   ]);
   const rows = data?.items ?? [];
+
+  useEffect(() => {
+    const stepId = tour.currentStep?.id;
+    if (!tour.active || !stepId) return;
+    if (["members-actions", "household-drawer", "spouse-drawer"].includes(stepId) && viewMode !== "list") {
+      setViewMode("list");
+    }
+  }, [tour.active, tour.currentStep?.id, viewMode]);
 
   return (
     <>

@@ -11,6 +11,41 @@ export const LANGUAGE_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
+export const NEWCOMER_PAST_PROFESSION_OPTIONS = [
+  { value: "Lawyers (Legal Advisors)", label: "Lawyers (Legal Advisors)" },
+  {
+    value: "Accountants / Financial Professionals (CPA)",
+    label: "Accountants / Financial Professionals (CPA)",
+  },
+  { value: "Banking & Financial Advisors", label: "Banking & Financial Advisors" },
+  { value: "Real Estate Professionals", label: "Real Estate Professionals" },
+  {
+    value: "Insurance & Risk Management Professionals",
+    label: "Insurance & Risk Management Professionals",
+  },
+  { value: "Engineers (building & safety advice)", label: "Engineers (building & safety advice)" },
+  {
+    value: "IT professionals (security, website, livestream)",
+    label: "IT professionals (security, website, livestream)",
+  },
+  { value: "Architecture", label: "Architecture" },
+] as const;
+
+export type NewcomerPastProfessionOption = (typeof NEWCOMER_PAST_PROFESSION_OPTIONS)[number]["value"];
+
+export const NEWCOMER_PAST_PROFESSION_OTHER_VALUE = "__other__";
+
+export function isNewcomerPastProfessionOption(
+  value: string | null | undefined
+): value is NewcomerPastProfessionOption {
+  return NEWCOMER_PAST_PROFESSION_OPTIONS.some((option) => option.value === value);
+}
+
+export function getNewcomerPastProfessionSelectValue(value: string | null | undefined): string {
+  if (!value) return "";
+  return isNewcomerPastProfessionOption(value) ? value : NEWCOMER_PAST_PROFESSION_OTHER_VALUE;
+}
+
 // ISO 3166-1 country and territory names used across dropdowns.
 const COUNTRY_NAMES = [
   "Afghanistan",

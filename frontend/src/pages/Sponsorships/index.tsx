@@ -7,6 +7,7 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
+import { useTour } from "@/context/TourContext";
 import { getCache, setCache } from "@/lib/cache";
 import {
   ApiCapabilities,
@@ -462,6 +463,7 @@ function resolveDraftStep(record: Sponsorship): WizardStep {
 export default function SponsorshipWorkspace() {
   const permissions = usePermissions();
   const toast = useToast();
+  const tour = useTour();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canView = permissions.viewSponsorships || permissions.manageSponsorships;
@@ -1220,6 +1222,14 @@ export default function SponsorshipWorkspace() {
     setActiveView(view);
     updateSearchParams({ view: view === "budget" ? "budget" : null });
   };
+
+  useEffect(() => {
+    const stepId = tour.currentStep?.id;
+    if (!tour.active || !stepId || !stepId.startsWith("sponsorship")) return;
+    if (activeView !== "cases") {
+      handleViewChange("cases");
+    }
+  }, [activeView, tour.active, tour.currentStep?.id]);
 
   const handleWizardOpen = () => {
     setDraftEditingId(null);
@@ -2046,14 +2056,14 @@ export default function SponsorshipWorkspace() {
             <RefreshCcw className="h-4 w-4 mr-2" /> Refresh
           </Button>
           {canManage && (
-            <Button onClick={handleWizardOpen}>
+            <Button data-tour="sponsorship-wizard" onClick={handleWizardOpen}>
               <PlusCircle className="h-4 w-4 mr-2" /> New Sponsorship
             </Button>
           )}
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-5">
+      <div data-tour="sponsorship-metrics" className="grid gap-3 md:grid-cols-4 xl:grid-cols-5">
         <Card className="p-4">
           <p className="text-xs uppercase text-mute">Active cases</p>
           <p className="text-2xl font-semibold">{metrics?.active_cases ?? "—"}</p>
@@ -2081,7 +2091,7 @@ export default function SponsorshipWorkspace() {
 
       {activeView === "cases" && (
         <>
-          <Card className="p-4 space-y-3">
+          <Card className="p-4 space-y-3" data-tour="sponsorship-filters">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2 w-full md:max-w-md">
             <Search className="h-4 w-4 text-mute" />
@@ -2217,7 +2227,7 @@ export default function SponsorshipWorkspace() {
         </AnimatePresence>
           </Card>
 
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden" data-tour="sponsorship-list">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium">Cases</p>

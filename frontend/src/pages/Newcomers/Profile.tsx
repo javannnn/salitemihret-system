@@ -27,7 +27,15 @@ import {
   transitionNewcomerStatus,
   updateNewcomer,
 } from "@/lib/api";
-import { COUNTRY_OPTIONS, MEMBER_STATUS_OPTIONS, PROVINCE_OPTIONS } from "@/lib/options";
+import {
+  COUNTRY_OPTIONS,
+  getNewcomerPastProfessionSelectValue,
+  isNewcomerPastProfessionOption,
+  MEMBER_STATUS_OPTIONS,
+  NEWCOMER_PAST_PROFESSION_OPTIONS,
+  NEWCOMER_PAST_PROFESSION_OTHER_VALUE,
+  PROVINCE_OPTIONS,
+} from "@/lib/options";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   getCanonicalCanadianPhone,
@@ -213,6 +221,7 @@ export default function NewcomerProfile() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsFieldErrors, setDetailsFieldErrors] = useState<NewcomerDetailFieldErrors>({});
   const [detailsForm, setDetailsForm] = useState<NewcomerDetailsForm>(emptyDetailsForm);
+  const [detailsPastProfessionSelection, setDetailsPastProfessionSelection] = useState<string>("");
   const debouncedSponsorSearchQuery = useDebouncedValue(sponsorSearchQuery, 300);
 
   useEffect(() => {
@@ -355,6 +364,7 @@ export default function NewcomerProfile() {
   const openDetailsModal = () => {
     if (!newcomer) return;
     setDetailsForm(detailsFormFromNewcomer(newcomer));
+    setDetailsPastProfessionSelection(getNewcomerPastProfessionSelectValue(newcomer.past_profession));
     setDetailsFieldErrors({});
     setDetailsError(null);
     setDetailsModalOpen(true);
@@ -949,7 +959,7 @@ export default function NewcomerProfile() {
                   <div className="text-sm text-ink">{newcomer.country || "-"}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase text-mute">Past profession</div>
+                  <div className="text-xs uppercase text-mute">Past profession / service</div>
                   <div className="text-sm text-ink whitespace-pre-wrap">{newcomer.past_profession || "-"}</div>
                 </div>
                 <div>
@@ -1303,12 +1313,52 @@ export default function NewcomerProfile() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Past profession</label>
-                  <Textarea
-                    value={detailsForm.past_profession}
-                    onChange={(event) => setDetailsForm((prev) => ({ ...prev, past_profession: event.target.value }))}
-                  />
+                  <label className="text-xs uppercase text-mute block mb-1">Past profession / service</label>
+                  <Select
+                    value={detailsPastProfessionSelection}
+                    onChange={(event) => {
+                      const nextSelection = event.target.value;
+                      setDetailsPastProfessionSelection(nextSelection);
+                      setDetailsForm((prev) => ({
+                        ...prev,
+                        past_profession:
+                          nextSelection === NEWCOMER_PAST_PROFESSION_OTHER_VALUE
+                            ? (isNewcomerPastProfessionOption(prev.past_profession) ? "" : prev.past_profession)
+                            : nextSelection,
+                      }));
+                      clearDetailsFieldError("past_profession");
+                    }}
+                  >
+                    <option value="">Select profession / service</option>
+                    {NEWCOMER_PAST_PROFESSION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value={NEWCOMER_PAST_PROFESSION_OTHER_VALUE}>Others</option>
+                  </Select>
+                  {detailsFieldErrors.past_profession && detailsPastProfessionSelection !== NEWCOMER_PAST_PROFESSION_OTHER_VALUE && (
+                    <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.past_profession}</p>
+                  )}
                 </div>
+
+                {detailsPastProfessionSelection === NEWCOMER_PAST_PROFESSION_OTHER_VALUE && (
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Specify other profession / service</label>
+                    <Input
+                      value={detailsForm.past_profession}
+                      className={detailsFieldClass("past_profession")}
+                      placeholder="Enter profession / service"
+                      onChange={(event) => {
+                        setDetailsForm((prev) => ({ ...prev, past_profession: event.target.value }));
+                        clearDetailsFieldError("past_profession");
+                      }}
+                    />
+                    {detailsFieldErrors.past_profession && (
+                      <p className="mt-1 text-xs text-rose-600">{detailsFieldErrors.past_profession}</p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="text-xs uppercase text-mute block mb-1">Notes</label>

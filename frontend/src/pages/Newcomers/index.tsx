@@ -29,6 +29,9 @@ import {
   CITY_OPTIONS_BY_PROVINCE,
   COUNTRY_OPTIONS,
   LANGUAGE_OPTIONS,
+  isNewcomerPastProfessionOption,
+  NEWCOMER_PAST_PROFESSION_OPTIONS,
+  NEWCOMER_PAST_PROFESSION_OTHER_VALUE,
   PROVINCE_OPTIONS,
 } from "@/lib/options";
 import {
@@ -167,6 +170,7 @@ export default function NewcomersWorkspace() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>(0);
   const [wizardForm, setWizardForm] = useState<NewcomerWizardForm>(emptyWizardForm);
+  const [wizardPastProfessionSelection, setWizardPastProfessionSelection] = useState<string>("");
   const [wizardSubmitting, setWizardSubmitting] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [wizardFieldErrors, setWizardFieldErrors] = useState<NewcomerFieldErrors>({});
@@ -367,6 +371,7 @@ export default function NewcomersWorkspace() {
   const resetWizard = () => {
     setWizardStep(0);
     setWizardForm(emptyWizardForm());
+    setWizardPastProfessionSelection("");
     setWizardError(null);
     setWizardFieldErrors({});
   };
@@ -528,7 +533,7 @@ export default function NewcomersWorkspace() {
         temporary_address_city: wizardForm.temporary_address_city || undefined,
         temporary_address_province: wizardForm.temporary_address_province || undefined,
         temporary_address_postal_code: formattedPostalCode || undefined,
-        past_profession: wizardForm.past_profession || undefined,
+        past_profession: wizardForm.past_profession.trim() || undefined,
         notes: wizardForm.notes || undefined,
         arrival_date: new Date().toISOString().slice(0, 10),
       });
@@ -1160,11 +1165,50 @@ export default function NewcomersWorkspace() {
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">Past profession / service</label>
-                    <Textarea
-                      value={wizardForm.past_profession}
-                      onChange={(event) => setWizardForm((prev) => ({ ...prev, past_profession: event.target.value }))}
-                    />
+                    <Select
+                      value={wizardPastProfessionSelection}
+                      onChange={(event) => {
+                        const nextSelection = event.target.value;
+                        setWizardPastProfessionSelection(nextSelection);
+                        setWizardForm((prev) => ({
+                          ...prev,
+                          past_profession:
+                            nextSelection === NEWCOMER_PAST_PROFESSION_OTHER_VALUE
+                              ? (isNewcomerPastProfessionOption(prev.past_profession) ? "" : prev.past_profession)
+                              : nextSelection,
+                        }));
+                        clearWizardFieldError("past_profession");
+                      }}
+                    >
+                      <option value="">Select profession / service</option>
+                      {NEWCOMER_PAST_PROFESSION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                      <option value={NEWCOMER_PAST_PROFESSION_OTHER_VALUE}>Others</option>
+                    </Select>
+                    {wizardFieldErrors.past_profession && wizardPastProfessionSelection !== NEWCOMER_PAST_PROFESSION_OTHER_VALUE && (
+                      <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.past_profession}</p>
+                    )}
                   </div>
+                  {wizardPastProfessionSelection === NEWCOMER_PAST_PROFESSION_OTHER_VALUE && (
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Specify other profession / service</label>
+                      <Input
+                        value={wizardForm.past_profession}
+                        className={fieldErrorClass("past_profession")}
+                        placeholder="Enter profession / service"
+                        onChange={(event) => {
+                          setWizardForm((prev) => ({ ...prev, past_profession: event.target.value }));
+                          clearWizardFieldError("past_profession");
+                        }}
+                      />
+                      {wizardFieldErrors.past_profession && (
+                        <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.past_profession}</p>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs uppercase text-mute block mb-1">Notes</label>
                     <Textarea

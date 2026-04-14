@@ -5,6 +5,7 @@ import { BookOpen, CalendarClock, FileText, HandHeart, Image, Loader2, PlusCircl
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
+import { useTour } from "@/context/TourContext";
 import {
   AbenetEnrollment,
   AbenetEnrollmentList,
@@ -176,6 +177,7 @@ const validateChildCandidate = (child: MemberChildSearchItem): { valid: boolean;
 export default function SchoolsWorkspace() {
   const permissions = usePermissions();
   const toast = useToast();
+  const tour = useTour();
   const canView = permissions.viewSchools;
   const canManage = permissions.manageSchools;
 
@@ -330,6 +332,15 @@ export default function SchoolsWorkspace() {
       })
       .finally(() => setContentLoading(false));
   }, [canView, toast, contentTypeFilter, contentStatusFilter, activeTab]);
+
+  useEffect(() => {
+    const stepId = tour.currentStep?.id;
+    if (!tour.active || !stepId || !stepId.startsWith("schools")) return;
+    const nextTab = stepId === "schools-sunday-list" ? "sundayschool" : "abenet";
+    if (activeTab !== nextTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, tour.active, tour.currentStep?.id]);
 
   useEffect(() => {
     setContentForm((prev) => ({ ...prev, type: contentTypeFilter }));
@@ -711,6 +722,7 @@ export default function SchoolsWorkspace() {
           <button
             key={tab.key}
             type="button"
+            data-tour={tab.key === "sundayschool" ? "schools-sunday-tab" : undefined}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-mute hover:text-foreground"
               }`}
             onClick={() => setActiveTab(tab.key as "abenet" | "sundayschool")}
