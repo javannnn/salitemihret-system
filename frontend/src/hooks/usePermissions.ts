@@ -17,6 +17,7 @@ export type PermissionMap = {
   editStatus: boolean;
   editFinance: boolean;
   editSpiritual: boolean;
+  manageFatherConfessors: boolean;
   bulkActions: boolean;
   importMembers: boolean;
   exportMembers: boolean;
@@ -42,6 +43,7 @@ const BASE_PERMISSIONS: PermissionMap = {
   editStatus: false,
   editFinance: false,
   editSpiritual: false,
+  manageFatherConfessors: false,
   bulkActions: false,
   importMembers: false,
   exportMembers: false,
@@ -68,6 +70,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     editStatus: true,
     editFinance: true,
     editSpiritual: true,
+    manageFatherConfessors: true,
     bulkActions: true,
     importMembers: true,
     exportMembers: true,
@@ -92,6 +95,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     editStatus: true,
     editFinance: true,
     editSpiritual: true,
+    manageFatherConfessors: true,
     bulkActions: true,
     importMembers: true,
     exportMembers: true,
@@ -244,9 +248,20 @@ export function usePermissions(): PermissionMap & {
     };
 
     const canAccessReport = (report: ReportPermissionKey) => canReadField("reports", report);
+    const membersFieldPermissions = fields.members ?? {};
+    const hasFatherConfessorManagementEntry = Object.prototype.hasOwnProperty.call(
+      membersFieldPermissions,
+      "father_confessor_management"
+    );
+    const manageFatherConfessors = isSuperAdmin
+      ? true
+      : hasFatherConfessorManagementEntry
+        ? canWriteField("members", "father_confessor_management")
+        : merged.manageFatherConfessors;
 
     return {
       ...merged,
+      manageFatherConfessors,
       isSuperAdmin,
       modules,
       isModuleVisible,

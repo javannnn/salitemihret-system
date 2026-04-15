@@ -2005,7 +2005,7 @@ export async function uploadAvatar(memberId: number, file: File): Promise<Avatar
   }
   if (!res.ok) {
     const message = await res.text();
-    throw new Error(message || "Avatar upload failed");
+    throw new ApiError(res.status, message || "Avatar upload failed");
   }
   return res.json();
 }
@@ -2019,7 +2019,7 @@ export async function deleteAvatar(memberId: number): Promise<void> {
   }
   if (!res.ok) {
     const message = await res.text();
-    throw new Error(message || "Avatar deletion failed");
+    throw new ApiError(res.status, message || "Avatar deletion failed");
   }
 }
 
@@ -2305,6 +2305,10 @@ export async function archivePriest(priestId: number): Promise<Priest> {
 
 export async function restorePriest(priestId: number): Promise<Priest> {
   return api<Priest>(`/priests/${priestId}/restore`, { method: "POST" });
+}
+
+export async function deletePriest(priestId: number): Promise<void> {
+  await api(`/priests/${priestId}`, { method: "DELETE" });
 }
 
 export async function listHouseholds(params: { q?: string; page?: number; page_size?: number } = {}): Promise<HouseholdListResponse> {

@@ -50,6 +50,20 @@ def test_budget_round_permission_defaults_to_admin_only() -> None:
     assert sponsor_fields["sponsorships"]["budget_rounds"] == {"read": False, "write": False}
 
 
+def test_father_confessor_management_defaults_to_admin_and_pr_only() -> None:
+    admin_role = Role(name="Admin")
+    pr_role = Role(name="PublicRelations")
+    registrar_role = Role(name="Registrar")
+
+    admin_fields = resolve_role_field_permissions(admin_role)
+    pr_fields = resolve_role_field_permissions(pr_role)
+    registrar_fields = resolve_role_field_permissions(registrar_role)
+
+    assert admin_fields["members"]["father_confessor_management"] == {"read": True, "write": True}
+    assert pr_fields["members"]["father_confessor_management"] == {"read": True, "write": True}
+    assert registrar_fields["members"]["father_confessor_management"] == {"read": False, "write": False}
+
+
 def test_custom_role_can_enable_budget_round_permission() -> None:
     role = Role(
         name="BudgetCoordinator",
@@ -65,6 +79,27 @@ def test_custom_role_can_enable_budget_round_permission() -> None:
 
     effective = compute_effective_permissions([role], is_super_admin=False)
     assert effective["fields"]["sponsorships"]["budget_rounds"] == {"read": True, "write": True}
+
+
+def test_custom_role_can_enable_father_confessor_management() -> None:
+    role = Role(
+        name="FatherConfessorCoordinator",
+        module_permissions={
+            "members": {"read": True, "write": True},
+        },
+        field_permissions={
+            "members": {
+                "father_confessor_management": {"read": True, "write": True},
+            }
+        },
+    )
+
+    resolved = resolve_role_field_permissions(role)
+    assert resolved["members"]["father_confessor_management"] == {"read": True, "write": True}
+
+    effective = compute_effective_permissions([role], is_super_admin=False)
+    assert effective["fields"]["members"]["father_confessor_management"] == {"read": True, "write": True}
+    assert effective["legacy"]["manageFatherConfessors"] is True
 
 
 def test_report_catalog_exposes_granular_report_fields() -> None:
@@ -105,3 +140,9 @@ def test_custom_role_can_hide_specific_report_type() -> None:
 
     assert has_field_permission(user, "reports", "members", "read") is True
     assert has_field_permission(user, "reports", "payments", "read") is False
+
+
+def test_permission_catalog_exposes_father_confessor_management_field() -> None:
+    members_module = next(module for module in permission_catalog_payload() if module["key"] == "members")
+
+    assert any(field["key"] == "father_confessor_management" for field in members_module["fields"])

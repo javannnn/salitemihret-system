@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_roles
+from app.auth.deps import require_field_permission, require_roles
 from app.core.db import get_db
+from app.models.member import Member
 from app.models.priest import Priest
 from app.models.user import User
 from app.schemas.member import PriestCreate, PriestOut, PriestUpdate
 
 READ_ROLES = ("PublicRelations", "Registrar", "Admin", "Clerk", "OfficeAdmin", "FinanceAdmin")
-WRITE_ROLES = ("Admin", "PublicRelations")
 
 router = APIRouter(prefix="/priests", tags=["priests"])
 
@@ -43,7 +43,7 @@ def list_priests(
 def create_priest(
     payload: PriestCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*WRITE_ROLES)),
+    _: User = Depends(require_field_permission("members", "father_confessor_management", "write")),
 ) -> PriestOut:
     existing = (
         db.query(Priest)
@@ -80,7 +80,7 @@ def update_priest(
     priest_id: int,
     payload: PriestUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*WRITE_ROLES)),
+    _: User = Depends(require_field_permission("members", "father_confessor_management", "write")),
 ) -> PriestOut:
     priest = _get_priest_or_404(db, priest_id)
 
@@ -111,7 +111,7 @@ def update_priest(
 def archive_priest(
     priest_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*WRITE_ROLES)),
+    _: User = Depends(require_field_permission("members", "father_confessor_management", "write")),
 ) -> PriestOut:
     priest = _get_priest_or_404(db, priest_id)
     priest.status = "Inactive"
@@ -124,10 +124,41 @@ def archive_priest(
 def restore_priest(
     priest_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*WRITE_ROLES)),
+    _: User = Depends(require_field_permission("members", "father_confessor_management", "write")),
 ) -> PriestOut:
     priest = _get_priest_or_404(db, priest_id)
     priest.status = "Active"
     db.commit()
     db.refresh(priest)
     return PriestOut.from_orm(priest)
+
+
+@router.delete(
+    "/{priest_id}",
+    status_code=status.HTTP_200_OK,
+    response_class=Response,
+)
+def delete_priest(
+    priest_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_field_permission("members", "father_confessor_management", "write")),
+) -> None:
+    priest = _get_priest_or_404(db, priest_id)
+    linked_members = (
+        db.query(func.count(Member.id))
+        .filter(Member.father_confessor_id == priest.id)
+        .scalar()
+        or 0
+    )
+    if linked_members:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete this father confessor while assigned to members. "
+                "Remove or reassign those links first."
+            ),
+        )
+
+    db.delete(priest)
+    db.commit()
+    return Response(status_code=status.HTTP_200_OK)

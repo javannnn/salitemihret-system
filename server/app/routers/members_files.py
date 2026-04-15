@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +19,7 @@ router = APIRouter(prefix="/members", tags=["members"])
 
 WRITE_ROLES = ("Registrar", "Admin")
 EXCEPTION_ATTACHMENT_ROLES = ("Admin", "FinanceAdmin", "Registrar", "PublicRelations")
+MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024
 MAX_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024
 
 ALLOWED_CONTENT_TYPES: dict[str, str] = {
@@ -94,15 +94,22 @@ def upload_member_avatar(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
     old_snapshot = snapshot_member(member)
+    old_path = member.avatar_path
     filename = f"{member_id}_{datetime.utcnow():%Y%m%d%H%M%S%f}.{extension}"
     absolute_path = UPLOAD_DIR / filename
 
     try:
-        with absolute_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
+        data = file.file.read(MAX_AVATAR_SIZE_BYTES + 1)
     finally:
         file.file.close()
 
+    if len(data) > MAX_AVATAR_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is too large. Maximum allowed size is 5MB.",
+        )
+
+    absolute_path.write_bytes(data)
     member.avatar_path = _relative_avatar_path(filename)
     member.updated_by_id = current_user.id
 
@@ -110,6 +117,8 @@ def upload_member_avatar(
     record_member_changes(db, member, old_snapshot, current_user.id)
     db.commit()
     db.refresh(member)
+    if old_path and old_path != member.avatar_path:
+        _delete_file_if_exists(old_path)
 
     return AvatarUploadResponse(avatar_url=f"/static/{member.avatar_path}")
 

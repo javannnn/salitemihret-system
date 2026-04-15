@@ -34,6 +34,11 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
             PermissionFieldCatalogEntry("last_name", "Last Name", "Family name on the member profile."),
             PermissionFieldCatalogEntry("email", "Email", "Primary email address."),
             PermissionFieldCatalogEntry("phone", "Phone", "Primary phone number."),
+            PermissionFieldCatalogEntry(
+                "father_confessor_management",
+                "Father Confessor Management",
+                "Create, update, archive, restore, and remove father confessor directory records.",
+            ),
             PermissionFieldCatalogEntry("status", "Status", "Membership status and overrides."),
             PermissionFieldCatalogEntry("district", "District", "District assignment."),
             PermissionFieldCatalogEntry("address", "Address", "Address lines and country."),
@@ -189,6 +194,9 @@ PERMISSION_FIELD_KEYS: dict[str, set[str]] = {
 }
 
 DEFAULT_FIELD_PERMISSION_OVERRIDES: dict[str, dict[str, dict[str, bool]]] = {
+    "members": {
+        "father_confessor_management": {"read": False, "write": False},
+    },
     "sponsorships": {
         "budget_rounds": {"read": False, "write": False},
     },
@@ -308,11 +316,36 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
 
 SYSTEM_ROLE_FIELD_DEFAULTS: dict[str, dict[str, dict[str, dict[str, bool]]]] = {
     "Admin": {
+        "members": {
+            "father_confessor_management": {"read": True, "write": True},
+        },
         "sponsorships": {
             "budget_rounds": {"read": True, "write": True},
         },
     },
+    "PublicRelations": {
+        "members": {
+            "father_confessor_management": {"read": True, "write": True},
+        },
+    },
 }
+
+
+def _field_permission_flags(
+    field_permissions: dict[str, dict[str, dict[str, bool]]] | None,
+    module: str,
+    field: str,
+) -> dict[str, bool] | None:
+    if not field_permissions:
+        return None
+    module_fields = field_permissions.get(module, {})
+    if field not in module_fields:
+        return None
+    flags = module_fields[field]
+    return {
+        "read": bool(flags.get("read")),
+        "write": bool(flags.get("write")),
+    }
 
 
 def _copy_modules(source: dict[str, dict[str, bool]] | None = None) -> dict[str, dict[str, bool]]:
@@ -509,7 +542,11 @@ def compute_effective_permissions(
         for role in roles:
             _merge_field_permissions(field_permissions, resolve_role_field_permissions(role))
 
-    legacy = to_legacy_permission_map(modules, is_super_admin=is_super_admin)
+    legacy = to_legacy_permission_map(
+        modules,
+        field_permissions=field_permissions,
+        is_super_admin=is_super_admin,
+    )
     return {
         "modules": modules,
         "fields": field_permissions,
@@ -520,6 +557,7 @@ def compute_effective_permissions(
 def to_legacy_permission_map(
     modules: dict[str, dict[str, bool]],
     *,
+    field_permissions: dict[str, dict[str, dict[str, bool]]] | None = None,
     is_super_admin: bool = False,
 ) -> dict[str, bool]:
     if is_super_admin:
@@ -530,6 +568,7 @@ def to_legacy_permission_map(
             "editStatus": True,
             "editFinance": True,
             "editSpiritual": True,
+            "manageFatherConfessors": True,
             "bulkActions": True,
             "importMembers": True,
             "exportMembers": True,
@@ -554,6 +593,12 @@ def to_legacy_permission_map(
     def _module_write(module: str) -> bool:
         return bool(modules.get(module, {}).get("write"))
 
+    def _field_write(module: str, field: str) -> bool:
+        flags = _field_permission_flags(field_permissions, module, field)
+        if flags is None:
+            return False
+        return bool(flags.get("write"))
+
     return {
         "viewMembers": _module_read("members"),
         "createMembers": _module_write("members"),
@@ -561,6 +606,7 @@ def to_legacy_permission_map(
         "editStatus": _module_write("members"),
         "editFinance": _module_write("members"),
         "editSpiritual": _module_write("members"),
+        "manageFatherConfessors": _field_write("members", "father_confessor_management"),
         "bulkActions": _module_write("members"),
         "importMembers": _module_write("members"),
         "exportMembers": _module_read("members"),

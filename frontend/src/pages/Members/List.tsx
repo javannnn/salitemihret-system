@@ -155,6 +155,7 @@ export default function MembersList() {
   const isMobile = useMediaQuery("(max-width: 1023px)");
 
   const canManage = permissions.editCore || permissions.editFinance || permissions.editSpiritual;
+  const canManageFatherConfessors = permissions.manageFatherConfessors;
   const canCreate = permissions.createMembers;
   const canBulk = permissions.bulkActions;
   const canImport = permissions.importMembers;
@@ -998,6 +999,10 @@ export default function MembersList() {
   };
 
   const handleCreatePriest = async () => {
+    if (!canManageFatherConfessors) {
+      toast.push("You do not have permission to manage father confessors.");
+      return;
+    }
     if (!newPriest.fullName.trim()) {
       setAssignError("Full name is required");
       return;
@@ -1032,7 +1037,7 @@ export default function MembersList() {
       toast.push("Father confessor created");
     } catch (error) {
       console.error(error);
-      toast.push("Failed to create father confessor");
+      toast.push(parseApiErrorMessage(error, "Failed to create father confessor"));
     } finally {
       setCreatingPriest(false);
     }
@@ -1072,7 +1077,7 @@ export default function MembersList() {
       return;
     }
     if (
-      permissions.editSpiritual &&
+      canManageFatherConfessors &&
       priestSearch.trim() &&
       filteredPriests.length === 0 &&
       !newPriestOpen &&
@@ -1086,7 +1091,7 @@ export default function MembersList() {
     }
   }, [
     assignModalOpen,
-    permissions.editSpiritual,
+    canManageFatherConfessors,
     priestSearch,
     filteredPriests.length,
     newPriestOpen,
@@ -1188,6 +1193,11 @@ export default function MembersList() {
             {canCreate && (
               <Button data-tour="member-create" onClick={() => navigate("/members/new")} className="h-12 rounded-full px-6">
                 Create member
+              </Button>
+            )}
+            {canManageFatherConfessors && (
+              <Button variant="ghost" onClick={() => setPriestDirectoryOpen(true)} className="h-12 rounded-full px-6">
+                Manage father confessors
               </Button>
             )}
           </div>
@@ -2239,7 +2249,7 @@ export default function MembersList() {
                   )}
                 </div>
 
-                {newPriestOpen ? (
+                {newPriestOpen && canManageFatherConfessors ? (
                   <div className="space-y-3 rounded-xl border border-border bg-card/70 p-4">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium">Create new father confessor</div>
@@ -2293,7 +2303,7 @@ export default function MembersList() {
                       </Button>
                     </div>
                   </div>
-                ) : (
+                ) : canManageFatherConfessors ? (
                   <Button
                     type="button"
                     variant="soft"
@@ -2305,10 +2315,12 @@ export default function MembersList() {
                   >
                     + Create new father confessor
                   </Button>
+                ) : null}
+                {canManageFatherConfessors && (
+                  <Button type="button" variant="ghost" onClick={() => setPriestDirectoryOpen(true)}>
+                    Manage father confessors
+                  </Button>
                 )}
-                <Button type="button" variant="ghost" onClick={() => setPriestDirectoryOpen(true)}>
-                  Manage father confessors
-                </Button>
 
                 {assignError && <div className="text-sm text-red-600">{assignError}</div>}
 

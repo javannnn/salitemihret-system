@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
 import { PhoneInput } from "@/components/PhoneInput";
+import PriestDirectoryModal from "./components/PriestDirectoryModal";
 import {
   API_BASE,
   ApiError,
@@ -21,7 +22,6 @@ import {
   getMembersMeta,
   getPaymentServiceTypes,
   listPayments,
-  createPriest,
   uploadAvatar,
   uploadContributionExceptionAttachment,
   deleteAvatar,
@@ -79,15 +79,9 @@ const SECTION_NAV_ITEMS = [
 
 type SectionId = (typeof SECTION_NAV_ITEMS)[number]["id"];
 type HouseholdSelectionMode = "none" | "existing" | "new";
-type NewFatherConfessorFormState = {
-  fullName: string;
-  phone: string;
-  email: string;
-};
 
 const CANADIAN_COUNTRY_CODE = "+1";
 const CANADA_FLAG = "🇨🇦";
-const CREATE_FATHER_CONFESSOR_OPTION = "__create_father_confessor__";
 const QUICK_AMOUNT_OPTIONS = [30, 75, 100] as const;
 const TIMELINE_CATEGORY_STYLES: Record<string, string> = {
   Profile: "bg-slate-100 text-slate-700 border-slate-200",
@@ -97,12 +91,6 @@ const TIMELINE_CATEGORY_STYLES: Record<string, string> = {
   Contribution: "bg-indigo-100 text-indigo-900 border-indigo-200",
   Membership: "bg-rose-100 text-rose-900 border-rose-200",
 };
-
-const createEmptyFatherConfessorForm = (): NewFatherConfessorFormState => ({
-  fullName: "",
-  phone: "",
-  email: "",
-});
 
 const getCountryOptionsForValue = (value: string) =>
   value && !COUNTRY_OPTIONS.some((option) => option.value === value)
@@ -471,6 +459,7 @@ function AvatarCard({
   onChangeClick,
   onRemoveClick,
   removing,
+  helperText,
 }: {
   avatarUrl: string | null;
   initials: string;
@@ -479,6 +468,7 @@ function AvatarCard({
   onChangeClick: () => void;
   onRemoveClick: () => void;
   removing: boolean;
+  helperText?: string | null;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 text-center space-y-4 shadow-sm">
@@ -507,6 +497,7 @@ function AvatarCard({
           </Button>
         )}
         <p className="text-[11px] text-mute">PNG, JPG or WEBP up to 5MB</p>
+        {helperText && <p className="text-[11px] text-mute">{helperText}</p>}
         {!canUpload && <p className="text-[11px] text-mute">Avatar updates require Registrar or Admin permissions</p>}
       </div>
     </div>
@@ -774,8 +765,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const disableCore = disableAll || !permissions.editCore;
   const disableFinance = disableAll || !permissions.editFinance;
   const disableSpiritual = disableAll || !permissions.editSpiritual;
-  const canCreateFatherConfessor =
-    permissions.isSuperAdmin || permissions.hasRole("Admin") || permissions.hasRole("PublicRelations");
+  const canManageFatherConfessors = permissions.manageFatherConfessors;
   const canViewAudit = permissions.viewAudit;
   const canSubmit = !disableAll;
   const canUploadAvatar = !disableCore;
@@ -794,6 +784,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [exceptionAttachmentUploading, setExceptionAttachmentUploading] = useState(false);
   const [exceptionAttachmentRemoving, setExceptionAttachmentRemoving] = useState(false);
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
+  const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
+  const [pendingAvatarPreviewUrl, setPendingAvatarPreviewUrl] = useState<string | null>(null);
   const [phoneDisplay, setPhoneDisplay] = useState("");
   const [phoneAutoAdjusted, setPhoneAutoAdjusted] = useState(false);
   const [timelineEntries, setTimelineEntries] = useState<MemberTimelineEvent[]>([]);
@@ -803,9 +795,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [selectedHousehold, setSelectedHousehold] = useState<string>("");
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [fatherConfessorId, setFatherConfessorId] = useState<string>("");
-  const [newFatherConfessorOpen, setNewFatherConfessorOpen] = useState(false);
-  const [newFatherConfessor, setNewFatherConfessor] = useState<NewFatherConfessorFormState>(createEmptyFatherConfessorForm);
-  const [creatingFatherConfessor, setCreatingFatherConfessor] = useState(false);
+  const [priestDirectoryOpen, setPriestDirectoryOpen] = useState(false);
   const [spouseForm, setSpouseForm] = useState<SpouseFormState | null>(null);
   const [childrenForm, setChildrenForm] = useState<ChildFormState[]>([]);
   const [newPayment, setNewPayment] = useState<MemberPaymentForm>(() => ({
@@ -823,6 +813,26 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     if (!serviceTypes.length) return "";
     return serviceTypes.find((type) => type.code === "CONTRIBUTION")?.code || serviceTypes[0].code;
   }, [serviceTypes]);
+
+  const clearPendingAvatar = useCallback(() => {
+    setPendingAvatarBlob(null);
+    setPendingAvatarPreviewUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev);
+      }
+      return null;
+    });
+  }, []);
+
+  const stagePendingAvatar = useCallback((blob: Blob) => {
+    setPendingAvatarBlob(blob);
+    setPendingAvatarPreviewUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev);
+      }
+      return URL.createObjectURL(blob);
+    });
+  }, []);
   const todayDateInputMax = useMemo(() => formatDateInputValue(new Date()), []);
   const filteredHouseholds = useMemo(() => {
     const households = meta?.households ?? [];
@@ -1061,13 +1071,12 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
 
 
   const initializeFormsFromMember = useCallback((details: MemberDetail) => {
+    clearPendingAvatar();
     setHouseholdMode(details.household ? "existing" : "none");
     setHouseholdSearch("");
     setSelectedHousehold(details.household ? String(details.household.id) : "");
     setNewHouseholdName("");
     setFatherConfessorId(details.father_confessor ? String(details.father_confessor.id) : "");
-    setNewFatherConfessorOpen(false);
-    setNewFatherConfessor(createEmptyFatherConfessorForm());
     if (details.marital_status === "Married") {
       setSpouseForm({
         first_name: details.spouse?.first_name ?? "",
@@ -1096,7 +1105,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     const digits = extractCanadianDigits(details.phone);
     setPhoneDisplay(formatCanadianPhoneDisplay(digits));
     setPhoneAutoAdjusted(false);
-  }, []);
+  }, [clearPendingAvatar]);
+
+  useEffect(() => () => {
+    if (pendingAvatarPreviewUrl) {
+      URL.revokeObjectURL(pendingAvatarPreviewUrl);
+    }
+  }, [pendingAvatarPreviewUrl]);
 
   useEffect(() => {
     if (!isCreateMode) {
@@ -1414,45 +1429,29 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     handleHouseholdSelect(String(householdSuggestions[0].id));
   };
 
-  const handleCreateFatherConfessor = async () => {
-    if (!canCreateFatherConfessor) {
-      toast.push("Only Admin or PR Admin can add a new father confessor.");
-      return;
-    }
-    const fullName = newFatherConfessor.fullName.trim();
-    if (!fullName) {
-      toast.push("Father confessor full name is required");
-      return;
-    }
+  const handleFatherConfessorSelected = (priest: MembersMeta["father_confessors"][number]) => {
+    setFatherConfessorId(String(priest.id));
+    setMember((prev) => (prev ? { ...prev, has_father_confessor: true, father_confessor: priest } : prev));
+    markDirty();
+  };
 
-    setCreatingFatherConfessor(true);
-    try {
-      const created = await createPriest({
-        full_name: fullName,
-        phone: newFatherConfessor.phone || undefined,
-        email: newFatherConfessor.email.trim() || undefined,
-      });
-      setMeta((prev) =>
-        prev
-          ? { ...prev, father_confessors: upsertSortedFatherConfessors(prev.father_confessors, created) }
-          : prev
-      );
-      setMember((prev) => (prev ? { ...prev, father_confessor: created, has_father_confessor: true } : prev));
-      setFatherConfessorId(String(created.id));
-      setNewFatherConfessorOpen(false);
-      setNewFatherConfessor(createEmptyFatherConfessorForm());
+  const handlePriestDirectoryUpdate = (next: MembersMeta["father_confessors"]) => {
+    setMeta((prev) => (prev ? { ...prev, father_confessors: next } : prev));
+    const selectedId = fatherConfessorId ? Number(fatherConfessorId) : null;
+    const updatedSelection = selectedId ? next.find((item) => item.id === selectedId) ?? null : null;
+    if (selectedId && !updatedSelection) {
+      setFatherConfessorId("");
       markDirty();
-      toast.push("Father confessor created");
-    } catch (error) {
-      console.error(error);
-      if (error instanceof ApiError) {
-        toast.push(error.body || "Failed to create father confessor");
-      } else {
-        toast.push("Failed to create father confessor");
-      }
-    } finally {
-      setCreatingFatherConfessor(false);
     }
+    setMember((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      if (!selectedId) {
+        return prev.father_confessor ? { ...prev, father_confessor: null } : prev;
+      }
+      return { ...prev, father_confessor: updatedSelection };
+    });
   };
 
   const toggleBoolean = (field: "is_tither" | "pays_contribution" | "has_father_confessor") =>
@@ -1892,6 +1891,26 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         body: JSON.stringify(payload),
       });
       const normalized = cloneMemberDetail(updated);
+      let avatarUploadFailureMessage: string | null = null;
+      if (pendingAvatarBlob && normalized.id) {
+        setAvatarUploading(true);
+        try {
+          const avatarFile = new File([pendingAvatarBlob], "avatar.jpg", { type: "image/jpeg" });
+          const avatarResponse = await uploadAvatar(normalized.id, avatarFile);
+          normalized.avatar_path = avatarResponse.avatar_url.startsWith("/static/")
+            ? avatarResponse.avatar_url.replace("/static/", "")
+            : avatarResponse.avatar_url;
+          clearPendingAvatar();
+        } catch (error) {
+          console.error(error);
+          avatarUploadFailureMessage = getAvatarUploadFailureMessage(
+            error,
+            "Member saved, but the photo could not be uploaded. You can retry it from the edit page."
+          );
+        } finally {
+          setAvatarUploading(false);
+        }
+      }
       setMeta((prev) => {
         if (!prev) {
           return prev;
@@ -1910,10 +1929,16 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       });
       setMember(normalized);
       initializeFormsFromMember(normalized);
-      baselineMemberRef.current = cloneMemberDetail(updated);
+      baselineMemberRef.current = cloneMemberDetail(normalized);
       setHasUnsavedChanges(false);
       await refreshTimeline(normalized.id);
-      toast.push(isCreateMode ? "Member created" : "Changes saved");
+      toast.push(
+        avatarUploadFailureMessage
+          ? avatarUploadFailureMessage
+          : isCreateMode
+            ? "Member created"
+            : "Changes saved"
+      );
       if (isCreateMode) {
         navigate(`/members/${normalized.id}/edit`, { replace: true });
       }
@@ -1965,8 +1990,32 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     return `${API_BASE}/static/${path}`;
   };
 
+  const getAvatarUploadFailureMessage = (error: unknown, fallback = "Failed to upload avatar. Please try again.") => {
+    const raw =
+      error instanceof ApiError
+        ? parseApiErrorMessage(error.body) || error.message
+        : error instanceof Error
+          ? error.message
+          : fallback;
+    const message = raw.toLowerCase();
+    if (message.includes("too large") || message.includes("file size") || message.includes("5mb")) {
+      return "Image file is too large. Please use an image under 5MB.";
+    }
+    if (message.includes("format") || message.includes("type") || message.includes("png") || message.includes("jpeg")) {
+      return "Invalid image format. Please use JPG, PNG, or WebP.";
+    }
+    return raw || fallback;
+  };
+
   const handleAvatarSave = async (blob: Blob) => {
     if (!member || !canUploadAvatar) return;
+
+    if (!member.id) {
+      stagePendingAvatar(blob);
+      markDirty();
+      toast.push("Photo ready. Save the member to upload it.");
+      return;
+    }
 
     setAvatarUploading(true);
     try {
@@ -1980,18 +2029,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       refreshTimeline(member.id);
     } catch (error) {
       console.error(error);
-      if (error instanceof Error) {
-        const message = error.message.toLowerCase();
-        if (message.includes("too large") || message.includes("file size")) {
-          toast.push("Image file is too large. Please use an image under 5MB.");
-        } else if (message.includes("format") || message.includes("type")) {
-          toast.push("Invalid image format. Please use JPG, PNG, or WebP.");
-        } else {
-          toast.push("Failed to upload avatar. Please try again.");
-        }
-      } else {
-        toast.push("Failed to upload avatar");
-      }
+      toast.push(getAvatarUploadFailureMessage(error));
     } finally {
       setAvatarUploading(false);
     }
@@ -2001,6 +2039,14 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     if (!member || !canUploadAvatar) return;
 
     if (!window.confirm("Are you sure you want to remove your avatar?")) {
+      return;
+    }
+
+    if (!member.id) {
+      clearPendingAvatar();
+      setMember((prev) => (prev ? { ...prev, avatar_path: null } : prev));
+      markDirty();
+      toast.push("Photo removed");
       return;
     }
 
@@ -2099,7 +2145,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     }
   };
 
-  const avatarUrl = member ? buildAvatarUrl(member.avatar_path) : null;
+  const avatarUrl = pendingAvatarPreviewUrl ?? (member ? buildAvatarUrl(member.avatar_path) : null);
   const exceptionAttachmentUrl = member ? buildAvatarUrl(member.contribution_exception_attachment_path) : null;
 
   const formatDate = (value?: string | null) => {
@@ -2775,6 +2821,17 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   ref={setSectionRef("household")}
                   title="Household & faith"
                   subtitle="Household membership and father confessor context"
+                  actions={
+                    canManageFatherConfessors ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setPriestDirectoryOpen(true)}
+                      >
+                        Manage father confessors
+                      </Button>
+                    ) : undefined
+                  }
                   data-tour="member-household"
                   collapsed={collapsedSections.household}
                   onToggle={() => toggleSectionCollapse("household")}
@@ -2938,11 +2995,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                             return;
                           }
                           const checked = event.target.checked;
-                          setMember((prev) => (prev ? { ...prev, has_father_confessor: checked } : prev));
+                          setMember((prev) =>
+                            prev
+                              ? { ...prev, has_father_confessor: checked, father_confessor: checked ? prev.father_confessor : null }
+                              : prev
+                          );
                           if (!checked) {
                             setFatherConfessorId("");
-                            setNewFatherConfessorOpen(false);
-                            setNewFatherConfessor(createEmptyFatherConfessorForm());
                           }
                           markDirty();
                         }}
@@ -2952,103 +3011,52 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                     </div>
                     {member.has_father_confessor && (
                       <div className="space-y-3">
-                        <Select
-                          className={`md:w-72 ${isCreateMode ? requiredFieldInputClass : ""}`}
-                          value={fatherConfessorId}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            if (value === CREATE_FATHER_CONFESSOR_OPTION) {
-                              setNewFatherConfessorOpen(true);
-                              return;
-                            }
-                            setFatherConfessorId(value);
-                            setNewFatherConfessorOpen(false);
-                            setMember((prev) => {
-                              if (!prev) return prev;
-                              const confessor = (meta?.father_confessors ?? []).find((item) => String(item.id) === value);
-                              return { ...prev, father_confessor: confessor ?? null };
-                            });
-                            markDirty();
-                          }}
-                          required
-                          disabled={disableSpiritual}
-                        >
-                          <option value="">Select father confessor…</option>
-                          {(meta?.father_confessors ?? []).map((confessor) => (
-                            <option key={confessor.id} value={String(confessor.id)}>
-                              {confessor.full_name}
-                            </option>
-                          ))}
-                          {canCreateFatherConfessor && <option value={CREATE_FATHER_CONFESSOR_OPTION}>Add new father confessor…</option>}
-                        </Select>
-                        {!disableSpiritual && !canCreateFatherConfessor && (
-                          <p className="text-xs text-mute">Need a new one added? Ask an Admin or PR Admin to create the father confessor record.</p>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start">
+                          <Select
+                            className={`md:w-72 ${isCreateMode ? requiredFieldInputClass : ""}`}
+                            value={fatherConfessorId}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setFatherConfessorId(value);
+                              setMember((prev) => {
+                                if (!prev) return prev;
+                                const confessor = (meta?.father_confessors ?? []).find((item) => String(item.id) === value);
+                                return { ...prev, father_confessor: confessor ?? null };
+                              });
+                              markDirty();
+                            }}
+                            required
+                            disabled={disableSpiritual}
+                          >
+                            <option value="">Select father confessor…</option>
+                            {(meta?.father_confessors ?? []).map((confessor) => (
+                              <option key={confessor.id} value={String(confessor.id)}>
+                                {confessor.full_name}
+                              </option>
+                            ))}
+                          </Select>
+                          {canManageFatherConfessors && !disableSpiritual && (
+                            <Button
+                              type="button"
+                              variant="soft"
+                              onClick={() => setPriestDirectoryOpen(true)}
+                            >
+                              Manage father confessors
+                            </Button>
+                          )}
+                        </div>
+                        {!disableSpiritual && canManageFatherConfessors && (
+                          <p className="text-xs text-mute">
+                            Open the manager to add, edit, archive, delete, or assign a father confessor without leaving this page.
+                          </p>
                         )}
-                        {newFatherConfessorOpen && canCreateFatherConfessor && (
-                          <div className="space-y-3 rounded-xl border border-border bg-card/60 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium">Add new father confessor</div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => {
-                                  setNewFatherConfessorOpen(false);
-                                  setNewFatherConfessor(createEmptyFatherConfessorForm());
-                                }}
-                                disabled={creatingFatherConfessor}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                            <div>
-                              <label className="text-xs uppercase text-mute">Full name</label>
-                              <Input
-                                value={newFatherConfessor.fullName}
-                                onChange={(event) =>
-                                  setNewFatherConfessor((prev) => ({ ...prev, fullName: event.target.value }))
-                                }
-                                placeholder="Abba Kidus"
-                                disabled={creatingFatherConfessor}
-                              />
-                            </div>
-                            <div className="grid md:grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-xs uppercase text-mute">Phone</label>
-                                <PhoneInput
-                                  value={newFatherConfessor.phone}
-                                  onChange={(value) => setNewFatherConfessor((prev) => ({ ...prev, phone: value }))}
-                                  disabled={creatingFatherConfessor}
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs uppercase text-mute">Email</label>
-                                <Input
-                                  type="email"
-                                  value={newFatherConfessor.email}
-                                  onChange={(event) =>
-                                    setNewFatherConfessor((prev) => ({ ...prev, email: event.target.value }))
-                                  }
-                                  placeholder="Optional"
-                                  disabled={creatingFatherConfessor}
-                                />
-                              </div>
-                            </div>
-                            <div className="flex justify-end">
-                              <Button
-                                type="button"
-                                variant="soft"
-                                onClick={handleCreateFatherConfessor}
-                                disabled={creatingFatherConfessor}
-                              >
-                                {creatingFatherConfessor ? "Saving…" : "Save father confessor"}
-                              </Button>
-                            </div>
-                          </div>
+                        {!disableSpiritual && !canManageFatherConfessors && (
+                          <p className="text-xs text-mute">Need a new one added or updated? Ask someone with Father Confessor Management.</p>
                         )}
                       </div>
                     )}
                     {disableSpiritual && (
-                      <p className="text-xs text-mute">Registrar or PR Admin must manage Father Confessor assignments.</p>
+                      <p className="text-xs text-mute">You do not have access to change father confessor assignments.</p>
                     )}
                   </div>
                 </SectionCard>
@@ -3681,6 +3689,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 onChangeClick={() => setAvatarEditorOpen(true)}
                 onRemoveClick={handleAvatarRemove}
                 removing={avatarRemoving}
+                helperText={
+                  isCreateMode && pendingAvatarBlob
+                    ? "Photo will be uploaded automatically after the member is saved."
+                    : null
+                }
               />
               <QuickActionsCard actions={quickActions} />
               <SnapshotCard
@@ -3739,7 +3752,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   Cancel
                 </Button>
                 <Button
-                  variant={confirmConfig.danger ? "outline" : "default"}
+                  variant={confirmConfig.danger ? "ghost" : "solid"}
                   className={confirmConfig.danger ? "border-amber-500 text-amber-700 hover:bg-amber-50 dark:border-amber-500/70 dark:text-amber-100 dark:hover:bg-amber-500/10" : "dark:border-slate-600 dark:bg-slate-800 dark:text-white"}
                   onClick={() => confirmConfig.onConfirm()}
                 >
@@ -3750,6 +3763,14 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           </Card>
         </div>
       )}
+      <PriestDirectoryModal
+        open={priestDirectoryOpen}
+        onClose={() => setPriestDirectoryOpen(false)}
+        priests={meta?.father_confessors ?? []}
+        onUpdate={handlePriestDirectoryUpdate}
+        selectedPriestId={fatherConfessorId ? Number(fatherConfessorId) : null}
+        onSelectPriest={handleFatherConfessorSelected}
+      />
       <AvatarEditor
         isOpen={avatarEditorOpen}
         onClose={() => setAvatarEditorOpen(false)}

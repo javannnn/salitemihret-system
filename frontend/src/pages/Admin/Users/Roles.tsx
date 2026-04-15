@@ -92,6 +92,9 @@ function getFieldPermissionDefaults(
   fieldKey: string,
   moduleFlags: Pick<RolePermissionFlags, "read" | "write">,
 ): RoleFieldPermissionFlags {
+  if (moduleKey === "members" && fieldKey === "father_confessor_management") {
+    return { read: false, write: false };
+  }
   if (moduleKey === "sponsorships" && fieldKey === "budget_rounds") {
     return { read: false, write: false };
   }
@@ -677,10 +680,10 @@ export default function RolesManager() {
             </div>
             <div>
               <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-[2.5rem]">
-                Roles that are easy to scan, safe to change, and hard to misconfigure.
+                Manage roles and permissions
               </h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                Search roles, focus only on the modules you care about, and keep hidden companion access explicit instead of buried in a long permission wall.
+                Configure module and field access for each role from one place.
               </p>
             </div>
           </div>
