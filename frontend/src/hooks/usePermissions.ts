@@ -8,7 +8,8 @@ export type ReportPermissionKey =
   | "payments"
   | "sponsorships"
   | "newcomers"
-  | "schools";
+  | "schools"
+  | "councils";
 
 export type PermissionMap = {
   viewMembers: boolean;
@@ -32,6 +33,8 @@ export type PermissionMap = {
   manageNewcomers: boolean;
   viewVolunteers: boolean;
   manageVolunteers: boolean;
+  viewParishCouncils: boolean;
+  manageParishCouncils: boolean;
   viewSchools: boolean;
   manageSchools: boolean;
 };
@@ -58,6 +61,8 @@ const BASE_PERMISSIONS: PermissionMap = {
   manageNewcomers: false,
   viewVolunteers: false,
   manageVolunteers: false,
+  viewParishCouncils: false,
+  manageParishCouncils: false,
   viewSchools: false,
   manageSchools: false,
 };
@@ -85,6 +90,8 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageNewcomers: true,
     viewVolunteers: true,
     manageVolunteers: true,
+    viewParishCouncils: true,
+    manageParishCouncils: true,
     viewSchools: true,
     manageSchools: true,
   },
@@ -107,6 +114,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     manageNewcomers: true,
     viewVolunteers: true,
     manageVolunteers: true,
+    viewParishCouncils: true,
     viewSchools: true,
     manageSchools: true,
   },
@@ -120,6 +128,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewNewcomers: true,
     manageNewcomers: true,
     viewVolunteers: true,
+    viewParishCouncils: true,
     viewSchools: true,
   },
   Clerk: {
@@ -136,6 +145,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewSponsorships: true,
     viewNewcomers: true,
     viewVolunteers: true,
+    viewParishCouncils: true,
     viewSchools: true,
   },
   FinanceAdmin: {
@@ -155,6 +165,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewNewcomers: true,
     manageNewcomers: true,
     viewVolunteers: true,
+    viewParishCouncils: true,
     viewSchools: true,
   },
   SchoolAdmin: {
@@ -162,6 +173,11 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     viewSchools: true,
     manageSchools: true,
     viewPayments: true,
+  },
+  ParishCouncilAdmin: {
+    viewParishCouncils: true,
+    manageParishCouncils: true,
+    viewAudit: true,
   },
 };
 

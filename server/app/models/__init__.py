@@ -31,3 +31,9 @@ from .schools import (  # noqa: F401
     SundaySchoolAuditLog,
 )
 from .chat import Message  # noqa: F401
+from .parish_council import (  # noqa: F401
+    ParishCouncilAssignment,
+    ParishCouncilAuditEvent,
+    ParishCouncilDepartment,
+    ParishCouncilDocument,
+)

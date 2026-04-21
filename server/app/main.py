@@ -40,6 +40,7 @@ from app.routers import schools as schools_router
 from app.routers import newcomers as newcomers_router
 from app.routers import chat as chat_router
 from app.routers import volunteers as volunteers_router
+from app.routers import parish_councils as parish_councils_router
 from app.services.child_promotion import get_children_ready_for_promotion
 from app.services.notifications import (
     frontend_url_warning,
@@ -104,6 +105,7 @@ app.include_router(sunday_school_router.public_router)
 app.include_router(reports_router.router)
 app.include_router(schools_router.router)
 app.include_router(volunteers_router.router)
+app.include_router(parish_councils_router.router)
 app.include_router(chat_router.router)
 app.include_router(license_router.router)
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR.parent), name="static")

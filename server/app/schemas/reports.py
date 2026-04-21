@@ -84,3 +84,34 @@ class NewcomerReportResponse(BaseModel):
     owner_breakdown: list[NewcomerOwnerBreakdownItem]
     recent_cases: list[NewcomerReportCaseItem]
     attention_cases: list[NewcomerReportCaseItem]
+
+
+class ParishCouncilReportRow(BaseModel):
+    department: str
+    lead_first_name: str | None = None
+    lead_last_name: str | None = None
+    lead_email: str | None = None
+    lead_phone: str | None = None
+    trainee_first_name: str
+    trainee_last_name: str
+    trainee_email: str | None = None
+    trainee_phone: str | None = None
+    training_from: date
+    training_to: date
+    status: str
+
+
+class ParishCouncilReportSummary(BaseModel):
+    total_rows: int
+    active_assignments: int
+    expiring_30_days: int
+    departments_covered: int
+    missing_contact_rows: int
+
+
+class ParishCouncilReportResponse(BaseModel):
+    summary: ParishCouncilReportSummary
+    status_breakdown: list[ReportBreakdownItem]
+    department_breakdown: list[ReportBreakdownItem]
+    expiring_assignments: list[ParishCouncilReportRow]
+    rows: list[ParishCouncilReportRow]

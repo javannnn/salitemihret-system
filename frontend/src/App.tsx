@@ -22,6 +22,7 @@ const SponsorshipWorkspace = lazy(() => import("@/pages/Sponsorships"));
 const SponsorshipCaseProfile = lazy(() => import("@/pages/Sponsorships/CaseProfile"));
 const SchoolsWorkspace = lazy(() => import("@/pages/Schools"));
 const VolunteersWorkspace = lazy(() => import("@/pages/Volunteers"));
+const ParishCouncilsWorkspace = lazy(() => import("@/pages/ParishCouncils"));
 const UsersList = lazy(() => import("@/pages/Admin/Users/List"));
 const UserDetail = lazy(() => import("@/pages/Admin/Users/Detail"));
 const RolesManager = lazy(() => import("@/pages/Admin/Users/Roles"));
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/sponsorships" element={<SponsorshipWorkspace />} />
           <Route path="/sponsorships/:id" element={<SponsorshipCaseProfile />} />
           <Route path="/volunteers" element={<VolunteersWorkspace />} />
+          <Route path="/parish-councils" element={<ParishCouncilsWorkspace />} />
           <Route path="/schools" element={<SchoolsWorkspace />} />
           <Route
             path="/admin/users"

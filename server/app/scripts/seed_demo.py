@@ -37,6 +37,7 @@ from app.services.schools import ABENET_SERVICE_CODE
 
 ROLE_NAMES = [
     "OfficeAdmin",
+    "ParishCouncilAdmin",
     "PublicRelations",
     "FinanceAdmin",
     "Clerk",

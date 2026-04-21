@@ -112,6 +112,7 @@ def test_report_catalog_exposes_granular_report_fields() -> None:
         "sponsorships",
         "newcomers",
         "schools",
+        "councils",
     ]
 
 
@@ -146,3 +147,25 @@ def test_permission_catalog_exposes_father_confessor_management_field() -> None:
     members_module = next(module for module in permission_catalog_payload() if module["key"] == "members")
 
     assert any(field["key"] == "father_confessor_management" for field in members_module["fields"])
+
+
+def test_parish_council_defaults_grant_read_only_to_office_admin() -> None:
+    office_role = Role(name="OfficeAdmin")
+    resolved = resolve_role_module_permissions(office_role)
+
+    assert resolved["parish_councils"] == {"read": True, "write": False, "visible": True}
+
+    effective = compute_effective_permissions([office_role], is_super_admin=False)
+    assert effective["legacy"]["viewParishCouncils"] is True
+    assert effective["legacy"]["manageParishCouncils"] is False
+
+
+def test_parish_council_admin_defaults_grant_full_access() -> None:
+    role = Role(name="ParishCouncilAdmin")
+    resolved = resolve_role_module_permissions(role)
+
+    assert resolved["parish_councils"] == {"read": True, "write": True, "visible": True}
+
+    effective = compute_effective_permissions([role], is_super_admin=False)
+    assert effective["legacy"]["viewParishCouncils"] is True
+    assert effective["legacy"]["manageParishCouncils"] is True

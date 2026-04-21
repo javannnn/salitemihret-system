@@ -214,6 +214,23 @@ def admin_user(db_session: Session) -> User:
 
 
 @pytest.fixture()
+def parish_council_admin_user(db_session: Session) -> User:
+    role = _ensure_role(db_session, "ParishCouncilAdmin")
+    user = User(
+        email=_unique_email("parish"),
+        username=_unique_username("parish.admin"),
+        full_name="Parish Council Admin",
+        hashed_password="hash",
+        is_active=True,
+    )
+    user.roles.append(role)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
 def sample_member(db_session: Session) -> Member:
     member = Member(
         first_name="Abeba",

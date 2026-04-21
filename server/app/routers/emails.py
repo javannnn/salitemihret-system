@@ -7,7 +7,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_super_admin
-from app.schemas.email import EmailInboxResponse, EmailMessageDetail, EmailMessageSummary, SendEmailRequest
+from app.schemas.email import (
+    EmailInboxResponse,
+    EmailInboxStatus,
+    EmailMessageDetail,
+    EmailMessageSummary,
+    SendEmailRequest,
+)
 from app.services import email_client
 from app.core.db import get_db
 from app.models.member import Member, Child
@@ -28,6 +34,12 @@ def _resolve_imap_folder(folder: str | None) -> str:
     if normalized == "trash":
         return settings.EMAIL_IMAP_TRASH_FOLDER
     return folder
+
+
+@router.get("/status", response_model=EmailInboxStatus)
+def get_email_status(_: object = Depends(require_super_admin)) -> EmailInboxStatus:
+    status_info = email_client.get_inbox_status()
+    return EmailInboxStatus(**status_info.__dict__)
 
 
 @router.get("", response_model=EmailInboxResponse)

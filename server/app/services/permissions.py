@@ -125,6 +125,33 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
         ),
     ),
     PermissionModuleCatalogEntry(
+        key="parish_councils",
+        label="Parish Councils",
+        description="Parish council departments, leads, trainees, and assignment history.",
+        fields=(
+            PermissionFieldCatalogEntry("name", "Department", "Parish council department name."),
+            PermissionFieldCatalogEntry("description", "Description", "Department description and scope notes."),
+            PermissionFieldCatalogEntry("status", "Department Status", "Department activation status."),
+            PermissionFieldCatalogEntry("minimum_age", "Minimum Age", "Minimum trainee age for the department."),
+            PermissionFieldCatalogEntry("lead_first_name", "Lead First Name", "Department lead first name."),
+            PermissionFieldCatalogEntry("lead_last_name", "Lead Last Name", "Department lead last name."),
+            PermissionFieldCatalogEntry("lead_email", "Lead Email", "Department lead email."),
+            PermissionFieldCatalogEntry("lead_phone", "Lead Phone", "Department lead phone."),
+            PermissionFieldCatalogEntry("lead_term_dates", "Lead Term Dates", "Lead term start and end dates."),
+            PermissionFieldCatalogEntry("trainee_first_name", "Trainee First Name", "Trainee first name."),
+            PermissionFieldCatalogEntry("trainee_last_name", "Trainee Last Name", "Trainee last name."),
+            PermissionFieldCatalogEntry("trainee_email", "Trainee Email", "Trainee email."),
+            PermissionFieldCatalogEntry("trainee_phone", "Trainee Phone", "Trainee phone."),
+            PermissionFieldCatalogEntry("trainee_birth_date", "Trainee Birth Date", "Trainee birth date used for age validation."),
+            PermissionFieldCatalogEntry("training_dates", "Training Dates", "Training start and end dates."),
+            PermissionFieldCatalogEntry("training_status", "Training Status", "Training assignment status."),
+            PermissionFieldCatalogEntry("approval", "Approval Workflow", "Approval submission, review, and decision actions."),
+            PermissionFieldCatalogEntry("documents", "Documents", "Uploaded approval forms, training files, and supporting documents."),
+            PermissionFieldCatalogEntry("history", "History", "Timeline, audit history, and change inspection."),
+            PermissionFieldCatalogEntry("notes", "Notes", "Department and assignment notes."),
+        ),
+    ),
+    PermissionModuleCatalogEntry(
         key="schools",
         label="Schools",
         description="Sunday school content, enrollments, attendance, and approvals.",
@@ -162,6 +189,11 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
                 "schools",
                 "School Report",
                 "Sunday school participation, content queue, and revenue reporting.",
+            ),
+            PermissionFieldCatalogEntry(
+                "councils",
+                "Parish Councils Report",
+                "Department lead and trainee assignment reporting.",
             ),
         ),
     ),
@@ -215,6 +247,7 @@ SYSTEM_ROLE_NAMES: set[str] = {
     "SundaySchoolViewer",
     "SundaySchoolAdmin",
     "SundaySchoolApprover",
+    "ParishCouncilAdmin",
     "Priest",
 }
 
@@ -267,6 +300,7 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
         "sponsorships": {"read": True, "write": False},
         "newcomers": {"read": True, "write": False},
         "volunteers": {"read": True, "write": True},
+        "parish_councils": {"read": True, "write": False},
         "schools": {"read": True, "write": False},
         "reports": {"read": True, "write": False},
         "users": {"read": True, "write": False},
@@ -307,6 +341,11 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
     "SundaySchoolApprover": {
         **_empty_modules(),
         "schools": {"read": True, "write": True},
+    },
+    "ParishCouncilAdmin": {
+        **_empty_modules(),
+        "parish_councils": {"read": True, "write": True},
+        "reports": {"read": True, "write": False},
     },
     "Priest": {
         **_empty_modules(),
@@ -583,6 +622,8 @@ def to_legacy_permission_map(
             "manageNewcomers": True,
             "viewVolunteers": True,
             "manageVolunteers": True,
+            "viewParishCouncils": True,
+            "manageParishCouncils": True,
             "viewSchools": True,
             "manageSchools": True,
         }
@@ -621,6 +662,8 @@ def to_legacy_permission_map(
         "manageNewcomers": _module_write("newcomers"),
         "viewVolunteers": _module_read("volunteers"),
         "manageVolunteers": _module_write("volunteers"),
+        "viewParishCouncils": _module_read("parish_councils"),
+        "manageParishCouncils": _module_write("parish_councils"),
         "viewSchools": _module_read("schools"),
         "manageSchools": _module_write("schools"),
     }
@@ -642,6 +685,8 @@ def infer_permission_target(method: str, path: str) -> tuple[str | None, Permiss
         return "newcomers", action
     if path.startswith("/volunteers"):
         return "volunteers", action
+    if path.startswith("/parish-councils"):
+        return "parish_councils", action
     if path.startswith("/schools") or path.startswith("/sunday-school"):
         return "schools", action
     if path.startswith("/reports"):

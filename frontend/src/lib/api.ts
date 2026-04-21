@@ -396,6 +396,37 @@ export type NewcomerReportResponse = {
   attention_cases: NewcomerReportCaseItem[];
 };
 
+export type ParishCouncilReportRow = {
+  department: string;
+  lead_first_name?: string | null;
+  lead_last_name?: string | null;
+  lead_email?: string | null;
+  lead_phone?: string | null;
+  trainee_first_name: string;
+  trainee_last_name: string;
+  trainee_email?: string | null;
+  trainee_phone?: string | null;
+  training_from: string;
+  training_to: string;
+  status: string;
+};
+
+export type ParishCouncilReportSummary = {
+  total_rows: number;
+  active_assignments: number;
+  expiring_30_days: number;
+  departments_covered: number;
+  missing_contact_rows: number;
+};
+
+export type ParishCouncilReportResponse = {
+  summary: ParishCouncilReportSummary;
+  status_breakdown: ReportBreakdownItem[];
+  department_breakdown: ReportBreakdownItem[];
+  expiring_assignments: ParishCouncilReportRow[];
+  rows: ParishCouncilReportRow[];
+};
+
 export type AICapability = {
   slug: string;
   label: string;
@@ -943,6 +974,207 @@ export type VolunteerWorkerPayload = {
 export type VolunteerWorkerUpdatePayload = Partial<VolunteerWorkerPayload>;
 
 export type VolunteerWorkerListResponse = Page<VolunteerWorker>;
+
+export type ParishCouncilDepartmentStatus = "Active" | "Inactive";
+export type ParishCouncilAssignmentStatus = "Planned" | "Active" | "Completed" | "Cancelled" | "OnHold";
+export type ParishCouncilApprovalStatus = "Pending" | "Approved" | "Rejected";
+export type ParishCouncilApprovalAction = "submit" | "approve" | "reject";
+export type ParishCouncilDocumentType = "ApprovalForm" | "TrainingMaterial" | "Evaluation" | "Notes" | "Other";
+
+export type ParishCouncilMetaDepartment = {
+  id: number;
+  name: string;
+  status: ParishCouncilDepartmentStatus;
+  minimum_age: number;
+};
+
+export type ParishCouncilMemberSearchItem = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  phone?: string | null;
+  birth_date?: string | null;
+};
+
+export type ParishCouncilMeta = {
+  departments: ParishCouncilMetaDepartment[];
+  department_statuses: ParishCouncilDepartmentStatus[];
+  assignment_statuses: ParishCouncilAssignmentStatus[];
+  approval_statuses: ParishCouncilApprovalStatus[];
+  document_types: ParishCouncilDocumentType[];
+};
+
+export type ParishCouncilActivityItem = {
+  id: number;
+  entity_type: "Department" | "Assignment";
+  action: string;
+  summary: string;
+  actor_name?: string | null;
+  created_at: string;
+  department_id?: number | null;
+  assignment_id?: number | null;
+  changes: string[];
+  before_state?: Record<string, unknown> | null;
+  after_state?: Record<string, unknown> | null;
+};
+
+export type ParishCouncilDocument = {
+  id: number;
+  department_id: number;
+  assignment_id?: number | null;
+  document_type: ParishCouncilDocumentType;
+  title?: string | null;
+  original_filename: string;
+  file_url: string;
+  content_type?: string | null;
+  size_bytes: number;
+  notes?: string | null;
+  uploaded_by_name?: string | null;
+  assignment_label?: string | null;
+  created_at: string;
+};
+
+export type ParishCouncilAssignment = {
+  id: number;
+  department_id: number;
+  department_name: string;
+  trainee_member_id?: number | null;
+  trainee_first_name: string;
+  trainee_last_name: string;
+  trainee_full_name: string;
+  trainee_email?: string | null;
+  trainee_phone?: string | null;
+  trainee_birth_date?: string | null;
+  trainee_age?: number | null;
+  training_from: string;
+  training_to: string;
+  status: ParishCouncilAssignmentStatus;
+  approval_status: ParishCouncilApprovalStatus;
+  approval_requested_at?: string | null;
+  approval_requested_by_name?: string | null;
+  approval_decided_at?: string | null;
+  approval_decided_by_name?: string | null;
+  approval_note?: string | null;
+  notes?: string | null;
+  document_count: number;
+  missing_contact_fields: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ParishCouncilDepartmentSummary = {
+  id: number;
+  name: string;
+  description?: string | null;
+  status: ParishCouncilDepartmentStatus;
+  minimum_age: number;
+  lead_member_id?: number | null;
+  lead_first_name?: string | null;
+  lead_last_name?: string | null;
+  lead_full_name?: string | null;
+  lead_email?: string | null;
+  lead_phone?: string | null;
+  lead_term_start?: string | null;
+  lead_term_end?: string | null;
+  notes?: string | null;
+  active_trainee_count: number;
+  expiring_assignment_count: number;
+  missing_contact_count: number;
+  open_assignment_count: number;
+  document_count: number;
+  updated_at: string;
+};
+
+export type ParishCouncilDepartmentDetail = ParishCouncilDepartmentSummary & {
+  assignments: ParishCouncilAssignment[];
+  documents: ParishCouncilDocument[];
+  activity: ParishCouncilActivityItem[];
+};
+
+export type ParishCouncilDepartmentListResponse = {
+  items: ParishCouncilDepartmentSummary[];
+  total: number;
+};
+
+export type ParishCouncilAssignmentListResponse = {
+  items: ParishCouncilAssignment[];
+  total: number;
+};
+
+export type ParishCouncilDepartmentOccupancyItem = {
+  department_id: number;
+  department_name: string;
+  active_trainees: number;
+  open_assignments: number;
+  minimum_age: number;
+  status: ParishCouncilDepartmentStatus;
+};
+
+export type ParishCouncilUpcomingAssignment = {
+  id: number;
+  department_id: number;
+  department_name: string;
+  trainee_full_name: string;
+  training_to: string;
+  status: ParishCouncilAssignmentStatus;
+};
+
+export type ParishCouncilOverviewSummary = {
+  total_departments: number;
+  active_departments: number;
+  active_leads: number;
+  active_trainees: number;
+  open_assignments: number;
+  expiring_assignments_30_days: number;
+  missing_contact_records: number;
+  total_documents: number;
+  underage_validation_issues: number;
+  pending_approvals: number;
+};
+
+export type ParishCouncilOverviewResponse = {
+  summary: ParishCouncilOverviewSummary;
+  status_breakdown: Array<{ label: string; value: number }>;
+  department_occupancy: ParishCouncilDepartmentOccupancyItem[];
+  upcoming_end_dates: ParishCouncilUpcomingAssignment[];
+  recent_activity: ParishCouncilActivityItem[];
+};
+
+export type ParishCouncilDepartmentUpdatePayload = {
+  description?: string | null;
+  status?: ParishCouncilDepartmentStatus;
+  minimum_age?: number;
+  lead_member_id?: number | null;
+  lead_first_name?: string | null;
+  lead_last_name?: string | null;
+  lead_email?: string | null;
+  lead_phone?: string | null;
+  lead_term_start?: string | null;
+  lead_term_end?: string | null;
+  notes?: string | null;
+};
+
+export type ParishCouncilAssignmentPayload = {
+  department_id: number;
+  trainee_member_id?: number | null;
+  trainee_first_name?: string | null;
+  trainee_last_name?: string | null;
+  trainee_email?: string | null;
+  trainee_phone?: string | null;
+  trainee_birth_date?: string | null;
+  training_from: string;
+  training_to: string;
+  status?: ParishCouncilAssignmentStatus;
+  notes?: string | null;
+  allow_same_person?: boolean;
+};
+
+export type ParishCouncilAssignmentUpdatePayload = Partial<ParishCouncilAssignmentPayload>;
+export type ParishCouncilAssignmentApprovalPayload = {
+  action: ParishCouncilApprovalAction;
+  note?: string | null;
+};
 
 export type SponsorshipTimelineEvent = {
   id: number;
@@ -1678,6 +1910,161 @@ export async function deleteVolunteerWorker(workerId: number): Promise<void> {
   await api<void>(`/volunteers/workers/${workerId}`, {
     method: "DELETE",
   });
+}
+
+export type ParishCouncilDepartmentFilters = {
+  q?: string;
+  status?: ParishCouncilDepartmentStatus;
+  lead_assigned?: boolean;
+  missing_contact?: boolean;
+  expiring_soon?: boolean;
+};
+
+export async function getParishCouncilMeta(): Promise<ParishCouncilMeta> {
+  return api<ParishCouncilMeta>("/parish-councils/meta");
+}
+
+export async function searchParishCouncilMembers(query: string, limit = 8): Promise<ParishCouncilMemberSearchItem[]> {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  return api<ParishCouncilMemberSearchItem[]>(`/parish-councils/member-search?${params.toString()}`);
+}
+
+export async function getParishCouncilOverview(): Promise<ParishCouncilOverviewResponse> {
+  return api<ParishCouncilOverviewResponse>("/parish-councils/overview");
+}
+
+export async function listParishCouncilDepartments(
+  filters: ParishCouncilDepartmentFilters = {},
+): Promise<ParishCouncilDepartmentListResponse> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return api<ParishCouncilDepartmentListResponse>(`/parish-councils/departments${query ? `?${query}` : ""}`);
+}
+
+export async function getParishCouncilDepartment(departmentId: number): Promise<ParishCouncilDepartmentDetail> {
+  return api<ParishCouncilDepartmentDetail>(`/parish-councils/departments/${departmentId}`);
+}
+
+export async function updateParishCouncilDepartment(
+  departmentId: number,
+  payload: ParishCouncilDepartmentUpdatePayload,
+): Promise<ParishCouncilDepartmentDetail> {
+  return api<ParishCouncilDepartmentDetail>(`/parish-councils/departments/${departmentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type ParishCouncilAssignmentFilters = {
+  department_id?: number;
+  status?: ParishCouncilAssignmentStatus;
+  approval_status?: ParishCouncilApprovalStatus;
+  active_only?: boolean;
+  expiring_in_days?: number;
+  q?: string;
+};
+
+export async function listParishCouncilAssignments(
+  filters: ParishCouncilAssignmentFilters = {},
+): Promise<ParishCouncilAssignmentListResponse> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return api<ParishCouncilAssignmentListResponse>(`/parish-councils/assignments${query ? `?${query}` : ""}`);
+}
+
+export async function createParishCouncilAssignment(
+  payload: ParishCouncilAssignmentPayload,
+): Promise<ParishCouncilAssignment> {
+  return api<ParishCouncilAssignment>("/parish-councils/assignments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateParishCouncilAssignment(
+  assignmentId: number,
+  payload: ParishCouncilAssignmentUpdatePayload,
+): Promise<ParishCouncilAssignment> {
+  return api<ParishCouncilAssignment>(`/parish-councils/assignments/${assignmentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateParishCouncilAssignmentApproval(
+  assignmentId: number,
+  payload: ParishCouncilAssignmentApprovalPayload,
+): Promise<ParishCouncilAssignment> {
+  return api<ParishCouncilAssignment>(`/parish-councils/assignments/${assignmentId}/approval`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function uploadParishCouncilDocument(
+  departmentId: number,
+  file: File,
+  payload: {
+    document_type: ParishCouncilDocumentType;
+    title?: string | null;
+    notes?: string | null;
+    assignment_id?: number | null;
+  },
+): Promise<ParishCouncilDocument> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("document_type", payload.document_type);
+  if (payload.title && payload.title.trim()) body.append("title", payload.title.trim());
+  if (payload.notes && payload.notes.trim()) body.append("notes", payload.notes.trim());
+  if (payload.assignment_id != null) body.append("assignment_id", String(payload.assignment_id));
+
+  const res = await authFetch(`${API_BASE}/parish-councils/departments/${departmentId}/documents`, {
+    method: "POST",
+    body,
+  });
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Document upload failed");
+  }
+  return res.json();
+}
+
+export async function deleteParishCouncilDocument(documentId: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/parish-councils/documents/${documentId}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Document deletion failed");
+  }
+}
+
+export async function listParishCouncilActivity(filters: {
+  department_id?: number;
+  assignment_id?: number;
+  limit?: number;
+} = {}): Promise<ParishCouncilActivityItem[]> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return api<ParishCouncilActivityItem[]>(`/parish-councils/activity${query ? `?${query}` : ""}`);
 }
 
 export async function listSponsorshipBudgetRounds(year?: number): Promise<SponsorshipBudgetRound[]> {
@@ -2608,6 +2995,26 @@ export async function getNewcomerReport(filters: { start_date?: string; end_date
   return api<NewcomerReportResponse>(`/reports/newcomers${query ? `?${query}` : ""}`);
 }
 
+export async function getParishCouncilReport(filters: {
+  department_id?: number;
+  status?: ParishCouncilAssignmentStatus;
+  q?: string;
+  active_only?: boolean;
+  expiring_in_days?: number;
+  start_date_from?: string;
+  start_date_to?: string;
+  end_date_from?: string;
+  end_date_to?: string;
+} = {}): Promise<ParishCouncilReportResponse> {
+  const search = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<ParishCouncilReportResponse>(`/reports/parish-councils${query ? `?${query}` : ""}`);
+}
+
 export async function getAICapabilities(): Promise<AICapability[]> {
   return api<AICapability[]>("/ai/capabilities");
 }
@@ -3008,6 +3415,20 @@ export type AdminEmailDetail = {
   has_attachments: boolean;
 };
 
+export type AdminEmailInboxStatus = {
+  state: "ready" | "mx_mismatch" | "imap_unreachable" | "mx_unverified" | "unconfigured" | string;
+  configured: boolean;
+  inbox_accessible: boolean;
+  inbound_ready: boolean;
+  mailbox_address?: string | null;
+  mailbox_domain?: string | null;
+  imap_host?: string | null;
+  imap_port?: number | null;
+  public_mx_hosts: string[];
+  summary: string;
+  details?: string | null;
+};
+
 export type SendAdminEmailPayload = {
   to: string[];
   cc?: string[];
@@ -3025,6 +3446,10 @@ export async function getAdminInbox(limit = 25, folder?: string): Promise<AdminE
   if (folder) params.set("folder", folder);
   const response = await api<{ items: AdminEmailSummary[] }>(`/emails?${params.toString()}`);
   return response.items;
+}
+
+export async function getAdminEmailStatus(): Promise<AdminEmailInboxStatus> {
+  return api<AdminEmailInboxStatus>("/emails/status");
 }
 
 export async function getAdminEmail(uid: string, folder?: string): Promise<AdminEmailDetail> {

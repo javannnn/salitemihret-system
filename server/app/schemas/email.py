@@ -26,6 +26,20 @@ class EmailInboxResponse(BaseModel):
     items: List[EmailMessageSummary]
 
 
+class EmailInboxStatus(BaseModel):
+    state: str
+    configured: bool
+    inbox_accessible: bool
+    inbound_ready: bool
+    mailbox_address: str | None = None
+    mailbox_domain: str | None = None
+    imap_host: str | None = None
+    imap_port: int | None = None
+    public_mx_hosts: list[str] = Field(default_factory=list)
+    summary: str
+    details: str | None = None
+
+
 class EmailMessageDetail(BaseModel):
     uid: str
     subject: str

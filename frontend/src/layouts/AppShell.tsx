@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus, HandHeart } from "lucide-react";
+import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus, HandHeart, Building2 } from "lucide-react";
 
 import { getTokenExpiry, isTokenExpired, login, logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
@@ -39,6 +39,7 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   "/sponsorships": () => import("@/pages/Sponsorships"),
   "/schools": () => import("@/pages/Schools"),
   "/volunteers": () => import("@/pages/Volunteers"),
+  "/parish-councils": () => import("@/pages/ParishCouncils"),
   "/admin/users": () => import("@/pages/Admin/Users/List"),
   "/admin/users/roles": () => import("@/pages/Admin/Users/Roles"),
   "/admin/email": () => import("@/pages/Admin/Email/Client"),
@@ -95,6 +96,7 @@ export default function AppShell() {
     const showNewcomers = permissions.isModuleVisible("newcomers");
     const showSponsorships = permissions.isModuleVisible("sponsorships");
     const showVolunteers = permissions.isModuleVisible("volunteers");
+    const showParishCouncils = permissions.isModuleVisible("parish_councils");
     const showSchools = permissions.isModuleVisible("schools");
     const showReports = permissions.isModuleVisible("reports");
     const showUsers = permissions.isModuleVisible("users");
@@ -104,6 +106,7 @@ export default function AppShell() {
     const canViewSponsorshipsReport = permissions.viewSponsorships && permissions.canAccessReport("sponsorships");
     const canViewNewcomersReport = permissions.viewNewcomers && permissions.canAccessReport("newcomers");
     const canViewSchoolsReport = permissions.viewSchools && permissions.canAccessReport("schools");
+    const canViewCouncilsReport = permissions.canAccessReport("councils");
     const canViewReports =
       showReports &&
       (
@@ -112,7 +115,8 @@ export default function AppShell() {
         canViewNewcomersReport ||
         canViewPaymentsReport ||
         canViewSponsorshipsReport ||
-        canViewSchoolsReport
+        canViewSchoolsReport ||
+        canViewCouncilsReport
       );
 
     const items = [
@@ -136,6 +140,12 @@ export default function AppShell() {
         to: "/volunteers",
         icon: HandHeart,
         visible: showVolunteers && (permissions.viewVolunteers || permissions.manageVolunteers),
+      },
+      {
+        label: "Parish Councils",
+        to: "/parish-councils",
+        icon: Building2,
+        visible: showParishCouncils && (permissions.viewParishCouncils || permissions.manageParishCouncils),
       },
       {
         label: "Schools",

@@ -5,14 +5,15 @@ import { NewcomersReport } from "./components/NewcomersReport";
 import { PaymentsReport } from "./components/PaymentsReport";
 import { SponsorshipsReport } from "./components/SponsorshipsReport";
 import { SchoolsReport } from "./components/SchoolsReport";
+import { ParishCouncilsReport } from "./components/ParishCouncilsReport";
 import { ReportAssistantPanel } from "./components/ReportAssistantPanel";
-import { LayoutDashboard, Users, UserPlus, CreditCard, Heart, GraduationCap, Sparkles, ArrowUpRight } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, CreditCard, Heart, GraduationCap, Sparkles, ArrowUpRight, Building2 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useNavigate } from "react-router-dom";
 import { AIReportQAModule } from "@/lib/api";
 import { Button } from "@/components/ui";
 
-type ReportTab = "overview" | "members" | "newcomers" | "payments" | "sponsorships" | "schools";
+type ReportTab = "overview" | "members" | "newcomers" | "payments" | "sponsorships" | "schools" | "councils";
 
 export default function ReportsClient() {
     const [activeTab, setActiveTab] = useState<ReportTab>("overview");
@@ -25,6 +26,7 @@ export default function ReportsClient() {
     const canViewPaymentsReport = permissions.viewPayments && permissions.canAccessReport("payments");
     const canViewSponsorshipsReport = permissions.viewSponsorships && permissions.canAccessReport("sponsorships");
     const canViewSchoolsReport = permissions.viewSchools && permissions.canAccessReport("schools");
+    const canViewCouncilsReport = permissions.canAccessReport("councils");
 
     const tabs = [
         { id: "overview", label: "Overview", icon: LayoutDashboard, visible: canViewOverviewReport },
@@ -33,6 +35,7 @@ export default function ReportsClient() {
         { id: "payments", label: "Financials", icon: CreditCard, visible: canViewPaymentsReport },
         { id: "sponsorships", label: "Sponsorships", icon: Heart, visible: canViewSponsorshipsReport },
         { id: "schools", label: "Schools", icon: GraduationCap, visible: canViewSchoolsReport },
+        { id: "councils", label: "Parish Councils", icon: Building2, visible: canViewCouncilsReport },
     ] as const;
 
     const visibleTabs = tabs.filter(t => t.visible);
@@ -55,6 +58,8 @@ export default function ReportsClient() {
                 ];
             case "schools":
                 return canViewSchoolsReport ? ["schools"] as AIReportQAModule[] : [];
+            case "councils":
+                return [];
             case "overview":
             default:
                 return [
@@ -123,6 +128,11 @@ export default function ReportsClient() {
                         "Is the content approval queue building up?",
                     ],
                 };
+            case "councils":
+                return {
+                    scopeLabel: "Parish council reports",
+                    suggestions: [],
+                };
             case "overview":
             default:
                 return {
@@ -164,6 +174,8 @@ export default function ReportsClient() {
                 return canViewSponsorshipsReport ? <SponsorshipsReport /> : null;
             case "schools":
                 return canViewSchoolsReport ? <SchoolsReport /> : null;
+            case "councils":
+                return canViewCouncilsReport ? <ParishCouncilsReport /> : null;
             default:
                 return canViewOverviewReport ? <Overview onNavigate={(tab) => setActiveTab(tab as ReportTab)} /> : null;
         }
@@ -175,7 +187,7 @@ export default function ReportsClient() {
                 <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-ink">Reports & Analytics</h1>
-                        <p className="text-sm text-muted">Live operational reporting across members, newcomers, finance, sponsorships, schools, and activity.</p>
+                        <p className="text-sm text-muted">Live operational reporting across members, newcomers, finance, sponsorships, parish councils, schools, and activity.</p>
                     </div>
                     {assistantModules.length > 0 ? (
                         <div className="flex items-center gap-3">
