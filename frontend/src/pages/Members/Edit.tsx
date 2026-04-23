@@ -1035,7 +1035,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
             label: "Sunday School records",
             description: "Review linked participants",
             disabled: !permissions.viewSchools,
-            onClick: () => navigate(`/schools/sunday-school?member=${member.id}`),
+            onClick: () =>
+              navigate(`/schools?tab=sundayschool&search=${encodeURIComponent(member.username)}`),
             icon: <BookOpen className="h-4 w-4" />,
           },
           {
@@ -2556,7 +2557,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                         type="button"
                         variant="soft"
                         className="rounded-full px-3 py-1 text-xs font-semibold"
-                        onClick={() => navigate("/schools/sunday-school")}
+                        onClick={() => navigate("/schools?tab=sundayschool&openParticipant=1")}
                       >
                         Add participant
                       </Button>
@@ -2662,7 +2663,9 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       type="button"
                       variant="ghost"
                       className="rounded-full px-4"
-                      onClick={() => navigate(`/schools/sunday-school?member=${member.id}`)}
+                      onClick={() =>
+                        navigate(`/schools?tab=sundayschool&search=${encodeURIComponent(member.username)}`)
+                      }
                     >
                       Open Sunday School workspace
                     </Button>

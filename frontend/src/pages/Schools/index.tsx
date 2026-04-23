@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, CalendarClock, FileText, HandHeart, Image, Loader2, PlusCircle, RefreshCcw, ShieldCheck, Users, Wallet } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -178,6 +179,7 @@ export default function SchoolsWorkspace() {
   const permissions = usePermissions();
   const toast = useToast();
   const tour = useTour();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canView = permissions.viewSchools;
   const canManage = permissions.manageSchools;
 
@@ -218,6 +220,15 @@ export default function SchoolsWorkspace() {
   const [contentForm, setContentForm] = useState<SundaySchoolContentPayload>({ type: "Mezmur", title: "", body: "" });
   const [contentList, setContentList] = useState<SundaySchoolContentList | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
+
+  function resetSundayForm() {
+    setSundayForm(defaultSundayForm);
+    setSundayMemberSearch("");
+    setSundayMemberResults([]);
+    setSundayChildResults([]);
+    setSelectedSundayMember(null);
+    setSelectedSundayChild(null);
+  }
 
   useEffect(() => {
     if (!canView) return;
@@ -343,6 +354,36 @@ export default function SchoolsWorkspace() {
   }, [activeTab, tour.active, tour.currentStep?.id]);
 
   useEffect(() => {
+    if (!canView) return;
+    const tab = searchParams.get("tab");
+    const search = searchParams.get("search");
+    const openParticipant = searchParams.get("openParticipant");
+
+    if (!tab && !search && !openParticipant) return;
+
+    if (tab === "sundayschool" && activeTab !== "sundayschool") {
+      setActiveTab("sundayschool");
+    } else if (tab === "abenet" && activeTab !== "abenet") {
+      setActiveTab("abenet");
+    }
+
+    if (search) {
+      setSundayFilters((prev) => ({
+        ...prev,
+        search,
+        page: 1,
+      }));
+    }
+
+    if (openParticipant === "1" && canManage) {
+      resetSundayForm();
+      setShowSundayForm(true);
+    }
+
+    setSearchParams({}, { replace: true });
+  }, [activeTab, canManage, canView, searchParams, setSearchParams]);
+
+  useEffect(() => {
     setContentForm((prev) => ({ ...prev, type: contentTypeFilter }));
   }, [contentTypeFilter]);
 
@@ -400,15 +441,6 @@ export default function SchoolsWorkspace() {
     if (!parentDetail || !enrollmentForm.child_id) return null;
     return parentDetail.children.find((child) => child.id === Number(enrollmentForm.child_id)) || null;
   }, [parentDetail, enrollmentForm.child_id]);
-
-  const resetSundayForm = () => {
-    setSundayForm(defaultSundayForm);
-    setSundayMemberSearch("");
-    setSundayMemberResults([]);
-    setSundayChildResults([]);
-    setSelectedSundayMember(null);
-    setSelectedSundayChild(null);
-  };
 
   const handleSundayMemberSelect = (member: Member) => {
     if (sundayForm.category === "Child") {
