@@ -434,6 +434,8 @@ export default function UsersList() {
 
     if (selectedInviteMember?.linked_user_id) {
       errors.member = `This member is already linked to ${selectedInviteMember.linked_username ?? "another user"}.`;
+    } else if (!selectedInviteMember) {
+      errors.member = "Select a member before creating an admin user.";
     }
 
     return errors;
@@ -592,7 +594,7 @@ export default function UsersList() {
                 User Accounts
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                Search, filter, and manage all system accounts in one place.
+                Search, filter, and manage member-linked system accounts in one place.
               </p>
             </div>
           </div>
@@ -702,7 +704,7 @@ export default function UsersList() {
                     })
                   }
                 >
-                  <option value="any">Any status</option>
+                  <option value="any">Any active/non-deleted status</option>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                   <option value="suspended">Suspended</option>
@@ -1182,7 +1184,7 @@ export default function UsersList() {
                     <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
                       {provisionResult
                         ? "Share the temporary password only if email delivery was not accepted."
-                        : "Identity, access, and member link are grouped here so nothing important gets missed."}
+                        : "Identity, access, and required member link are grouped here so nothing important gets missed."}
                     </p>
                   </div>
                 </div>
@@ -1457,7 +1459,7 @@ export default function UsersList() {
                         {selectedInviteMember ? (
                           <ToneBadge tone="success">Selected</ToneBadge>
                         ) : (
-                          <ToneBadge>Optional</ToneBadge>
+                          <ToneBadge tone="warning">Required</ToneBadge>
                         )}
                       </div>
 
@@ -1479,10 +1481,10 @@ export default function UsersList() {
                               setSelectedInviteMember(null);
                             }
                           }}
-                          placeholder="Name, email, or phone"
+                          placeholder="First name, last name, full name, email, or phone"
                         />
                         <p className="text-sm text-slate-500 dark:text-slate-400">
-                          Linking now avoids duplicate identities later in audit and communication flows, and it can also pull the member's saved details into this user form.
+                          Admin users must be linked to an existing member. Search by first name, last name, full name, email, or phone.
                         </p>
                       </div>
 

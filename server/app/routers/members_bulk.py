@@ -52,7 +52,7 @@ router = APIRouter(prefix="/members", tags=["members"])
 ADMIN_ROLES = ("Admin", "PublicRelations")
 READ_ROLES = ("PublicRelations", "OfficeAdmin", "Registrar", "Admin", "Clerk", "FinanceAdmin")
 
-EXPORT_HEADERS = [
+BASE_EXPORT_HEADERS = [
     "id",
     "username",
     "first_name",
@@ -93,11 +93,11 @@ EXPORT_HEADERS = [
     "spouse_country_of_birth",
     "spouse_phone",
     "spouse_email",
-    "children",
     "created_at",
     "updated_at",
     "deleted_at",
 ]
+CHILD_EXPORT_FIELDS = ("first_name", "last_name", "gender", "birth_date", "country_of_birth", "notes")
 
 IMPORT_CONTENT_TYPES = {
     "text/csv",
@@ -106,28 +106,31 @@ IMPORT_CONTENT_TYPES = {
 }
 
 
-def _format_member_row(member: Member) -> list[str]:
+def _format_member_row(member: Member, max_children: int = 0) -> list[str]:
     def _format_date(value):
-        return value.isoformat() if value else ""
+        if not value:
+            return ""
+        if isinstance(value, datetime):
+            return value.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+        return value.isoformat()
 
     def _format_decimal(value):
         return f"{value:.2f}" if value is not None else ""
 
-    def _format_children() -> str:
-        segments: list[str] = []
-        for child in member.children_all:
-            if child.promoted_at:
-                continue
-            parts = [
-                child.first_name or "",
-                child.last_name or "",
-                child.gender or "",
-                _format_date(child.birth_date),
-                child.country_of_birth or "",
-                child.notes or "",
+    active_children = [child for child in member.children_all if not child.promoted_at]
+    child_columns: list[str] = []
+    for index in range(max_children):
+        child = active_children[index] if index < len(active_children) else None
+        child_columns.extend(
+            [
+                child.first_name if child else "",
+                child.last_name if child else "",
+                child.gender if child else "",
+                _format_date(child.birth_date) if child else "",
+                child.country_of_birth if child else "",
+                child.notes if child else "",
             ]
-            segments.append("|".join(parts))
-        return ";".join(segments)
+        )
 
     tag_names = ", ".join(sorted(tag.name for tag in member.tags))
     ministry_names = ", ".join(sorted(ministry.name for ministry in member.ministries))
@@ -176,18 +179,30 @@ def _format_member_row(member: Member) -> list[str]:
         spouse.country_of_birth if spouse else "",
         spouse.phone if spouse else "",
         spouse.email if spouse else "",
-        _format_children(),
+        *child_columns,
         _format_date(member.created_at),
         _format_date(member.updated_at),
         _format_date(member.deleted_at),
     ]
 
 
-def _stream_csv(rows: Iterable[list[str]]) -> Iterable[str]:
+def _export_headers(max_children: int) -> list[str]:
+    headers = list(BASE_EXPORT_HEADERS)
+    insert_at = headers.index("created_at")
+    child_headers = [
+        f"child_{index}_{field}"
+        for index in range(1, max_children + 1)
+        for field in CHILD_EXPORT_FIELDS
+    ]
+    headers[insert_at:insert_at] = child_headers
+    return headers
+
+
+def _stream_csv(headers: list[str], rows: Iterable[list[str]]) -> Iterable[str]:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
 
-    writer.writerow(EXPORT_HEADERS)
+    writer.writerow(headers)
     yield buffer.getvalue()
     buffer.seek(0)
     buffer.truncate(0)
@@ -248,8 +263,12 @@ def export_members(
         ).all()
     )
 
-    rows = (_format_member_row(member) for member in members)
-    response = StreamingResponse(_stream_csv(rows), media_type="text/csv")
+    max_children = max(
+        (len([child for child in member.children_all if not child.promoted_at]) for member in members),
+        default=0,
+    )
+    rows = (_format_member_row(member, max_children=max_children) for member in members)
+    response = StreamingResponse(_stream_csv(_export_headers(max_children), rows), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=members_export.csv"
     return response
 

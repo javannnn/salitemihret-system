@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Query, Session, selectinload
 
 from app.models.member import Member
@@ -24,7 +24,7 @@ from app.schemas.payment import (
     PaymentStatusUpdate,
     PaymentStatus,
 )
-from app.services.membership import MembershipHealthData, apply_contribution_payment
+from app.services.membership import MembershipHealthData, apply_contribution_payment, refresh_membership_state
 from app.services.notifications import notify_membership_status_change
 
 DEFAULT_PAYMENT_SERVICE_TYPES: tuple[dict[str, str], ...] = (
@@ -67,6 +67,9 @@ PAYMENT_METHOD_ALIASES: dict[str, list[str]] = {
     "cheque": ["cheque", "check"],
 }
 
+MEMBER_REQUIRED_SERVICE_CODES = {"CONTRIBUTION"}
+DONATION_SERVICE_CODES = {"DONATION"}
+
 
 @dataclass
 class PaymentAdjustmentOutcome:
@@ -107,7 +110,42 @@ def _resolve_member(db: Session, member_id: Optional[int]) -> Optional[Member]:
     member = db.get(Member, member_id)
     if not member:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Member not found")
+    if member.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Member is archived or deleted")
     return member
+
+
+def _clean_text(value: str | None) -> str | None:
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+def _validate_payment_parties(payload: PaymentCreate, service_type: PaymentServiceType, member: Member | None) -> None:
+    code = service_type.code.upper()
+    has_donor_identity = any(
+        _clean_text(value)
+        for value in (payload.donor_first_name, payload.donor_last_name, payload.donor_email)
+    )
+    if code in MEMBER_REQUIRED_SERVICE_CODES and member is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Monthly contribution payments must be linked to an active member",
+        )
+    if member is None and code not in DONATION_SERVICE_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Non-member payments are only allowed for General Donation",
+        )
+    if code in DONATION_SERVICE_CODES and member is None and not _clean_text(payload.donor_first_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Donor first name is required for non-member donations",
+        )
+    if code not in DONATION_SERVICE_CODES and has_donor_identity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Donor fields are only available for General Donation payments",
+        )
 
 
 def _normalize_status(payload_status: Optional[PaymentStatus], due_date: Optional[date]) -> PaymentStatus:
@@ -168,8 +206,16 @@ def _apply_payment_filters(
         query = query.filter(Payment.status == status_filter)
     if member_name:
         search = f"%{member_name}%"
-        query = query.join(Member).filter(
-            (Member.first_name.ilike(search)) | (Member.last_name.ilike(search))
+        query = query.outerjoin(Member, Payment.member_id == Member.id).filter(
+            or_(
+                (
+                    (Member.deleted_at.is_(None))
+                    & ((Member.first_name.ilike(search)) | (Member.last_name.ilike(search)))
+                ),
+                Payment.donor_first_name.ilike(search),
+                Payment.donor_last_name.ilike(search),
+                Payment.donor_email.ilike(search),
+            )
         )
     return query
 
@@ -197,6 +243,7 @@ def _build_payment(
 ) -> tuple[Payment, Optional[Member], datetime, PaymentServiceType]:
     service_type = _get_service_type(db, payload.service_type_code)
     member = _resolve_member(db, payload.member_id)
+    _validate_payment_parties(payload, service_type, member)
     posted_at = payload.posted_at or datetime.now(timezone.utc)
     status = _normalize_status(payload.status, payload.due_date)
     payment = Payment(
@@ -207,6 +254,9 @@ def _build_payment(
         service_type_id=service_type.id,
         member_id=member.id if member else None,
         household_id=member.household_id if member else payload.household_id,
+        donor_first_name=_clean_text(payload.donor_first_name) if not member else None,
+        donor_last_name=_clean_text(payload.donor_last_name) if not member else None,
+        donor_email=_clean_text(payload.donor_email) if not member else None,
         recorded_by_id=actor.id if actor else None,
         posted_at=posted_at,
         due_date=payload.due_date,
@@ -272,6 +322,7 @@ def list_payments(
         status_filter=status_filter,
         member_name=member_name,
     )
+    query = query.filter(or_(Payment.member_id.is_(None), Payment.member.has(Member.deleted_at.is_(None))))
 
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -341,6 +392,9 @@ def _create_reversal_entry(db: Session, original: Payment, reason: str, actor: U
         service_type_id=original.service_type_id,
         member_id=original.member_id,
         household_id=original.household_id,
+        donor_first_name=original.donor_first_name,
+        donor_last_name=original.donor_last_name,
+        donor_email=original.donor_email,
         recorded_by_id=actor.id if actor else None,
         posted_at=posted_at,
         due_date=original.due_date,
@@ -359,6 +413,7 @@ def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionC
 
     correction_posted_at = datetime.now(timezone.utc)
     reversal = _create_reversal_entry(db, original, payload.correction_reason, actor, correction_posted_at)
+    db.expire(original, ["corrections"])
 
     replacement: Payment | None = None
     if payload.replacement is not None:
@@ -366,9 +421,12 @@ def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionC
             update={
                 "member_id": payload.replacement.member_id if payload.replacement.member_id is not None else original.member_id,
                 "household_id": payload.replacement.household_id if payload.replacement.household_id is not None else original.household_id,
+                "donor_first_name": payload.replacement.donor_first_name if payload.replacement.donor_first_name is not None else original.donor_first_name,
+                "donor_last_name": payload.replacement.donor_last_name if payload.replacement.donor_last_name is not None else original.donor_last_name,
+                "donor_email": payload.replacement.donor_email if payload.replacement.donor_email is not None else original.donor_email,
             }
         )
-        replacement_payment, _, replacement_posted_at, _ = _build_payment(
+        replacement_payment, replacement_member, replacement_posted_at, replacement_service_type = _build_payment(
             db,
             replacement_payload,
             actor,
@@ -379,6 +437,17 @@ def request_correction(db: Session, payment_id: int, payload: PaymentCorrectionC
         db.add(replacement_payment)
         db.flush()
         replacement = replacement_payment
+        if replacement_member and replacement_service_type.code == "CONTRIBUTION":
+            db.expire(replacement_member, ["payments"])
+            apply_contribution_payment(
+                replacement_member,
+                amount=Decimal(str(replacement_payment.amount)),
+                posted_at=replacement_posted_at,
+            )
+
+    if original.member and original.service_type and original.service_type.code == "CONTRIBUTION":
+        db.expire(original.member, ["payments"])
+        refresh_membership_state(original.member, reference_time=correction_posted_at)
 
     db.commit()
     db.refresh(original)
@@ -398,6 +467,10 @@ def void_payment(db: Session, payment_id: int, reason: str, actor: User) -> Paym
     _ensure_payment_adjustable(original)
 
     reversal = _create_reversal_entry(db, original, reason, actor, datetime.now(timezone.utc))
+    db.expire(original, ["corrections"])
+    if original.member and original.service_type and original.service_type.code == "CONTRIBUTION":
+        db.expire(original.member, ["payments"])
+        refresh_membership_state(original.member)
     db.commit()
     db.refresh(original)
     db.refresh(reversal)
@@ -429,6 +502,10 @@ def void_payments(db: Session, payment_ids: list[int], reason: str, actor: User)
     outcomes: list[PaymentAdjustmentOutcome] = []
     for original in originals:
         reversal = _create_reversal_entry(db, original, reason, actor, posted_at)
+        db.expire(original, ["corrections"])
+        if original.member and original.service_type and original.service_type.code == "CONTRIBUTION":
+            db.expire(original.member, ["payments"])
+            refresh_membership_state(original.member, reference_time=posted_at)
         outcomes.append(
             PaymentAdjustmentOutcome(
                 original=original,
@@ -458,6 +535,7 @@ def summarize_payments(
             func.min(Payment.currency).label("currency"),
         )
         .group_by(Payment.service_type_id)
+        .filter(or_(Payment.member_id.is_(None), Payment.member.has(Member.deleted_at.is_(None))))
     )
     if start_date:
         query = query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc))
@@ -529,6 +607,7 @@ def get_payments_for_export(
         status_filter=status_filter,
         member_name=member_name,
     )
+    query = query.filter(or_(Payment.member_id.is_(None), Payment.member.has(Member.deleted_at.is_(None))))
     return query.all()
 
 

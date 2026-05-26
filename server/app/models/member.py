@@ -101,6 +101,7 @@ class Member(Base):
         cascade="all, delete-orphan",
         order_by="MemberContributionPayment.paid_at.desc(), MemberContributionPayment.id.desc()",
     )
+    payments = relationship("Payment", back_populates="member", order_by="Payment.posted_at.desc(), Payment.id.desc()")
     abenet_enrollments = relationship("AbenetEnrollment", back_populates="parent")
     user_link = relationship("UserMemberLink", back_populates="member", uselist=False)
 

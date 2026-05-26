@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.auth.security import hash_password
+from app.core.config import settings
 from app.models.user import User, UserMemberLink
 
 
@@ -38,7 +39,8 @@ def test_list_users_allows_linked_members_with_placeholder_email(
     assert data["items"][0]["member"]["email"] == "mock+member-6@example.invalid"
 
 
-def test_suspend_user_blocks_login_until_unsuspended(client, authorize, db_session):
+def test_suspend_user_blocks_login_until_unsuspended(client, authorize, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "RECAPTCHA_SECRET", None)
     super_admin = User(
         email="super.admin@example.com",
         username="super.admin",
@@ -88,7 +90,8 @@ def test_suspend_user_blocks_login_until_unsuspended(client, authorize, db_sessi
     assert restored_login.json()["access_token"]
 
 
-def test_delete_and_restore_user_requires_reactivation(client, authorize, db_session):
+def test_delete_and_restore_user_requires_reactivation(client, authorize, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "RECAPTCHA_SECRET", None)
     super_admin = User(
         email="super.admin@example.com",
         username="super.admin",
@@ -210,7 +213,39 @@ def test_list_users_reports_lifecycle_counts(client, authorize, db_session):
     assert payload["total_deleted"] == 1
     lifecycle_by_username = {item["username"]: item["lifecycle_status"] for item in payload["items"]}
     assert lifecycle_by_username["suspended.user"] == "suspended"
-    assert lifecycle_by_username["deleted.user"] == "deleted"
+    assert "deleted.user" not in lifecycle_by_username
+
+    deleted_response = client.get("/users", params={"lifecycle_status": "deleted"})
+    assert deleted_response.status_code == 200, deleted_response.text
+    deleted_payload = deleted_response.json()
+    deleted_by_username = {
+        item["username"]: item["lifecycle_status"] for item in deleted_payload["items"]
+    }
+    assert deleted_by_username["deleted.user"] == "deleted"
+
+
+def test_member_search_matches_full_member_name(client, authorize, db_session, sample_member):
+    super_admin = User(
+        email="super.admin@example.com",
+        username="super.admin",
+        full_name="Super Admin",
+        hashed_password="hash",
+        is_active=True,
+        is_super_admin=True,
+    )
+    db_session.add(super_admin)
+    db_session.commit()
+    db_session.refresh(super_admin)
+
+    authorize(super_admin)
+    response = client.get(
+        "/users/member-search",
+        params={"query": f"{sample_member.first_name} {sample_member.last_name}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert any(item["id"] == sample_member.id for item in payload)
 
 
 def test_cannot_delete_own_super_admin_account(client, authorize, db_session):

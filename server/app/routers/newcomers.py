@@ -101,6 +101,15 @@ def update_newcomer(
     return newcomers_service.update_newcomer(db, newcomer_id, payload, current_user.id)
 
 
+@router.delete("/{newcomer_id:int}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_newcomer(
+    newcomer_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
+) -> None:
+    newcomers_service.delete_newcomer(db, newcomer_id)
+
+
 @router.post("/{newcomer_id:int}/status", response_model=NewcomerOut, status_code=status.HTTP_200_OK)
 def transition_newcomer_status(
     newcomer_id: int,

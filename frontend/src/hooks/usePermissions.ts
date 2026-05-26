@@ -19,6 +19,7 @@ export type PermissionMap = {
   editFinance: boolean;
   editSpiritual: boolean;
   manageFatherConfessors: boolean;
+  manageTagsMinistries: boolean;
   bulkActions: boolean;
   importMembers: boolean;
   exportMembers: boolean;
@@ -47,6 +48,7 @@ const BASE_PERMISSIONS: PermissionMap = {
   editFinance: false,
   editSpiritual: false,
   manageFatherConfessors: false,
+  manageTagsMinistries: false,
   bulkActions: false,
   importMembers: false,
   exportMembers: false,
@@ -76,6 +78,7 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     editFinance: true,
     editSpiritual: true,
     manageFatherConfessors: true,
+    manageTagsMinistries: true,
     bulkActions: true,
     importMembers: true,
     exportMembers: true,
@@ -100,9 +103,10 @@ const ROLE_RULES: Record<string, Partial<PermissionMap>> = {
     createMembers: true,
     editCore: true,
     editStatus: true,
-    editFinance: true,
+    editFinance: false,
     editSpiritual: true,
     manageFatherConfessors: true,
+    manageTagsMinistries: true,
     bulkActions: true,
     importMembers: true,
     exportMembers: true,
@@ -269,15 +273,25 @@ export function usePermissions(): PermissionMap & {
       membersFieldPermissions,
       "father_confessor_management"
     );
+    const hasTagMinistryManagementEntry = Object.prototype.hasOwnProperty.call(
+      membersFieldPermissions,
+      "tag_ministry_management"
+    );
     const manageFatherConfessors = isSuperAdmin
       ? true
       : hasFatherConfessorManagementEntry
         ? canWriteField("members", "father_confessor_management")
         : merged.manageFatherConfessors;
+    const manageTagsMinistries = isSuperAdmin
+      ? true
+      : hasTagMinistryManagementEntry
+        ? canWriteField("members", "tag_ministry_management")
+        : merged.manageTagsMinistries;
 
     return {
       ...merged,
       manageFatherConfessors,
+      manageTagsMinistries,
       isSuperAdmin,
       modules,
       isModuleVisible,

@@ -17,6 +17,7 @@ import {
   NewcomerTimelineResponse,
   convertNewcomer,
   createNewcomerInteraction,
+  deleteNewcomer,
   getNewcomer,
   getNewcomerTimeline,
   inactivateNewcomer,
@@ -103,6 +104,10 @@ type NewcomerDetailsForm = {
   temporary_address_city: string;
   temporary_address_province: string;
   temporary_address_postal_code: string;
+  current_address_street: string;
+  current_address_city: string;
+  current_address_province: string;
+  current_address_postal_code: string;
   past_profession: string;
   notes: string;
 };
@@ -133,6 +138,10 @@ const emptyDetailsForm = (): NewcomerDetailsForm => ({
   temporary_address_city: "",
   temporary_address_province: "",
   temporary_address_postal_code: "",
+  current_address_street: "",
+  current_address_city: "",
+  current_address_province: "",
+  current_address_postal_code: "",
   past_profession: "",
   notes: "",
 });
@@ -154,6 +163,10 @@ function detailsFormFromNewcomer(newcomer: Newcomer): NewcomerDetailsForm {
     temporary_address_city: newcomer.temporary_address_city ?? "",
     temporary_address_province: newcomer.temporary_address_province ?? "",
     temporary_address_postal_code: newcomer.temporary_address_postal_code ?? "",
+    current_address_street: newcomer.current_address_street ?? "",
+    current_address_city: newcomer.current_address_city ?? "",
+    current_address_province: newcomer.current_address_province ?? "",
+    current_address_postal_code: newcomer.current_address_postal_code ?? "",
     past_profession: newcomer.past_profession ?? "",
     notes: newcomer.notes ?? "",
   };
@@ -182,6 +195,15 @@ function statusNext(current: Newcomer["status"]) {
   return STATUS_FLOW[idx + 1];
 }
 
+function allowedStatuses(current: Newcomer["status"]) {
+  if (current === "Closed") {
+    return STATUS_FLOW.filter((status) => status !== "Closed");
+  }
+  const idx = STATUS_FLOW.indexOf(current);
+  if (idx === -1) return STATUS_FLOW;
+  return STATUS_FLOW.slice(idx + 1);
+}
+
 export default function NewcomerProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -208,6 +230,7 @@ export default function NewcomerProfile() {
 
   const [interactionType, setInteractionType] = useState<NewcomerInteraction["interaction_type"]>("Note");
   const [interactionNote, setInteractionNote] = useState("");
+  const [interactionStatusChoice, setInteractionStatusChoice] = useState<Newcomer["status"] | "">("");
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
 
   const [statusModal, setStatusModal] = useState<StatusModalState>({ open: false, mode: null });
@@ -482,6 +505,10 @@ export default function NewcomerProfile() {
         temporary_address_city: detailsForm.temporary_address_city.trim() || undefined,
         temporary_address_province: detailsForm.temporary_address_province.trim() || undefined,
         temporary_address_postal_code: detailsForm.temporary_address_postal_code.trim() || undefined,
+        current_address_street: detailsForm.current_address_street.trim() || undefined,
+        current_address_city: detailsForm.current_address_city.trim() || undefined,
+        current_address_province: detailsForm.current_address_province.trim() || undefined,
+        current_address_postal_code: detailsForm.current_address_postal_code.trim() || undefined,
         county: detailsForm.temporary_address_province.trim() || undefined,
         past_profession: detailsForm.past_profession.trim() || undefined,
         notes: detailsForm.notes.trim() || undefined,
@@ -551,7 +578,16 @@ export default function NewcomerProfile() {
         interaction_type: interactionType,
         note: interactionNote.trim(),
       });
+      if (interactionStatusChoice && interactionStatusChoice !== newcomer.status) {
+        const updated = await transitionNewcomerStatus(newcomer.id, {
+          status: interactionStatusChoice,
+          reason: interactionNote.trim(),
+        });
+        setNewcomer(updated);
+        setInteractionStatusChoice("");
+      }
       setInteractionNote("");
+      setInteractionStatusChoice("");
       await refreshInteractions();
       await refreshTimeline();
       toast.push("Interaction logged.");
@@ -560,6 +596,24 @@ export default function NewcomerProfile() {
       toast.push("Unable to log interaction.");
     } finally {
       setInteractionSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!newcomer) return;
+    const confirmed = window.confirm(`Delete ${newcomer.newcomer_code}?`);
+    if (!confirmed) return;
+    try {
+      await deleteNewcomer(newcomer.id);
+      toast.push("Newcomer deleted.");
+      navigate("/newcomers");
+    } catch (error) {
+      console.error(error);
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Unable to delete newcomer.");
+      } else {
+        toast.push("Unable to delete newcomer.");
+      }
     }
   };
 
@@ -724,6 +778,11 @@ export default function NewcomerProfile() {
             {isAdmin && newcomer && !newcomer.is_inactive && (
               <Button variant="ghost" onClick={() => openStatusModal("inactivate")}>
                 Mark inactive
+              </Button>
+            )}
+            {isAdmin && newcomer && (
+              <Button variant="ghost" onClick={handleDelete}>
+                Delete
               </Button>
             )}
             {newcomer?.status === "Settled" && (
@@ -1016,6 +1075,17 @@ export default function NewcomerProfile() {
                       value={interactionNote}
                       onChange={(event) => setInteractionNote(event.target.value)}
                     />
+                    <Select
+                      value={interactionStatusChoice}
+                      onChange={(event) => setInteractionStatusChoice(event.target.value as Newcomer["status"] | "")}
+                    >
+                      <option value="">Keep current status</option>
+                      {allowedStatuses(newcomer.status).map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </Select>
                     <Button onClick={handleInteraction} disabled={interactionSubmitting || !interactionNote.trim()}>
                       {interactionSubmitting ? "Saving..." : "Add interaction"}
                     </Button>
@@ -1299,7 +1369,7 @@ export default function NewcomerProfile() {
                     </Select>
                   </div>
                   <div>
-                    <label className="text-xs uppercase text-mute block mb-1">Province</label>
+                    <label className="text-xs uppercase text-mute block mb-1">Temporary province</label>
                     <Select
                       value={detailsForm.temporary_address_province}
                       onChange={(event) => setDetailsForm((prev) => ({ ...prev, temporary_address_province: event.target.value }))}
@@ -1314,9 +1384,10 @@ export default function NewcomerProfile() {
                   </div>
                 </div>
 
+                <div className="text-xs font-semibold uppercase text-mute">Temporary address</div>
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="md:col-span-2">
-                    <label className="text-xs uppercase text-mute block mb-1">Street</label>
+                    <label className="text-xs uppercase text-mute block mb-1">Temporary address</label>
                     <Input
                       value={detailsForm.temporary_address_street}
                       onChange={(event) =>
@@ -1325,7 +1396,7 @@ export default function NewcomerProfile() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs uppercase text-mute block mb-1">City</label>
+                    <label className="text-xs uppercase text-mute block mb-1">Temporary city</label>
                     <Input
                       value={detailsForm.temporary_address_city}
                       onChange={(event) =>
@@ -1336,13 +1407,60 @@ export default function NewcomerProfile() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
+                  <label className="text-xs uppercase text-mute block mb-1">Temporary postal code</label>
                   <Input
                     value={detailsForm.temporary_address_postal_code}
                     onChange={(event) =>
                       setDetailsForm((prev) => ({ ...prev, temporary_address_postal_code: event.target.value }))
                     }
                   />
+                </div>
+
+                <div className="text-xs font-semibold uppercase text-mute">Current address</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Current province</label>
+                    <Select
+                      value={detailsForm.current_address_province}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, current_address_province: event.target.value }))
+                      }
+                    >
+                      <option value="">Select province</option>
+                      {PROVINCE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Current city</label>
+                    <Input
+                      value={detailsForm.current_address_city}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, current_address_city: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Current address</label>
+                    <Input
+                      value={detailsForm.current_address_street}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, current_address_street: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase text-mute block mb-1">Current postal code</label>
+                    <Input
+                      value={detailsForm.current_address_postal_code}
+                      onChange={(event) =>
+                        setDetailsForm((prev) => ({ ...prev, current_address_postal_code: event.target.value }))
+                      }
+                    />
+                  </div>
                 </div>
 
                 <div>

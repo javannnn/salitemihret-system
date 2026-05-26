@@ -39,6 +39,11 @@ PERMISSION_CATALOG: tuple[PermissionModuleCatalogEntry, ...] = (
                 "Father Confessor Management",
                 "Create, update, archive, restore, and remove father confessor directory records.",
             ),
+            PermissionFieldCatalogEntry(
+                "tag_ministry_management",
+                "Tag & Ministry Management",
+                "Create, update, and remove reusable member tags and ministries.",
+            ),
             PermissionFieldCatalogEntry("status", "Status", "Membership status and overrides."),
             PermissionFieldCatalogEntry("district", "District", "District assignment."),
             PermissionFieldCatalogEntry("address", "Address", "Address lines and country."),
@@ -227,7 +232,9 @@ PERMISSION_FIELD_KEYS: dict[str, set[str]] = {
 
 DEFAULT_FIELD_PERMISSION_OVERRIDES: dict[str, dict[str, dict[str, bool]]] = {
     "members": {
+        "contribution": {"read": False, "write": False},
         "father_confessor_management": {"read": False, "write": False},
+        "tag_ministry_management": {"read": False, "write": False},
     },
     "sponsorships": {
         "budget_rounds": {"read": False, "write": False},
@@ -356,7 +363,9 @@ SYSTEM_ROLE_DEFAULTS: dict[str, dict[str, dict[str, bool]]] = {
 SYSTEM_ROLE_FIELD_DEFAULTS: dict[str, dict[str, dict[str, dict[str, bool]]]] = {
     "Admin": {
         "members": {
+            "contribution": {"read": True, "write": True},
             "father_confessor_management": {"read": True, "write": True},
+            "tag_ministry_management": {"read": True, "write": True},
         },
         "sponsorships": {
             "budget_rounds": {"read": True, "write": True},
@@ -365,7 +374,30 @@ SYSTEM_ROLE_FIELD_DEFAULTS: dict[str, dict[str, dict[str, dict[str, bool]]]] = {
     "PublicRelations": {
         "members": {
             "father_confessor_management": {"read": True, "write": True},
+            "tag_ministry_management": {"read": True, "write": True},
         },
+    },
+    "Registrar": {
+        "members": {
+            "contribution": {"read": True, "write": True},
+        },
+    },
+    "FinanceAdmin": {
+        "members": {
+            "contribution": {"read": True, "write": True},
+        },
+    },
+}
+
+FIELD_PERMISSION_ALIASES: dict[str, dict[str, str]] = {
+    "members": {
+        "is_tither": "contribution",
+        "pays_contribution": "contribution",
+        "contribution_method": "contribution",
+        "contribution_amount": "contribution",
+        "contribution_currency": "contribution",
+        "contribution_exception_reason": "contribution",
+        "contribution_exception_attachment_path": "contribution",
     },
 }
 
@@ -608,6 +640,7 @@ def to_legacy_permission_map(
             "editFinance": True,
             "editSpiritual": True,
             "manageFatherConfessors": True,
+            "manageTagsMinistries": True,
             "bulkActions": True,
             "importMembers": True,
             "exportMembers": True,
@@ -645,9 +678,10 @@ def to_legacy_permission_map(
         "createMembers": _module_write("members"),
         "editCore": _module_write("members"),
         "editStatus": _module_write("members"),
-        "editFinance": _module_write("members"),
+        "editFinance": _field_write("members", "contribution"),
         "editSpiritual": _module_write("members"),
         "manageFatherConfessors": _field_write("members", "father_confessor_management"),
+        "manageTagsMinistries": _field_write("members", "tag_ministry_management"),
         "bulkActions": _module_write("members"),
         "importMembers": _module_write("members"),
         "exportMembers": _module_read("members"),
@@ -752,7 +786,12 @@ def forbidden_write_fields(user: User, module: str, fields: Iterable[str]) -> li
         return []
     if not has_module_permission(user, module, "write"):
         return sorted(set(fields))
-    blocked = [field for field in set(fields) if not has_field_permission(user, module, field, "write")]
+    aliases = FIELD_PERMISSION_ALIASES.get(module, {})
+    blocked = [
+        field
+        for field in set(fields)
+        if not has_field_permission(user, module, aliases.get(field, field), "write")
+    ]
     return sorted(blocked)
 
 

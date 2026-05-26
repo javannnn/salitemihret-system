@@ -64,6 +64,38 @@ def test_father_confessor_management_defaults_to_admin_and_pr_only() -> None:
     assert registrar_fields["members"]["father_confessor_management"] == {"read": False, "write": False}
 
 
+def test_tag_ministry_management_defaults_to_admin_and_pr_only() -> None:
+    admin_role = Role(name="Admin")
+    pr_role = Role(name="PublicRelations")
+    registrar_role = Role(name="Registrar")
+
+    admin_fields = resolve_role_field_permissions(admin_role)
+    pr_fields = resolve_role_field_permissions(pr_role)
+    registrar_fields = resolve_role_field_permissions(registrar_role)
+
+    assert admin_fields["members"]["tag_ministry_management"] == {"read": True, "write": True}
+    assert pr_fields["members"]["tag_ministry_management"] == {"read": True, "write": True}
+    assert registrar_fields["members"]["tag_ministry_management"] == {"read": False, "write": False}
+
+    effective = compute_effective_permissions([pr_role], is_super_admin=False)
+    assert effective["legacy"]["manageTagsMinistries"] is True
+
+
+def test_contribution_permissions_exclude_public_relations() -> None:
+    admin_role = Role(name="Admin")
+    pr_role = Role(name="PublicRelations")
+    registrar_role = Role(name="Registrar")
+    finance_role = Role(name="FinanceAdmin")
+
+    assert resolve_role_field_permissions(admin_role)["members"]["contribution"] == {"read": True, "write": True}
+    assert resolve_role_field_permissions(pr_role)["members"]["contribution"] == {"read": False, "write": False}
+    assert resolve_role_field_permissions(registrar_role)["members"]["contribution"] == {"read": True, "write": True}
+    assert resolve_role_field_permissions(finance_role)["members"]["contribution"] == {"read": True, "write": True}
+
+    effective = compute_effective_permissions([pr_role], is_super_admin=False)
+    assert effective["legacy"]["editFinance"] is False
+
+
 def test_custom_role_can_enable_budget_round_permission() -> None:
     role = Role(
         name="BudgetCoordinator",
@@ -147,6 +179,7 @@ def test_permission_catalog_exposes_father_confessor_management_field() -> None:
     members_module = next(module for module in permission_catalog_payload() if module["key"] == "members")
 
     assert any(field["key"] == "father_confessor_management" for field in members_module["fields"])
+    assert any(field["key"] == "tag_ministry_management" for field in members_module["fields"])
 
 
 def test_parish_council_defaults_grant_read_only_to_office_admin() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, timedelta
 
 from app.models.household import Household
@@ -76,6 +78,38 @@ def test_create_member_success(client, authorize, registrar_user, db_session):
     assert member is not None
     assert member.is_tither is True
     assert [tag.slug for tag in member.tags] == ["choir"]
+
+
+def test_member_export_splits_children_and_formats_timestamps(client, authorize, admin_user):
+    authorize(admin_user)
+    payload = {
+        "first_name": "Export",
+        "last_name": "Parent",
+        "email": "export.parent@example.com",
+        "status": "Active",
+        "phone": "6135550111",
+        "address_postal_code": "T5J 0N3",
+        "pays_contribution": True,
+        "contribution_amount": 75.0,
+        "children": [
+            {"first_name": "Alpha", "last_name": "Child", "birth_date": "2014-01-02"},
+            {"first_name": "Beta", "last_name": "Child", "birth_date": "2016-03-04"},
+        ],
+    }
+    create_response = client.post("/members", json=payload)
+    assert create_response.status_code == 201, create_response.text
+
+    response = client.get("/members/export.csv?q=export.parent@example.com")
+    assert response.status_code == 200, response.text
+    reader = csv.DictReader(io.StringIO(response.text))
+    rows = list(reader)
+
+    assert "children" not in (reader.fieldnames or [])
+    assert rows[0]["child_1_first_name"] == "Alpha"
+    assert rows[0]["child_1_birth_date"] == "2014-01-02"
+    assert rows[0]["child_2_first_name"] == "Beta"
+    assert "." not in rows[0]["created_at"]
+    assert "." not in rows[0]["updated_at"]
 
 
 def test_create_member_requires_email(client, authorize, registrar_user):
@@ -182,12 +216,33 @@ def test_patch_member_updates_status(client, authorize, admin_user, sample_membe
     authorize(admin_user)
     response = client.patch(
         f"/members/{sample_member.id}",
-        json={"status": "Inactive"},
+        json={"status": "Inactive", "status_override_reason": "UAT status correction"},
     )
     assert response.status_code == 200
     db_session.expire_all()
     member = db_session.get(Member, sample_member.id)
     assert member.status == "Inactive"
+    assert member.status_override_reason == "UAT status correction"
+
+
+def test_patch_member_status_requires_reason(client, authorize, admin_user, sample_member):
+    authorize(admin_user)
+    response = client.patch(
+        f"/members/{sample_member.id}",
+        json={"status": "Inactive"},
+    )
+    assert response.status_code == 400
+    assert "reason is required" in response.text
+
+
+def test_public_relations_cannot_update_contribution_fields(client, authorize, public_relations_user, sample_member):
+    authorize(public_relations_user)
+    response = client.patch(
+        f"/members/{sample_member.id}",
+        json={"contribution_amount": 120.0},
+    )
+    assert response.status_code == 403
+    assert "contribution_amount" in response.text
 
 
 def test_patch_member_rejects_blank_email(client, authorize, admin_user, sample_member):

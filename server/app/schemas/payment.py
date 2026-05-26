@@ -68,6 +68,9 @@ class PaymentBase(BaseModel):
     service_type_code: str = Field(..., min_length=1, max_length=50)
     member_id: Optional[int] = None
     household_id: Optional[int] = None
+    donor_first_name: Optional[str] = Field(None, max_length=120)
+    donor_last_name: Optional[str] = Field(None, max_length=120)
+    donor_email: Optional[str] = Field(None, max_length=255)
     posted_at: Optional[datetime] = None
     due_date: Optional[date] = None
     status: Optional[PaymentStatus] = None
@@ -100,6 +103,9 @@ class PaymentOut(BaseModel):
     posted_at: datetime
     member_id: Optional[int]
     household_id: Optional[int]
+    donor_first_name: Optional[str]
+    donor_last_name: Optional[str]
+    donor_email: Optional[str]
     recorded_by_id: Optional[int]
     correction_of_id: Optional[int]
     correction_reason: Optional[str]

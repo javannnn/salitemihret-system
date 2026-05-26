@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me"
     TEMP_CREDENTIALS_SECRET: str | None = None
     JWT_ALG: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 240
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 300
     SESSION_IDLE_TIMEOUT_MINUTES: int = 30
     SESSION_ACTIVITY_UPDATE_INTERVAL_SECONDS: int = 60
     ENVIRONMENT: str = "local"

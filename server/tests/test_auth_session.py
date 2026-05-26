@@ -48,8 +48,8 @@ def _make_request(path: str = "/auth/whoami") -> Request:
     )
 
 
-def test_access_token_uses_four_hour_expiry(monkeypatch):
-    monkeypatch.setattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 240)
+def test_access_token_uses_five_hour_expiry(monkeypatch):
+    monkeypatch.setattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 300)
 
     started_at = datetime.now(timezone.utc)
     token = create_access_token(subject="123", roles=["Admin"])
@@ -58,8 +58,8 @@ def test_access_token_uses_four_hour_expiry(monkeypatch):
     payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
     expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
 
-    assert started_at + timedelta(minutes=239, seconds=50) <= expires_at
-    assert expires_at <= finished_at + timedelta(minutes=240, seconds=5)
+    assert started_at + timedelta(minutes=299, seconds=50) <= expires_at
+    assert expires_at <= finished_at + timedelta(minutes=300, seconds=5)
 
 
 def test_whoami_rejects_idle_session_after_thirty_minutes(monkeypatch):

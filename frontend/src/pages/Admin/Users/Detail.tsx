@@ -606,14 +606,14 @@ export default function UserDetail() {
     if (!user) {
       return;
     }
-    if (!window.confirm(`Soft-delete ${getUserDisplayName(user)}? The account will be preserved for audit and can be restored later.`)) {
+    if (!window.confirm(`Remove ${getUserDisplayName(user)}? The account will be preserved for audit and can be restored later.`)) {
       return;
     }
     setLifecycleSubmitting(true);
     try {
       await deleteAdminUser(user.id, { reason: deletionReason.trim() || undefined });
-      toast.push("User soft-deleted");
-      setReloadKey((value) => value + 1);
+      toast.push("User removed");
+      navigate("/admin/users");
     } catch (error) {
       console.error(error);
       toast.push(parseApiErrorMessage(error, "Failed to delete user"));
@@ -1039,10 +1039,10 @@ export default function UserDetail() {
                     <div className="space-y-4 rounded-[24px] border border-rose-200 bg-rose-50/50 p-5 dark:border-rose-500/30 dark:bg-rose-500/10">
                       <div>
                         <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                          Soft delete and restore
+                          Remove and restore
                         </p>
                         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                          Deleted users stay in the system for audit, but cannot sign in or receive normal access actions.
+                          Removed users are hidden from the normal list, preserved for audit, and can be restored from the Deleted status filter.
                         </p>
                       </div>
                       <div className="space-y-2">
@@ -1093,7 +1093,7 @@ export default function UserDetail() {
                             ) : (
                               <>
                                 <Trash2 className="h-4 w-4" />
-                                Soft delete user
+                                Remove user
                               </>
                             )}
                           </Button>

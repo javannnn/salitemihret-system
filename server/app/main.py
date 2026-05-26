@@ -26,6 +26,7 @@ from app.routers import license as license_router
 from app.routers import members as members_router
 from app.routers import members_bulk as members_bulk_router
 from app.routers import members_files as members_files_router
+from app.routers import member_taxonomy as member_taxonomy_router
 from app.routers import households as households_router
 from app.routers import priests as priests_router
 from app.routers import payments as payments_router
@@ -93,6 +94,7 @@ app.include_router(emails_router.router)
 app.include_router(members_files_router.router)
 app.include_router(members_bulk_router.router)
 app.include_router(members_router.router)
+app.include_router(member_taxonomy_router.router)
 app.include_router(users_router.router)
 app.include_router(roles_router.router)
 app.include_router(staff_router.router)

@@ -6,7 +6,7 @@ import json
 from typing import get_args
 
 from fastapi import HTTPException, status
-from sqlalchemy import String, cast, func
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.member import Member
@@ -485,17 +485,34 @@ def _build_sponsorship_query(
         query = query.filter(func.date(Sponsorship.created_at) <= created_to)
     if county:
         like = f"%{county.strip().lower()}%"
-        query = query.join(Sponsorship.newcomer).filter(
-            func.lower(func.coalesce(Newcomer.county, "")).like(like)
-        )
+        query = query.filter(Sponsorship.newcomer.has(func.lower(func.coalesce(Newcomer.county, "")).like(like)))
     if search:
         like = f"%{search.lower()}%"
-        query = query.join(Sponsorship.sponsor).outerjoin(Sponsorship.newcomer).filter(
-            func.lower(Member.first_name).like(like)
-            | func.lower(Member.last_name).like(like)
-            | func.lower(Sponsorship.beneficiary_name).like(like)
-            | func.lower(func.coalesce(Newcomer.first_name, "")).like(like)
-            | func.lower(func.coalesce(Newcomer.last_name, "")).like(like)
+        query = query.filter(
+            or_(
+                Sponsorship.sponsor.has(
+                    or_(
+                        func.lower(Member.first_name).like(like),
+                        func.lower(Member.last_name).like(like),
+                        func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
+                    )
+                ),
+                Sponsorship.beneficiary_member.has(
+                    or_(
+                        func.lower(Member.first_name).like(like),
+                        func.lower(Member.last_name).like(like),
+                        func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
+                    )
+                ),
+                func.lower(func.coalesce(Sponsorship.beneficiary_name, "")).like(like),
+                Sponsorship.newcomer.has(
+                    or_(
+                        func.lower(Newcomer.first_name).like(like),
+                        func.lower(Newcomer.last_name).like(like),
+                        func.lower(func.coalesce(Newcomer.first_name, "") + " " + func.coalesce(Newcomer.last_name, "")).like(like),
+                    )
+                ),
+            )
         )
     return query
 
@@ -1011,6 +1028,11 @@ REMINDER_INTERVALS = {
     "Monthly": 30,
     "Quarterly": 90,
     "Yearly": 365,
+    "OneYear": 365,
+    "TwoYears": 730,
+    "ThreeYears": 1095,
+    "FourYears": 1460,
+    "FiveYears": 1825,
 }
 
 STATUS_TRANSITIONS = {
@@ -1020,7 +1042,7 @@ STATUS_TRANSITIONS = {
     "Rejected": set(),
     "Active": {"Suspended", "Completed"},
     "Suspended": {"Active", "Completed"},
-    "Completed": set(),
+    "Completed": {"Active"},
     "Closed": set(),
 }
 
@@ -1085,6 +1107,8 @@ def transition_sponsorship_status(
         action = "Suspension"
     elif target == "Active" and current == "Suspended":
         action = "Reactivation"
+    elif target == "Active" and current == "Completed":
+        action = "Reversal"
 
     sponsorship.status = target
     sponsorship.updated_by_id = actor.id
@@ -1102,6 +1126,17 @@ def transition_sponsorship_status(
     db.commit()
     db.refresh(sponsorship)
     return _serialize(db, sponsorship)
+
+
+def delete_sponsorship(db: Session, sponsorship_id: int) -> None:
+    sponsorship = _load_sponsorship(db, sponsorship_id)
+    if sponsorship.status not in {"Draft", "Rejected", "Completed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Draft, Rejected, or Completed sponsorship cases can be deleted.",
+        )
+    db.delete(sponsorship)
+    db.commit()
 
 
 def trigger_reminder(db: Session, sponsorship_id: int) -> SponsorshipOut:
@@ -1381,8 +1416,14 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
     )
     last_status = last_case.status if last_case else None
     last_date = None
+    last_name = None
     if last_case:
         last_date = _case_reference_date(last_case)
+        last_name = _normalize_beneficiary_name(
+            beneficiary_name=last_case.beneficiary_name,
+            beneficiary_member=last_case.beneficiary_member,
+            newcomer=last_case.newcomer,
+        )
 
     since = date.today() - timedelta(days=365)
     history_count = (
@@ -1451,12 +1492,15 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         member_id=sponsor.id,
         member_name=f"{sponsor.first_name} {sponsor.last_name}".strip(),
         member_status=sponsor.status,
+        member_phone=getattr(sponsor, "phone", None),
+        member_email=getattr(sponsor, "email", None),
         marital_status=marital_status,
         spouse_name=spouse_name,
         spouse_phone=spouse_phone,
         spouse_email=spouse_email,
         last_sponsorship_id=last_case.id if last_case else None,
         last_sponsorship_date=last_date,
+        last_sponsorship_name=last_name,
         last_sponsorship_status=last_status,
         history_count_last_12_months=history_count,
         volunteer_services=services,

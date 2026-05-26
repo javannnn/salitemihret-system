@@ -91,14 +91,36 @@ def _required_consecutive_months() -> int:
 
 def _calculate_consecutive_months(member: Member, now: datetime) -> int:
     payments = list(getattr(member, "contribution_payments", []) or [])
+    ledger_payments = []
+    for payment in list(getattr(member, "payments", []) or []):
+        service_type = getattr(payment, "service_type", None)
+        if (getattr(service_type, "code", "") or "").upper() != "CONTRIBUTION":
+            continue
+        if getattr(payment, "status", None) != "Completed":
+            continue
+        amount = Decimal(str(getattr(payment, "amount", 0) or 0))
+        if amount <= 0:
+            continue
+        if getattr(payment, "correction_of_id", None) is None and getattr(payment, "has_adjustments", False):
+            continue
+        ledger_payments.append(payment)
+    payments.extend(ledger_payments)
     if not payments:
         return 0
-    payments.sort(key=lambda item: (item.paid_at, item.id))
+    def payment_sort_key(item: object) -> tuple[datetime, int]:
+        paid_at = getattr(item, "paid_at", None)
+        if paid_at is not None:
+            return (_combine_date(paid_at), int(getattr(item, "id", 0) or 0))
+        posted_at = _ensure_datetime(getattr(item, "posted_at", None)) or now
+        return (posted_at, int(getattr(item, "id", 0) or 0))
+
+    payments.sort(key=payment_sort_key)
     grace = timedelta(days=GRACE_PERIOD_DAYS)
     consecutive_months = 0
     coverage_end: datetime | None = None
     for payment in payments:
-        paid_at = _combine_date(payment.paid_at)
+        paid_at_value = getattr(payment, "paid_at", None)
+        paid_at = _combine_date(paid_at_value) if paid_at_value is not None else (_ensure_datetime(getattr(payment, "posted_at", None)) or now)
         payment_amount = Decimal(str(payment.amount))
         covered_months = months_covered(payment_amount, member)
         if coverage_end is None:
@@ -200,8 +222,11 @@ def set_status_override(member: Member, *, enabled: bool, value: Optional[str], 
         raise ValueError("Override value is required when enabling status override")
     if value not in ("Active", "Inactive", "Pending", "Archived"):
         raise ValueError("Invalid override status value")
+    cleaned_reason = reason.strip() if reason else ""
+    if not cleaned_reason:
+        raise ValueError("Override reason is required when changing membership status")
     member.status_override_value = value
-    member.status_override_reason = reason
+    member.status_override_reason = cleaned_reason
 
 
 def build_membership_events(member: Member, health: MembershipHealthData, limit: int = EVENT_HISTORY_LIMIT) -> List[MembershipEventData]:

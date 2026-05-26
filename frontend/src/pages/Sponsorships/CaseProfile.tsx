@@ -13,6 +13,7 @@ import {
   SponsorshipSponsorContext,
   SponsorshipTimelineResponse,
   createSponsorshipNote,
+  deleteSponsorship,
   getSponsorContext,
   getSponsorship,
   getSponsorshipTimeline,
@@ -53,6 +54,10 @@ function formatDateTime(value?: string | null) {
 
 function caseId(id: number) {
   return `SP-${String(id).padStart(4, "0")}`;
+}
+
+function statusLabel(status?: string | null) {
+  return status === "Suspended" ? "Declined" : status || "-";
 }
 
 function beneficiaryLabel(record: Sponsorship) {
@@ -244,6 +249,24 @@ export default function SponsorshipCaseProfile() {
     }
   };
 
+  const handleDeleteCase = async () => {
+    if (!sponsorship) return;
+    const confirmed = window.confirm(`Delete ${caseId(sponsorship.id)}?`);
+    if (!confirmed) return;
+    try {
+      await deleteSponsorship(sponsorship.id);
+      toast.push("Sponsorship case deleted.");
+      navigate("/sponsorships");
+    } catch (error) {
+      console.error(error);
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Unable to delete sponsorship case.");
+      } else {
+        toast.push("Unable to delete sponsorship case.");
+      }
+    }
+  };
+
   const handleCopyMessage = async () => {
     if (!whatsappMessage) return;
     try {
@@ -290,9 +313,9 @@ export default function SponsorshipCaseProfile() {
                 {sponsorship ? caseId(sponsorship.id) : "Sponsorship case"}
               </h1>
               {sponsorship && (
-                <Badge variant="outline" className={STATUS_STYLES[sponsorship.status]}>
-                  {sponsorship.status}
-                </Badge>
+              <Badge variant="outline" className={STATUS_STYLES[sponsorship.status]}>
+                {statusLabel(sponsorship.status)}
+              </Badge>
               )}
             </div>
             <p className="text-sm text-mute">
@@ -345,9 +368,9 @@ export default function SponsorshipCaseProfile() {
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() => openStatusModal("Suspended", "Suspend case", false)}
+                  onClick={() => openStatusModal("Suspended", "Decline case", false)}
                 >
-                  Suspend
+                  Decline
                 </Button>
                 <Button onClick={() => openStatusModal("Completed", "Complete case", false)}>
                   Complete
@@ -358,6 +381,16 @@ export default function SponsorshipCaseProfile() {
               <Button onClick={() => openStatusModal("Active", "Resume case", false)}>
                 Resume
               </Button>
+            )}
+            {sponsorship.status === "Completed" && (
+              <>
+                <Button variant="ghost" onClick={() => openStatusModal("Active", "Reverse completed case", true)}>
+                  Reverse
+                </Button>
+                <Button variant="ghost" onClick={handleDeleteCase}>
+                  Delete
+                </Button>
+              </>
             )}
           </div>
         )}
@@ -389,11 +422,12 @@ export default function SponsorshipCaseProfile() {
                 </Badge>
               </div>
               <div className="text-sm text-mute space-y-1">
-                <div>Last co-sponsorship: {formatDate(sponsorContext?.last_sponsorship_date)}</div>
-                <div>Last status: {sponsorContext?.last_sponsorship_status || "-"}</div>
+                <div>Last sponsored co-sponsor: {sponsorContext?.last_sponsorship_name || "-"}</div>
+                <div>Last status: {statusLabel(sponsorContext?.last_sponsorship_status)}</div>
+                <div>Co-sponsor contact: {[sponsorContext?.member_phone, sponsorContext?.member_email].filter(Boolean).join(" • ") || "-"}</div>
                 <div>12-mo history: {sponsorContext?.history_count_last_12_months ?? 0}</div>
                 <div>Volunteer services: {sponsorContext?.volunteer_services?.join(", ") || "-"}</div>
-                <div>Father of repentance: {sponsorContext?.father_of_repentance_name || "-"}</div>
+                <div>Father of Confession: {sponsorContext?.father_of_repentance_name || "-"}</div>
                 {sponsorContext?.marital_status === "Married" && (
                   <div>
                     Spouse: {sponsorContext.spouse_name || "Not set in family profile"}
@@ -432,7 +466,7 @@ export default function SponsorshipCaseProfile() {
                 <div>Last reminder: {formatDateTime(sponsorship.reminder_last_sent)}</div>
                 <div>Next reminder: {formatDateTime(sponsorship.reminder_next_due)}</div>
                 <div>Last sponsored date: {formatDate(sponsorship.last_sponsored_date)}</div>
-                <div>Payment information: {sponsorship.payment_information || "-"}</div>
+                <div>Bond: {sponsorship.payment_information || "-"}</div>
                 <div>
                   Last sponsored status: {sponsorship.last_status || "-"}
                   {sponsorship.last_status === "Rejected" && sponsorship.last_status_reason
@@ -442,17 +476,17 @@ export default function SponsorshipCaseProfile() {
                 <div>Start date: {formatDate(sponsorship.start_date)}</div>
                 <div>Expected end: {formatDate(sponsorship.end_date)}</div>
                 <div>
-                  Budget round:{" "}
+                  Allocated sponsor round:{" "}
                   {sponsorship.budget_round
                     ? `Round ${sponsorship.budget_round.round_number} (${sponsorship.budget_round.year})`
                     : "-"}
                 </div>
                 <div>
-                  Budget period: {sponsorship.budget_month && sponsorship.budget_year
+                  Allocated sponsor period: {sponsorship.budget_month && sponsorship.budget_year
                     ? `${sponsorship.budget_month}/${sponsorship.budget_year}`
                     : "-"}
                 </div>
-                <div>Budget slots: {sponsorship.budget_slots ?? "-"}</div>
+                <div>Allocated sponsor slots: {sponsorship.budget_slots ?? "-"}</div>
                 <div>Used slots: {sponsorship.used_slots ?? 0}</div>
                 {sponsorship.notes && (
                   <div className="pt-2">

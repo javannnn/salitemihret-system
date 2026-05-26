@@ -58,6 +58,11 @@ const formatPaymentMethod = (method?: string | null) => {
 const formatMoney = (amount: number, currency = "CAD") =>
   `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
+const donorDisplayName = (payment: Pick<Payment, "donor_first_name" | "donor_last_name" | "donor_email">) => {
+  const name = [payment.donor_first_name, payment.donor_last_name].filter(Boolean).join(" ").trim();
+  return name || payment.donor_email || "";
+};
+
 type Filters = {
   reference: string;
   service_type: string;
@@ -558,9 +563,12 @@ export default function PaymentsLedger() {
                         </div>
                       </Link>
                     ) : (
-                      <span className="text-mute">
-                        {payment.member_id ? `Member #${payment.member_id}` : "Unassigned"}
-                      </span>
+                      <div>
+                        <div className="font-medium text-ink">{donorDisplayName(payment) || (payment.member_id ? `Member #${payment.member_id}` : "Unassigned")}</div>
+                        {donorDisplayName(payment) && (
+                          <div className="text-xs text-mute">{payment.donor_email || "Non-member donor"}</div>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -718,6 +726,9 @@ function RecordPaymentDialog({
     memo: "",
     service_type_code: "",
     member_id: "",
+    donor_first_name: "",
+    donor_last_name: "",
+    donor_email: "",
     due_date: "",
     status: "",
   });
@@ -736,6 +747,9 @@ function RecordPaymentDialog({
         memo: "",
         service_type_code: "",
         member_id: "",
+        donor_first_name: "",
+        donor_last_name: "",
+        donor_email: "",
         due_date: "",
         status: "",
       });
@@ -777,6 +791,11 @@ function RecordPaymentDialog({
   if (!open) return null;
 
   const selectedType = serviceTypes.find((type) => type.code === form.service_type_code);
+  const selectedCode = (selectedType?.code || form.service_type_code || "").toUpperCase();
+  const requiresMember = selectedCode === "CONTRIBUTION";
+  const isDonation = selectedCode === "DONATION";
+  const hasMemberLink = Boolean(form.member_id);
+  const showDonorFields = isDonation && !hasMemberLink;
 
   const handleSelectMember = (member: Member) => {
     setSelectedMember(member);
@@ -800,6 +819,18 @@ function RecordPaymentDialog({
       toast.push("Select a service type");
       return;
     }
+    if (requiresMember && !form.member_id) {
+      toast.push("Monthly contribution must be linked to an active member");
+      return;
+    }
+    if (!isDonation && !form.member_id) {
+      toast.push("Non-member payments are only allowed for General Donation");
+      return;
+    }
+    if (showDonorFields && !form.donor_first_name.trim()) {
+      toast.push("Enter the donor first name");
+      return;
+    }
     if (!canRecordPayments) {
       toast.push("You do not have permission to record payments.");
       return;
@@ -814,6 +845,9 @@ function RecordPaymentDialog({
         memo: form.memo || undefined,
         service_type_code: form.service_type_code,
         member_id: form.member_id ? Number(form.member_id) : undefined,
+        donor_first_name: showDonorFields ? form.donor_first_name.trim() : undefined,
+        donor_last_name: showDonorFields ? form.donor_last_name.trim() || undefined : undefined,
+        donor_email: showDonorFields ? form.donor_email.trim() || undefined : undefined,
         due_date: form.due_date || undefined,
         status: form.status || undefined,
       });
@@ -873,13 +907,17 @@ function RecordPaymentDialog({
         </div>
         <div className="space-y-3">
           <div>
-            <label className="text-xs uppercase text-mute block">Link member (optional)</label>
+            <label className="text-xs uppercase text-mute block">{requiresMember ? "Link member" : "Link member (optional)"}</label>
             <Input
               value={memberLookupQuery}
               onChange={(event) => setMemberLookupQuery(event.target.value)}
               placeholder="Search by name, email, or phone"
             />
-            <p className="text-xs text-mute mt-1">Type at least two characters to search existing members.</p>
+            <p className="text-xs text-mute mt-1">
+              {requiresMember
+                ? "Monthly contribution payments require an active member."
+                : "Type at least two characters to search existing members."}
+            </p>
           </div>
           {memberLookupQuery.trim().length >= 2 && (
             <Card className="p-2 border border-border/60 max-h-48 overflow-auto">
@@ -944,6 +982,33 @@ function RecordPaymentDialog({
             />
           </div>
         </div>
+        {showDonorFields && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-xl border border-border bg-card/70 p-3">
+            <div>
+              <label className="text-xs uppercase text-mute block mb-1">Donor first name</label>
+              <Input
+                value={form.donor_first_name}
+                onChange={(event) => setForm((prev) => ({ ...prev, donor_first_name: event.target.value }))}
+                required={showDonorFields}
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase text-mute block mb-1">Donor last name</label>
+              <Input
+                value={form.donor_last_name}
+                onChange={(event) => setForm((prev) => ({ ...prev, donor_last_name: event.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase text-mute block mb-1">Donor email</label>
+              <Input
+                type="email"
+                value={form.donor_email}
+                onChange={(event) => setForm((prev) => ({ ...prev, donor_email: event.target.value }))}
+              />
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="text-xs uppercase text-mute block mb-1">Method</label>

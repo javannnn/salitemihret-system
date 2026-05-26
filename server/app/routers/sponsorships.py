@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_field_permission, require_roles
+from app.auth.deps import require_roles
 from app.core.db import get_db
 from app.models.sponsorship import Sponsorship
 from app.models.user import User
@@ -37,6 +37,7 @@ router = APIRouter(prefix="/sponsorships", tags=["sponsorships"])
 
 READ_ROLES = ("SponsorshipCommittee", "Admin", "FinanceAdmin", "OfficeAdmin", "PublicRelations")
 MANAGE_ROLES = ("SponsorshipCommittee", "Admin")
+BUDGET_MANAGE_ROLES = ("SponsorshipCommittee", "Admin", "FinanceAdmin")
 
 SPONSORSHIP_EXPORT_HEADERS = [
     "case_id",
@@ -416,8 +417,7 @@ def list_budget_rounds(
 def create_budget_round(
     payload: SponsorshipBudgetRoundCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*MANAGE_ROLES)),
-    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
+    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.create_budget_round(db, payload)
 
@@ -427,8 +427,7 @@ def update_budget_round(
     round_id: int,
     payload: SponsorshipBudgetRoundUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*MANAGE_ROLES)),
-    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
+    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.update_budget_round(db, round_id, payload)
 
@@ -437,8 +436,7 @@ def update_budget_round(
 def delete_budget_round(
     round_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*MANAGE_ROLES)),
-    __: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
+    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
 ) -> None:
     sponsorships_service.delete_budget_round(db, round_id)
 
@@ -506,6 +504,15 @@ def update_sponsorship(
     current_user: User = Depends(require_roles(*MANAGE_ROLES)),
 ) -> SponsorshipOut:
     return sponsorships_service.update_sponsorship(db, sponsorship_id, payload, current_user.id)
+
+
+@router.delete("/{sponsorship_id:int}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sponsorship(
+    sponsorship_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*MANAGE_ROLES)),
+) -> None:
+    sponsorships_service.delete_sponsorship(db, sponsorship_id)
 
 
 @router.post("/{sponsorship_id:int}/status", response_model=SponsorshipOut, status_code=status.HTTP_200_OK)

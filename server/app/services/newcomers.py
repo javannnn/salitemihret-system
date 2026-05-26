@@ -560,6 +560,18 @@ def get_newcomer(db: Session, newcomer_id: int) -> NewcomerOut:
     )
 
 
+def delete_newcomer(db: Session, newcomer_id: int) -> None:
+    record = db.query(Newcomer).filter(Newcomer.id == newcomer_id).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
+    db.query(Sponsorship).filter(Sponsorship.newcomer_id == newcomer_id).update(
+        {Sponsorship.newcomer_id: None},
+        synchronize_session=False,
+    )
+    db.delete(record)
+    db.commit()
+
+
 def transition_newcomer_status(
     db: Session,
     newcomer_id: int,

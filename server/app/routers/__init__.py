@@ -10,6 +10,7 @@ from app.routers import (  # noqa: F401
     members,
     members_bulk,
     members_files,
+    member_taxonomy,
     payments,
     households,
     priests,

@@ -49,6 +49,8 @@ export type MemberStatus = "Active" | "Inactive" | "Pending" | "Archived";
 
 export type Tag = { id: number; name: string; slug: string };
 export type Ministry = { id: number; name: string; slug: string };
+export type TaxonomyItem = (Tag | Ministry) & { members_count: number };
+export type TaxonomyItemPayload = { name: string; slug?: string | null };
 export type Household = {
   id: number;
   name: string;
@@ -201,6 +203,80 @@ export type MemberDetail = Member & {
   membership_events: MembershipEvent[];
 };
 
+export type IndividualMemberReport = {
+  generated_at: string;
+  financial_access: boolean;
+  member: MemberDetail;
+  household: HouseholdDetail | null;
+  children: Child[];
+  spouse: Spouse | null;
+  tags: Tag[];
+  ministries: Ministry[];
+  sunday_school_participants: MemberSundaySchoolParticipant[];
+  sunday_school_payments: MemberSundaySchoolPayment[];
+  contribution_history: ContributionPayment[];
+  payments: Payment[];
+  sponsorships: Array<{
+    id: number;
+    role: "Sponsor" | "Beneficiary";
+    beneficiary_name: string;
+    status: string;
+    program?: string | null;
+    frequency: string;
+    monthly_amount?: number | null;
+    received_amount?: number | null;
+    start_date: string;
+    end_date?: string | null;
+    notes?: string | null;
+  }>;
+  membership_health: MembershipHealth;
+  membership_events: MembershipEvent[];
+  client_report_fields: {
+    membership: {
+      first_name: string;
+      last_name: string;
+      membership_date?: string | null;
+      spouse_name?: string | null;
+      children: Array<{
+        child_name: string;
+        birth_year?: number | null;
+      }>;
+    };
+    payments: Array<{
+      first_name: string;
+      last_name: string;
+      amount: number;
+      currency: string;
+      payment_date: string;
+      email?: string | null;
+    }>;
+    payment_years: Array<{
+      year: number;
+      total_amount: number;
+      currency: string;
+      payment_count: number;
+    }>;
+    sponsorship: {
+      first_name: string;
+      last_name: string;
+      membership_date?: string | null;
+      payment_information_by_year: Array<{
+        year: number;
+        total_amount: number;
+        currency: string;
+        payment_count: number;
+      }>;
+      volunteer_rows: Array<{
+        volunteer_date?: string | null;
+        service_type: string;
+      }>;
+      last_sponsored_date?: string | null;
+      number_sponsored: number;
+      last_sponsor_status?: string | null;
+    };
+  };
+};
+
 export type MemberSummary = {
   id: number;
   first_name: string;
@@ -256,6 +332,7 @@ export type PaymentMember = {
   id: number;
   first_name: string;
   last_name: string;
+  full_name?: string | null;
   email?: string | null;
 };
 
@@ -277,6 +354,9 @@ export type Payment = {
   status: "Pending" | "Completed" | "Overdue";
   member_id?: number | null;
   household_id?: number | null;
+  donor_first_name?: string | null;
+  donor_last_name?: string | null;
+  donor_email?: string | null;
   recorded_by_id?: number | null;
   correction_of_id?: number | null;
   correction_reason?: string | null;
@@ -836,6 +916,7 @@ export type SponsorshipPayload = {
   monthly_amount: number;
   received_amount?: number;
   start_date: string;
+  end_date?: string;
   frequency: Sponsorship["frequency"];
   status: Sponsorship["status"];
   program?: SponsorshipProgram;
@@ -905,12 +986,15 @@ export type SponsorshipSponsorContext = {
   member_id: number;
   member_name: string;
   member_status?: string | null;
+  member_phone?: string | null;
+  member_email?: string | null;
   marital_status?: string | null;
   spouse_name?: string | null;
   spouse_phone?: string | null;
   spouse_email?: string | null;
   last_sponsorship_id?: number | null;
   last_sponsorship_date?: string | null;
+  last_sponsorship_name?: string | null;
   last_sponsorship_status?: string | null;
   history_count_last_12_months: number;
   volunteer_services: string[];
@@ -2111,6 +2195,12 @@ export async function updateSponsorship(id: number, payload: Partial<Sponsorship
   });
 }
 
+export async function deleteSponsorship(id: number): Promise<void> {
+  await api<void>(`/sponsorships/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export async function transitionSponsorshipStatus(id: number, payload: SponsorshipStatusTransitionPayload): Promise<Sponsorship> {
   return api<Sponsorship>(`/sponsorships/${id}/status`, {
     method: "POST",
@@ -2192,6 +2282,12 @@ export async function updateNewcomer(id: number, payload: NewcomerUpdatePayload)
   return api<Newcomer>(`/newcomers/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteNewcomer(id: number): Promise<void> {
+  await api<void>(`/newcomers/${id}`, {
+    method: "DELETE",
   });
 }
 
@@ -2664,6 +2760,61 @@ export async function searchPriests(search: string, limit = 20): Promise<Priest[
   return api<Priest[]>(`/priests?${params.toString()}`);
 }
 
+export async function listMemberTags(search = "", limit = 100): Promise<TaxonomyItem[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("limit", String(limit));
+  return api<TaxonomyItem[]>(`/member-tags?${params.toString()}`);
+}
+
+export async function createMemberTag(payload: TaxonomyItemPayload): Promise<TaxonomyItem> {
+  return api<TaxonomyItem>("/member-tags", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateMemberTag(tagId: number, payload: TaxonomyItemPayload): Promise<TaxonomyItem> {
+  return api<TaxonomyItem>(`/member-tags/${tagId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteMemberTag(tagId: number): Promise<void> {
+  await api<void>(`/member-tags/${tagId}`, { method: "DELETE" });
+}
+
+export async function listMemberMinistries(search = "", limit = 100): Promise<TaxonomyItem[]> {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  params.set("limit", String(limit));
+  return api<TaxonomyItem[]>(`/member-ministries?${params.toString()}`);
+}
+
+export async function createMemberMinistry(payload: TaxonomyItemPayload): Promise<TaxonomyItem> {
+  return api<TaxonomyItem>("/member-ministries", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateMemberMinistry(ministryId: number, payload: TaxonomyItemPayload): Promise<TaxonomyItem> {
+  return api<TaxonomyItem>(`/member-ministries/${ministryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteMemberMinistry(ministryId: number): Promise<void> {
+  await api<void>(`/member-ministries/${ministryId}`, { method: "DELETE" });
+}
+
+export async function getIndividualMemberReport(memberId: number, source: "members" | "payments" = "members"): Promise<IndividualMemberReport> {
+  const prefix = source === "payments" ? "/reports/payments/members" : "/reports/members";
+  return api<IndividualMemberReport>(`${prefix}/${memberId}/individual`);
+}
+
 export type PriestPayload = {
   full_name: string;
   phone?: string;
@@ -2905,6 +3056,9 @@ type PaymentCreatePayload = {
   service_type_code: string;
   member_id?: number | null;
   household_id?: number | null;
+  donor_first_name?: string | null;
+  donor_last_name?: string | null;
+  donor_email?: string | null;
   posted_at?: string;
   due_date?: string;
   status?: string;

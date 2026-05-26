@@ -1,9 +1,25 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel
+
+from app.schemas.household import HouseholdDetail
+from app.schemas.member import (
+    ChildOut,
+    ContributionPaymentOut,
+    MemberDetailOut,
+    MemberSundaySchoolParticipantOut,
+    MemberSundaySchoolPaymentOut,
+    MembershipEventOut,
+    MembershipHealthOut,
+    MinistryOut,
+    SpouseOut,
+    TagOut,
+)
+from app.schemas.payment import PaymentOut
 
 
 class ReportActivityItem(BaseModel):
@@ -115,3 +131,88 @@ class ParishCouncilReportResponse(BaseModel):
     department_breakdown: list[ReportBreakdownItem]
     expiring_assignments: list[ParishCouncilReportRow]
     rows: list[ParishCouncilReportRow]
+
+
+class IndividualSponsorshipReportItem(BaseModel):
+    id: int
+    role: Literal["Sponsor", "Beneficiary"]
+    beneficiary_name: str
+    status: str
+    program: str | None = None
+    frequency: str
+    monthly_amount: Decimal | None = None
+    received_amount: Decimal | None = None
+    start_date: date
+    end_date: date | None = None
+    notes: str | None = None
+
+
+class ClientMembershipChildField(BaseModel):
+    child_name: str
+    birth_year: int | None = None
+
+
+class ClientMembershipReportFields(BaseModel):
+    first_name: str
+    last_name: str
+    membership_date: date | None = None
+    spouse_name: str | None = None
+    children: list[ClientMembershipChildField]
+
+
+class ClientPaymentReportRow(BaseModel):
+    first_name: str
+    last_name: str
+    amount: float
+    currency: str
+    payment_date: datetime
+    email: str | None = None
+
+
+class ClientPaymentYearSummary(BaseModel):
+    year: int
+    total_amount: float
+    currency: str
+    payment_count: int
+
+
+class ClientSponsorshipVolunteerRow(BaseModel):
+    volunteer_date: date | None = None
+    service_type: str
+
+
+class ClientSponsorshipReportFields(BaseModel):
+    first_name: str
+    last_name: str
+    membership_date: date | None = None
+    payment_information_by_year: list[ClientPaymentYearSummary]
+    volunteer_rows: list[ClientSponsorshipVolunteerRow]
+    last_sponsored_date: date | None = None
+    number_sponsored: int
+    last_sponsor_status: str | None = None
+
+
+class ClientReportFields(BaseModel):
+    membership: ClientMembershipReportFields
+    payments: list[ClientPaymentReportRow]
+    payment_years: list[ClientPaymentYearSummary]
+    sponsorship: ClientSponsorshipReportFields
+
+
+class IndividualMemberReportResponse(BaseModel):
+    generated_at: datetime
+    financial_access: bool
+    member: MemberDetailOut
+    household: HouseholdDetail | None = None
+    children: list[ChildOut]
+    spouse: SpouseOut | None = None
+    tags: list[TagOut]
+    ministries: list[MinistryOut]
+    sunday_school_participants: list[MemberSundaySchoolParticipantOut]
+    sunday_school_payments: list[MemberSundaySchoolPaymentOut]
+    contribution_history: list[ContributionPaymentOut]
+    payments: list[PaymentOut]
+    sponsorships: list[IndividualSponsorshipReportItem]
+    membership_health: MembershipHealthOut
+    membership_events: list[MembershipEventOut]
+    client_report_fields: ClientReportFields

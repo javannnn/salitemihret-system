@@ -144,6 +144,20 @@ class TagOut(BaseModel):
         from_attributes = True
 
 
+class TaxonomyItemOut(TagOut):
+    members_count: int = 0
+
+
+class TaxonomyItemCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    slug: Optional[str] = Field(None, min_length=1, max_length=140)
+
+
+class TaxonomyItemUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    slug: Optional[str] = Field(None, min_length=1, max_length=140)
+
+
 class MinistryOut(BaseModel):
     id: int
     name: str
@@ -210,7 +224,7 @@ class MemberBase(BaseModel):
     district: Optional[str] = Field(None, max_length=100)
     status: str = Field(default="Active")
     is_tither: bool = False
-    pays_contribution: bool = False
+    pays_contribution: bool = True
     contribution_method: Optional[str] = Field(None, max_length=100)
     contribution_amount: Optional[float] = None
     contribution_exception_reason: Optional[str] = None

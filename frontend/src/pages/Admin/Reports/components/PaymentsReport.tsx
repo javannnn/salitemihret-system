@@ -5,6 +5,7 @@ import { DollarSign, TrendingUp, CreditCard, Calendar } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
 import { useToast } from "@/components/Toast";
 import { DateRangeControls, DateRangeValue } from "./DateRangeControls";
+import { MembersReport } from "./MembersReport";
 
 export function PaymentsReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
@@ -227,6 +228,13 @@ export function PaymentsReport() {
                     )}
                 </div>
             </div>
+
+            <MembersReport
+                individualOnly
+                individualReportSource="payments"
+                individualTitle="Individual Payment Report"
+                individualDescription="Search by member first name, last name, phone, email, or username to open the finance-visible individual report."
+            />
         </div>
     );
 }

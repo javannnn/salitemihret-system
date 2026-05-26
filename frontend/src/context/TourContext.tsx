@@ -252,7 +252,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       {
         id: "sponsorship-wizard",
         title: "New sponsorship wizard",
-        description: "Start a sponsorship with sponsor search, beneficiary selection, program, and reminder channels.",
+        description: "Start a sponsorship with co-sponsor search, immigrant selection, program, and reminder channels.",
         selector: '[data-tour="sponsorship-wizard"]',
         route: "/sponsorships",
       },

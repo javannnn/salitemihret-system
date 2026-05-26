@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card, Input, Select, Textarea, Button, Badge } from "@/components/ui";
 import { PhoneInput } from "@/components/PhoneInput";
 import PriestDirectoryModal from "./components/PriestDirectoryModal";
+import TagMinistryDirectoryModal from "./components/TagMinistryDirectoryModal";
 import {
   API_BASE,
   ApiError,
@@ -331,7 +332,15 @@ export default function EditMember({ mode = "edit" }: EditMemberProps) {
   );
 }
 
-function SummaryCards({ member, formatDate }: { member: MemberDetail; formatDate: (value?: string | null) => string }) {
+function SummaryCards({
+  member,
+  formatDate,
+  showFinance,
+}: {
+  member: MemberDetail;
+  formatDate: (value?: string | null) => string;
+  showFinance: boolean;
+}) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div className="border rounded-lg p-4 space-y-3">
@@ -404,32 +413,36 @@ function SummaryCards({ member, formatDate }: { member: MemberDetail; formatDate
             <div className="text-xs uppercase text-mute">Father confessor</div>
             <div>{member.father_confessor?.full_name ?? (member.has_father_confessor ? "Assigned" : "—")}</div>
           </div>
-          <div>
-            <div className="text-xs uppercase text-mute">Giving</div>
-            <div>
-              {member.is_tither ? "Tither" : "Non-tither"}
-              {" · "}
-              {member.pays_contribution ? "Gives contribution" : "Contribution pending"}
-            </div>
-          </div>
-          <div className="md:col-span-2">
-            <div className="text-xs uppercase text-mute">Contribution details</div>
-            <div>
-              {member.contribution_method || "—"}
-              {member.contribution_amount !== null && member.contribution_amount !== undefined && (
-                <span>
+          {showFinance && (
+            <>
+              <div>
+                <div className="text-xs uppercase text-mute">Giving</div>
+                <div>
+                  {member.is_tither ? "Tither" : "Non-tither"}
                   {" · "}
-                  {member.contribution_currency} {member.contribution_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              )}
-              {member.contribution_exception_reason && (
-                <span className="text-amber-600"> · {member.contribution_exception_reason === "LowIncome" ? "Low income" : member.contribution_exception_reason} exception</span>
-              )}
-              {member.contribution_exception_reason === "LowIncome" && member.contribution_exception_attachment_path && (
-                <span className="text-emerald-700 dark:text-emerald-300"> · PDF attached</span>
-              )}
-            </div>
-          </div>
+                  {member.pays_contribution ? "Gives contribution" : "Contribution pending"}
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <div className="text-xs uppercase text-mute">Contribution details</div>
+                <div>
+                  {member.contribution_method || "—"}
+                  {member.contribution_amount !== null && member.contribution_amount !== undefined && (
+                    <span>
+                      {" · "}
+                      {member.contribution_currency} {member.contribution_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                  {member.contribution_exception_reason && (
+                    <span className="text-amber-600"> · {member.contribution_exception_reason === "LowIncome" ? "Low income" : member.contribution_exception_reason} exception</span>
+                  )}
+                  {member.contribution_exception_reason === "LowIncome" && member.contribution_exception_attachment_path && (
+                    <span className="text-emerald-700 dark:text-emerald-300"> · PDF attached</span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
           <div className="md:col-span-2">
             <div className="text-xs uppercase text-mute">Address</div>
             <div>
@@ -557,6 +570,7 @@ type SnapshotCardProps = {
   addressSummary: string;
   isTither: boolean;
   paysContribution: boolean;
+  showFinance: boolean;
 };
 
 function SnapshotCard({
@@ -570,6 +584,7 @@ function SnapshotCard({
   addressSummary,
   isTither,
   paysContribution,
+  showFinance,
 }: SnapshotCardProps) {
   const sundayStatusLabel = sundayLinkedCount
     ? `${sundaySummary.upToDate} up to date · ${sundaySummary.overdue} overdue`
@@ -585,20 +600,22 @@ function SnapshotCard({
           </div>
           <div className="text-xs text-mute">Member since {membershipSince}</div>
         </div>
-        <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
-          <div className="text-[11px] uppercase text-mute">Contribution status</div>
-          <div className="font-semibold text-ink">
-            {isTither ? "Tither" : "Non-tither"} · {paysContribution ? "Contribution active" : "Contribution paused"}
+        {showFinance && (
+          <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+            <div className="text-[11px] uppercase text-mute">Contribution status</div>
+            <div className="font-semibold text-ink">
+              {isTither ? "Tither" : "Non-tither"} · {paysContribution ? "Contribution active" : "Contribution paused"}
+            </div>
+            <div className="text-xs text-mute">Last ledger payment: {lastContributionDate}</div>
           </div>
-          <div className="text-xs text-mute">Last ledger payment: {lastContributionDate}</div>
-        </div>
+        )}
         <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
           <div className="text-[11px] uppercase text-mute">Sunday school</div>
           <div className="font-semibold text-ink">
-            {sundayLinkedCount} linked · {sundayContributors} contributors
+            {sundayLinkedCount} linked{showFinance ? ` · ${sundayContributors} contributors` : ""}
           </div>
           <div className="text-xs text-mute">
-            {sundayStatusLabel} · Last payment {lastSundayPayment}
+            {showFinance ? `${sundayStatusLabel} · Last payment ${lastSundayPayment}` : "Linked participant records only"}
           </div>
         </div>
         <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2">
@@ -765,7 +782,9 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const disableCore = disableAll || !permissions.editCore;
   const disableFinance = disableAll || !permissions.editFinance;
   const disableSpiritual = disableAll || !permissions.editSpiritual;
+  const canViewMemberFinance = permissions.editFinance || permissions.viewPayments || permissions.managePayments;
   const canManageFatherConfessors = permissions.manageFatherConfessors;
+  const canManageTagsMinistries = permissions.manageTagsMinistries;
   const canViewAudit = permissions.viewAudit;
   const canSubmit = !disableAll;
   const canUploadAvatar = !disableCore;
@@ -796,6 +815,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [fatherConfessorId, setFatherConfessorId] = useState<string>("");
   const [priestDirectoryOpen, setPriestDirectoryOpen] = useState(false);
+  const [tagMinistryDirectoryOpen, setTagMinistryDirectoryOpen] = useState(false);
   const [spouseForm, setSpouseForm] = useState<SpouseFormState | null>(null);
   const [childrenForm, setChildrenForm] = useState<ChildFormState[]>([]);
   const [newPayment, setNewPayment] = useState<MemberPaymentForm>(() => ({
@@ -1455,6 +1475,27 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     });
   };
 
+  const handleTagMinistryDirectoryUpdate = (
+    nextTags: MembersMeta["tags"],
+    nextMinistries: MembersMeta["ministries"]
+  ) => {
+    setMeta((prev) => (prev ? { ...prev, tags: nextTags, ministries: nextMinistries } : prev));
+    setMember((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        tags: prev.tags
+          .map((tag) => nextTags.find((item) => item.id === tag.id))
+          .filter((tag): tag is MembersMeta["tags"][number] => Boolean(tag)),
+        ministries: prev.ministries
+          .map((ministry) => nextMinistries.find((item) => item.id === ministry.id))
+          .filter((ministry): ministry is MembersMeta["ministries"][number] => Boolean(ministry)),
+      };
+    });
+  };
+
   const toggleBoolean = (field: "is_tither" | "pays_contribution" | "has_father_confessor") =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const checked = event.target.checked;
@@ -1672,13 +1713,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   };
 
   const handleCancelChanges = () => {
-    if (!baselineMemberRef.current) {
-      return;
+    if (baselineMemberRef.current) {
+      const snapshot = cloneMemberDetail(baselineMemberRef.current);
+      setMember(snapshot);
+      initializeFormsFromMember(snapshot);
+      setHasUnsavedChanges(false);
     }
-    const snapshot = cloneMemberDetail(baselineMemberRef.current);
-    setMember(snapshot);
-    initializeFormsFromMember(snapshot);
-    setHasUnsavedChanges(false);
+    navigate(-1);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1711,6 +1752,12 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         return trimmed && trimmed.length > 0 ? trimmed : null;
       };
       const normalizedEmail = member.email?.trim().toLowerCase() ?? "";
+
+      if (member.status_override && !trimOrNull(member.status_override_reason)) {
+        toast.push("Enter a reason before changing the membership status.");
+        setUpdating(false);
+        return;
+      }
 
       if (!disableCore && !normalizedEmail) {
         toast.push("Email is required");
@@ -2163,6 +2210,36 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const membershipEvents = member.membership_events ?? [];
   const overrideDisabled = disableAll || !canOverrideStatus;
   const effectiveStatus = membershipHealth?.effective_status ?? member.status;
+  const registeredAt = member.created_at || member.join_date;
+  const registrationAgeDays = registeredAt
+    ? Math.floor((Date.now() - new Date(registeredAt).getTime()) / 86_400_000)
+    : null;
+  const showOverdueHealth =
+    canViewMemberFinance &&
+    registrationAgeDays !== null &&
+    registrationAgeDays >= 0 &&
+    registrationAgeDays <= 62;
+  const visibleOverdueDays = showOverdueHealth ? membershipHealth?.overdue_days : null;
+  const dueStatusLabel =
+    !canViewMemberFinance
+      ? "Restricted"
+      : membershipHealth?.days_until_due !== null && membershipHealth?.days_until_due !== undefined
+        ? membershipHealth.days_until_due >= 0
+          ? `${membershipHealth.days_until_due} days remaining`
+          : showOverdueHealth
+            ? `${Math.abs(membershipHealth.days_until_due)} days overdue`
+            : "Established member"
+        : "No schedule";
+  const dueStatusClass =
+    !canViewMemberFinance
+      ? "text-mute"
+      : membershipHealth?.days_until_due !== null && membershipHealth?.days_until_due !== undefined
+        ? membershipHealth.days_until_due >= 0
+          ? "text-emerald-700 dark:text-emerald-400"
+          : showOverdueHealth
+            ? "text-rose-700 dark:text-rose-400"
+            : "text-mute"
+        : "text-mute";
   const displayName = `${member.first_name} ${member.last_name}`.trim() || "New member";
   const initials = `${(member.first_name?.[0] ?? "").toUpperCase()}${(member.last_name?.[0] ?? "").toUpperCase()}`;
   const statusChipClass = statusChipStyles[effectiveStatus] ?? "bg-slate-100 text-slate-600 ring-slate-200";
@@ -2170,6 +2247,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     ? "New member · Username will be generated when saved"
     : `Username: ${member.username} · Member ID: ${member.id}`;
   const pendingRequirement =
+    canViewMemberFinance &&
     membershipHealth &&
     membershipHealth.auto_status === "Pending" &&
     membershipHealth.required_consecutive_months > 1
@@ -2180,14 +2258,16 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
       ? `Manual override · Auto status ${membershipHealth.auto_status}`
       : pendingRequirement
         ? pendingRequirement
-        : membershipHealth.days_until_due !== null && membershipHealth.days_until_due !== undefined
+        : canViewMemberFinance && membershipHealth.days_until_due !== null && membershipHealth.days_until_due !== undefined
           ? membershipHealth.days_until_due >= 0
             ? `Next due in ${membershipHealth.days_until_due} days`
-            : `Overdue by ${Math.abs(membershipHealth.days_until_due)} days`
+            : showOverdueHealth
+              ? `Overdue by ${Math.abs(membershipHealth.days_until_due)} days`
+              : "Established member"
           : "Automatic status"
     : "";
-  const nextContributionLabel = membershipHealth?.next_due_at ? formatDate(membershipHealth.next_due_at) : "—";
-  const lastContributionLabel = membershipHealth?.last_paid_at ? formatDate(membershipHealth.last_paid_at) : "—";
+  const nextContributionLabel = canViewMemberFinance && membershipHealth?.next_due_at ? formatDate(membershipHealth.next_due_at) : "—";
+  const lastContributionLabel = canViewMemberFinance && membershipHealth?.last_paid_at ? formatDate(membershipHealth.last_paid_at) : "—";
   const membershipSince = formatDate(member.join_date);
   const addressSummary =
     [
@@ -2456,50 +2536,44 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       <div className="text-xs uppercase text-mute">Auto status</div>
                       <div className="text-sm text-ink">{membershipHealth?.auto_status ?? "—"}</div>
                     </div>
-                    <div>
-                      <div className="text-xs uppercase text-mute">Last payment</div>
-                      <div>{lastContributionLabel}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase text-mute">Next due</div>
-                      <div>{nextContributionLabel}</div>
-                    </div>
+                    {canViewMemberFinance && (
+                      <>
+                        <div>
+                          <div className="text-xs uppercase text-mute">Last payment</div>
+                          <div>{lastContributionLabel}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase text-mute">Next due</div>
+                          <div>{nextContributionLabel}</div>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="rounded-xl border border-border bg-card/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] uppercase text-mute">Next payment</div>
-                      <div className="text-base font-semibold text-ink">{nextContributionLabel}</div>
+                  {canViewMemberFinance && (
+                    <div className="rounded-xl border border-border bg-card/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase text-mute">Next payment</div>
+                        <div className="text-base font-semibold text-ink">{nextContributionLabel}</div>
+                      </div>
+                      <div className={`text-sm font-semibold ${dueStatusClass}`}>{dueStatusLabel}</div>
                     </div>
-                    <div
-                      className={`text-sm font-semibold ${membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                        ? membershipHealth.days_until_due >= 0
-                          ? "text-emerald-700 dark:text-emerald-400"
-                          : "text-rose-700 dark:text-rose-400"
-                        : "text-mute"
-                        }`}
-                    >
-                      {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                        ? membershipHealth.days_until_due >= 0
-                          ? `${membershipHealth.days_until_due} days remaining`
-                          : `${Math.abs(membershipHealth.days_until_due)} days overdue`
-                        : "No schedule"}
-                    </div>
-                  </div>
+                  )}
                   {membershipHealth?.override_active && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       Manual override active
                       {member.status_override_reason ? ` — ${member.status_override_reason}` : ""}
                     </div>
                   )}
-                  {membershipHealth?.auto_status === "Pending" &&
+                  {canViewMemberFinance &&
+                    membershipHealth?.auto_status === "Pending" &&
                     (membershipHealth?.required_consecutive_months ?? 0) > 1 && (
                       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                         {membershipHealth.consecutive_months} of {membershipHealth.required_consecutive_months} consecutive months paid. Record payments to activate status automatically.
                       </div>
                     )}
-                  {membershipHealth?.overdue_days && membershipHealth.overdue_days > 0 && (
+                  {visibleOverdueDays && visibleOverdueDays > 0 && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
-                      Contribution overdue by {membershipHealth.overdue_days} days. Record a payment to reactivate status.
+                      Contribution overdue by {visibleOverdueDays} days. Record a payment to reactivate status.
                     </div>
                   )}
                   {canOverrideStatus && (
@@ -2533,8 +2607,9 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                           <Input
                             value={member.status_override_reason ?? ""}
                             onChange={(event) => handleOverrideReasonChange(event.target.value)}
-                            placeholder="Reason (optional)"
+                            placeholder="Reason for status change"
                             disabled={overrideDisabled}
+                            required
                           />
                         </>
                       )}
@@ -3064,15 +3139,16 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   </div>
                 </SectionCard>
 
-                <SectionCard
-                  id="giving"
-                  ref={setSectionRef("giving")}
-                  title="Giving & contributions"
-                  subtitle="Finance admins keep contribution data in sync here"
-                  data-tour="member-giving"
-                  collapsed={collapsedSections.giving}
-                  onToggle={() => toggleSectionCollapse("giving")}
-                >
+                {canViewMemberFinance && (
+                  <SectionCard
+                    id="giving"
+                    ref={setSectionRef("giving")}
+                    title="Giving & contributions"
+                    subtitle="Finance admins keep contribution data in sync here"
+                    data-tour="member-giving"
+                    collapsed={collapsedSections.giving}
+                    onToggle={() => toggleSectionCollapse("giving")}
+                  >
                   <div className="flex flex-wrap gap-4">
                     <label className="flex items-center gap-2 text-sm">
                       <input
@@ -3285,9 +3361,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       Finance Admin permissions are required to adjust giving details.
                     </p>
                   )}
-                </SectionCard>
+                  </SectionCard>
+                )}
 
-                <SectionCard
+                {canViewMemberFinance && (
+                  <SectionCard
                   id="payments"
                   ref={setSectionRef("payments")}
                   title="Financial activity"
@@ -3314,20 +3392,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                         <div className="text-xs uppercase text-slate-500">Next contribution due</div>
                         <div className="text-base font-semibold text-ink">{nextContributionLabel}</div>
                       </div>
-                      <div
-                        className={`text-sm font-semibold ${membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                          ? membershipHealth.days_until_due >= 0
-                            ? "text-emerald-700 dark:text-emerald-400"
-                            : "text-rose-700 dark:text-rose-400"
-                          : "text-mute"
-                          }`}
-                      >
-                        {membershipHealth?.days_until_due !== undefined && membershipHealth?.days_until_due !== null
-                          ? membershipHealth.days_until_due >= 0
-                            ? `${membershipHealth.days_until_due} days`
-                            : `${Math.abs(membershipHealth.days_until_due)} days overdue`
-                          : "No schedule"}
-                      </div>
+                      <div className={`text-sm font-semibold ${dueStatusClass}`}>{dueStatusLabel}</div>
                     </div>
                     {membershipEvents.length > 0 && (
                       <div className="space-y-2">
@@ -3465,7 +3530,8 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                       </div>
                     </div>
                   )}
-                </SectionCard>
+                  </SectionCard>
+                )}
 
                 <SectionCard
                   id="family"
@@ -3607,6 +3673,18 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   subtitle="Chip selectors keep roles + cohorts tidy"
                   collapsed={collapsedSections.ministries}
                   onToggle={() => toggleSectionCollapse("ministries")}
+                  actions={
+                    canManageTagsMinistries ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="px-3 py-1.5 text-xs"
+                        onClick={() => setTagMinistryDirectoryOpen(true)}
+                      >
+                        Manage tags & ministries
+                      </Button>
+                    ) : null
+                  }
                 >
                   <div className="space-y-4">
                     <div>
@@ -3680,7 +3758,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                   </Button>
                 </div>
               </form>
-              <SummaryCards member={member} formatDate={formatDate} />
+              <SummaryCards member={member} formatDate={formatDate} showFinance={canViewMemberFinance} />
               <MemberTimelineCard timelineLoading={timelineLoading} timelineEntries={timelineEntries} />
             </div>
             <aside className="space-y-4">
@@ -3710,6 +3788,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
                 addressSummary={addressSummary}
                 isTither={member.is_tither}
                 paysContribution={member.pays_contribution}
+                showFinance={canViewMemberFinance}
               />
             </aside>
           </div>
@@ -3721,7 +3800,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           <span>{unsavedLabel}</span>
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={handleCancelChanges} className="rounded-full px-4">
-              Cancel
+              Cancel / Back
             </Button>
             <Button type="submit" form="member-form" disabled={updating || !canSubmit} className="rounded-full px-5">
               {updating ? "Saving…" : "Save changes"}
@@ -3773,6 +3852,13 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
         onUpdate={handlePriestDirectoryUpdate}
         selectedPriestId={fatherConfessorId ? Number(fatherConfessorId) : null}
         onSelectPriest={handleFatherConfessorSelected}
+      />
+      <TagMinistryDirectoryModal
+        open={tagMinistryDirectoryOpen}
+        onClose={() => setTagMinistryDirectoryOpen(false)}
+        tags={meta?.tags ?? []}
+        ministries={meta?.ministries ?? []}
+        onUpdate={handleTagMinistryDirectoryUpdate}
       />
       <AvatarEditor
         isOpen={avatarEditorOpen}

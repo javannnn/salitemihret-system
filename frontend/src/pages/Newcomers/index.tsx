@@ -17,6 +17,7 @@ import {
   NewcomerListResponse,
   createNewcomer,
   createNewcomerInteraction,
+  deleteNewcomer,
   getNewcomerMetrics,
   listNewcomers,
   searchMembers,
@@ -62,6 +63,10 @@ type NewcomerWizardForm = {
   temporary_address_city: string;
   temporary_address_province: string;
   temporary_address_postal_code: string;
+  current_address_street: string;
+  current_address_city: string;
+  current_address_province: string;
+  current_address_postal_code: string;
   sponsored_by_member_id: string;
   sponsored_by_member_name: string;
   past_profession: string;
@@ -136,6 +141,10 @@ const emptyWizardForm = (): NewcomerWizardForm => ({
   temporary_address_city: "",
   temporary_address_province: "",
   temporary_address_postal_code: "",
+  current_address_street: "",
+  current_address_city: "",
+  current_address_province: "",
+  current_address_postal_code: "",
   sponsored_by_member_id: "",
   sponsored_by_member_name: "",
   past_profession: "",
@@ -168,6 +177,7 @@ export default function NewcomersWorkspace() {
   const navigate = useNavigate();
   const canView = permissions.viewNewcomers || permissions.manageNewcomers;
   const canManage = permissions.manageNewcomers;
+  const isAdmin = permissions.hasRole("Admin") || permissions.isSuperAdmin;
 
   const [metrics, setMetrics] = useState<NewcomerMetrics | null>(null);
   const [newcomers, setNewcomers] = useState<NewcomerListResponse | null>(null);
@@ -208,6 +218,7 @@ export default function NewcomersWorkspace() {
   const [interactionModal, setInteractionModal] = useState<InteractionModalState>({ open: false, newcomer: null });
   const [interactionType, setInteractionType] = useState<NewcomerInteraction["interaction_type"]>("Note");
   const [interactionNote, setInteractionNote] = useState("");
+  const [interactionStatusChoice, setInteractionStatusChoice] = useState<Newcomer["status"] | "">("");
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const listRequestRef = useRef(0);
   const skipNextListCacheRef = useRef(false);
@@ -223,6 +234,10 @@ export default function NewcomersWorkspace() {
   const cityOptions = useMemo(
     () => CITY_OPTIONS_BY_PROVINCE[wizardForm.temporary_address_province] ?? [],
     [wizardForm.temporary_address_province]
+  );
+  const currentCityOptions = useMemo(
+    () => CITY_OPTIONS_BY_PROVINCE[wizardForm.current_address_province] ?? [],
+    [wizardForm.current_address_province]
   );
   const phoneSnapSuggestion = useMemo(() => {
     const value = wizardForm.contact_phone.trim();
@@ -530,12 +545,19 @@ export default function NewcomersWorkspace() {
 
     if (steps.includes(2)) {
       const postalCodeInput = wizardForm.temporary_address_postal_code.trim();
+      const currentPostalCodeInput = wizardForm.current_address_postal_code.trim();
       const postalCodeValidationMessage = postalCodeInput
         ? getCanadianPostalCodeValidationMessage(postalCodeInput)
+        : null;
+      const currentPostalCodeValidationMessage = currentPostalCodeInput
+        ? getCanadianPostalCodeValidationMessage(currentPostalCodeInput)
         : null;
 
       if (postalCodeValidationMessage) {
         addFieldError(2, "temporary_address_postal_code", postalCodeValidationMessage);
+      }
+      if (currentPostalCodeValidationMessage) {
+        addFieldError(2, "current_address_postal_code", currentPostalCodeValidationMessage);
       }
     }
 
@@ -590,6 +612,7 @@ export default function NewcomersWorkspace() {
       ? getCanonicalCanadianPhone(wizardForm.contact_whatsapp)
       : null;
     const formattedPostalCode = formatCanadianPostalCode(wizardForm.temporary_address_postal_code);
+    const formattedCurrentPostalCode = formatCanadianPostalCode(wizardForm.current_address_postal_code);
 
     setWizardSubmitting(true);
     setWizardError(null);
@@ -611,6 +634,10 @@ export default function NewcomersWorkspace() {
         temporary_address_city: wizardForm.temporary_address_city || undefined,
         temporary_address_province: wizardForm.temporary_address_province || undefined,
         temporary_address_postal_code: formattedPostalCode || undefined,
+        current_address_street: wizardForm.current_address_street || undefined,
+        current_address_city: wizardForm.current_address_city || undefined,
+        current_address_province: wizardForm.current_address_province || undefined,
+        current_address_postal_code: formattedCurrentPostalCode || undefined,
         sponsored_by_member_id: wizardForm.sponsored_by_member_id ? Number(wizardForm.sponsored_by_member_id) : undefined,
         past_profession: wizardForm.past_profession.trim() || undefined,
         notes: wizardForm.notes || undefined,
@@ -695,6 +722,7 @@ export default function NewcomersWorkspace() {
   const openInteractionModal = (newcomer: Newcomer) => {
     setInteractionType("Note");
     setInteractionNote("");
+    setInteractionStatusChoice("");
     setInteractionModal({ open: true, newcomer });
   };
 
@@ -706,6 +734,12 @@ export default function NewcomersWorkspace() {
         interaction_type: interactionType,
         note: interactionNote.trim(),
       });
+      if (interactionStatusChoice && interactionStatusChoice !== interactionModal.newcomer.status) {
+        await transitionNewcomerStatus(interactionModal.newcomer.id, {
+          status: interactionStatusChoice,
+          reason: interactionNote.trim(),
+        });
+      }
       toast.push("Interaction logged.");
       setInteractionModal({ open: false, newcomer: null });
       refreshNewcomerList();
@@ -714,6 +748,24 @@ export default function NewcomersWorkspace() {
       toast.push("Unable to log interaction.");
     } finally {
       setInteractionSubmitting(false);
+    }
+  };
+
+  const handleDeleteNewcomer = async (newcomer: Newcomer) => {
+    const confirmed = window.confirm(`Delete ${newcomer.newcomer_code}?`);
+    if (!confirmed) return;
+    try {
+      await deleteNewcomer(newcomer.id);
+      toast.push("Newcomer deleted.");
+      refreshMetrics();
+      refreshNewcomerList();
+    } catch (error) {
+      console.error(error);
+      if (error instanceof ApiError) {
+        toast.push(error.body || "Unable to delete newcomer.");
+      } else {
+        toast.push("Unable to delete newcomer.");
+      }
     }
   };
 
@@ -860,6 +912,7 @@ export default function NewcomersWorkspace() {
               <tr>
                 <th className="px-4 py-2 text-left">Newcomer ID</th>
                 <th className="px-4 py-2 text-left">Primary contact</th>
+                <th className="px-4 py-2 text-left">Arrival date</th>
                 <th className="px-4 py-2 text-left">Province</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-left">Assigned sponsor</th>
@@ -871,7 +924,7 @@ export default function NewcomersWorkspace() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
                     <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
                     Loading newcomers...
                   </td>
@@ -886,6 +939,7 @@ export default function NewcomersWorkspace() {
                       </p>
                       <p className="text-xs text-mute">Family size: {item.family_size ?? "-"}</p>
                     </td>
+                    <td className="px-4 py-2">{formatDate(item.arrival_date)}</td>
                     <td className="px-4 py-2">{item.county || "-"}</td>
                     <td className="px-4 py-2">
                       <Badge variant="outline" className={STATUS_BADGE_STYLES[item.status]}>
@@ -920,13 +974,18 @@ export default function NewcomersWorkspace() {
                             Change status
                           </Button>
                         )}
+                        {isAdmin && (
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteNewcomer(item)}>
+                            Delete
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-mute">
+                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-mute">
                     No newcomers found.
                   </td>
                 </tr>
@@ -1186,8 +1245,11 @@ export default function NewcomersWorkspace() {
                         ))}
                       </Select>
                     </div>
+                  </div>
+                  <div className="text-xs font-semibold uppercase text-mute">Temporary address</div>
+                  <div className="grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Province</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Temporary province</label>
                       <Select
                         value={wizardForm.temporary_address_province}
                         onChange={(event) =>
@@ -1209,14 +1271,14 @@ export default function NewcomersWorkspace() {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Street</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Temporary address</label>
                       <Input
                         value={wizardForm.temporary_address_street}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, temporary_address_street: event.target.value }))}
                       />
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">City</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Temporary city</label>
                       <Select
                         value={wizardForm.temporary_address_city}
                         onChange={(event) => setWizardForm((prev) => ({ ...prev, temporary_address_city: event.target.value }))}
@@ -1233,7 +1295,7 @@ export default function NewcomersWorkspace() {
                       </Select>
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
+                      <label className="text-xs uppercase text-mute block mb-1">Temporary postal code</label>
                       <Input
                         placeholder="A1A 1A1"
                         className={fieldErrorClass("temporary_address_postal_code")}
@@ -1250,6 +1312,71 @@ export default function NewcomersWorkspace() {
                         <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.temporary_address_postal_code}</p>
                       ) : (
                         <p className="mt-1 text-xs text-mute">Optional. Use Canadian format A1A 1A1.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs font-semibold uppercase text-mute">Current address</div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Current province</label>
+                      <Select
+                        value={wizardForm.current_address_province}
+                        onChange={(event) =>
+                          setWizardForm((prev) => ({
+                            ...prev,
+                            current_address_province: event.target.value,
+                            current_address_city: "",
+                          }))
+                        }
+                      >
+                        <option value="">Select province</option>
+                        {PROVINCE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Current city</label>
+                      <Select
+                        value={wizardForm.current_address_city}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, current_address_city: event.target.value }))}
+                        disabled={!wizardForm.current_address_province}
+                      >
+                        <option value="">
+                          {wizardForm.current_address_province ? "Select city" : "Select province first"}
+                        </option>
+                        {currentCityOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Current address</label>
+                      <Input
+                        value={wizardForm.current_address_street}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, current_address_street: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase text-mute block mb-1">Current postal code</label>
+                      <Input
+                        placeholder="A1A 1A1"
+                        className={fieldErrorClass("current_address_postal_code")}
+                        value={wizardForm.current_address_postal_code}
+                        onChange={(event) => {
+                          setWizardForm((prev) => ({
+                            ...prev,
+                            current_address_postal_code: formatCanadianPostalCode(event.target.value),
+                          }));
+                          clearWizardFieldError("current_address_postal_code");
+                        }}
+                      />
+                      {wizardFieldErrors.current_address_postal_code && (
+                        <p className="mt-1 text-xs text-rose-600">{wizardFieldErrors.current_address_postal_code}</p>
                       )}
                     </div>
                   </div>
@@ -1553,6 +1680,17 @@ export default function NewcomersWorkspace() {
                 value={interactionNote}
                 onChange={(event) => setInteractionNote(event.target.value)}
               />
+              <Select
+                value={interactionStatusChoice}
+                onChange={(event) => setInteractionStatusChoice(event.target.value as Newcomer["status"] | "")}
+              >
+                <option value="">Keep current status</option>
+                {allowedStatuses(interactionModal.newcomer.status).map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </Select>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setInteractionModal({ open: false, newcomer: null })}>
                   Cancel

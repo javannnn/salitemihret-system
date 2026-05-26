@@ -445,6 +445,11 @@ export const SPONSORSHIP_FREQUENCY_OPTIONS = [
   { value: "Monthly", label: "Monthly" },
   { value: "Quarterly", label: "Quarterly" },
   { value: "Yearly", label: "Yearly" },
+  { value: "OneYear", label: "1 year" },
+  { value: "TwoYears", label: "2 years" },
+  { value: "ThreeYears", label: "3 years" },
+  { value: "FourYears", label: "4 years" },
+  { value: "FiveYears", label: "5 years" },
 ];
 
 export const SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS = [

@@ -263,6 +263,7 @@ def list_users(
     _: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> UserListResponse:
+    joined_member = False
     query = (
         db.query(User)
         .options(
@@ -272,11 +273,24 @@ def list_users(
     )
     if search:
         pattern = f"%{search.lower()}%"
+        query = query.outerjoin(User.member_link).outerjoin(Member)
+        joined_member = True
+        member_full_name = func.lower(
+            func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")
+        )
+        member_reverse_name = func.lower(
+            func.coalesce(Member.last_name, "") + " " + func.coalesce(Member.first_name, "")
+        )
         query = query.filter(
             or_(
                 func.lower(User.email).like(pattern),
                 func.lower(User.username).like(pattern),
                 func.lower(func.coalesce(User.full_name, "")).like(pattern),
+                func.lower(func.coalesce(Member.first_name, "")).like(pattern),
+                func.lower(func.coalesce(Member.last_name, "")).like(pattern),
+                member_full_name.like(pattern),
+                member_reverse_name.like(pattern),
+                func.lower(func.coalesce(Member.email, "")).like(pattern),
             )
         )
     if role:
@@ -291,8 +305,11 @@ def list_users(
         query = query.filter(suspended_user_sql_clause())
     elif lifecycle_status == "deleted":
         query = query.filter(deleted_user_sql_clause())
+    else:
+        query = query.filter(User.deleted_at.is_(None))
     if linked is not None:
-        query = query.outerjoin(User.member_link)
+        if not joined_member:
+            query = query.outerjoin(User.member_link)
         if linked:
             query = query.filter(UserMemberLink.member_id.isnot(None))
         else:
@@ -305,7 +322,7 @@ def list_users(
         .limit(limit)
         .all()
     )
-    total_users = db.query(func.count(User.id)).scalar() or 0
+    total_users = db.query(func.count(User.id)).filter(User.deleted_at.is_(None)).scalar() or 0
     total_active = db.query(func.count(User.id)).filter(active_user_sql_clause()).scalar() or 0
     total_inactive = db.query(func.count(User.id)).filter(inactive_user_sql_clause()).scalar() or 0
     total_suspended = db.query(func.count(User.id)).filter(suspended_user_sql_clause()).scalar() or 0
@@ -313,6 +330,7 @@ def list_users(
     total_linked = (
         db.query(func.count(User.id))
         .join(User.member_link)
+        .filter(User.deleted_at.is_(None))
         .filter(UserMemberLink.member_id.isnot(None))
         .scalar()
         or 0
@@ -340,6 +358,12 @@ def search_members(
     db: Session = Depends(get_db),
 ) -> list[UserMemberSummary]:
     pattern = f"%{query.lower()}%"
+    full_name = func.lower(
+        func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")
+    )
+    reverse_name = func.lower(
+        func.coalesce(Member.last_name, "") + " " + func.coalesce(Member.first_name, "")
+    )
     members = (
         db.query(Member)
         .options(joinedload(Member.user_link).joinedload(UserMemberLink.user))
@@ -347,6 +371,8 @@ def search_members(
             or_(
                 func.lower(Member.first_name).like(pattern),
                 func.lower(Member.last_name).like(pattern),
+                full_name.like(pattern),
+                reverse_name.like(pattern),
                 func.lower(func.coalesce(Member.email, "")).like(pattern),
                 func.lower(func.coalesce(Member.phone, "")).like(pattern),
             )
@@ -394,8 +420,12 @@ def create_user(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     member: Member | None = None
-    if payload.member_id is not None:
-        member = _ensure_member_available(db, payload.member_id)
+    if payload.member_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select a member before creating an admin user.",
+        )
+    member = _ensure_member_available(db, payload.member_id)
 
     try:
         super_requested = SUPER_ADMIN_ROLE_NAME in payload.roles

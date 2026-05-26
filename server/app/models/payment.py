@@ -36,6 +36,9 @@ class Payment(Base):
     service_type_id = Column(Integer, ForeignKey("payment_service_types.id", ondelete="RESTRICT"), nullable=False)
     member_id = Column(Integer, ForeignKey("members.id", ondelete="SET NULL"), nullable=True, index=True)
     household_id = Column(Integer, ForeignKey("households.id", ondelete="SET NULL"), nullable=True, index=True)
+    donor_first_name = Column(String(120), nullable=True)
+    donor_last_name = Column(String(120), nullable=True)
+    donor_email = Column(String(255), nullable=True)
     recorded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     posted_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     due_date = Column(Date, nullable=True)
@@ -46,7 +49,7 @@ class Payment(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     service_type = relationship("PaymentServiceType", back_populates="payments")
-    member = relationship("Member")
+    member = relationship("Member", back_populates="payments")
     household = relationship("Household")
     recorded_by = relationship("User")
     correction_of = relationship("Payment", remote_side=[id], backref="corrections")

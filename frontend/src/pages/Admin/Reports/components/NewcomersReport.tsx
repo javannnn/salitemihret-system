@@ -15,10 +15,19 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { Badge, Card } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import {
+    getNewcomer,
     getNewcomerReport,
+    getNewcomerTimeline,
+    listNewcomerAddressHistory,
+    listNewcomerInteractions,
+    listNewcomers,
+    Newcomer,
+    NewcomerAddressHistoryListResponse,
+    NewcomerInteractionListResponse,
     NewcomerReportCaseItem,
     NewcomerReportOwnerBreakdownItem,
     NewcomerReportResponse,
+    NewcomerTimelineResponse,
     ReportBreakdownItem,
 } from "@/lib/api";
 import { StatCard } from "./StatCard";
@@ -39,6 +48,15 @@ export function NewcomersReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [report, setReport] = useState<NewcomerReportResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    const [individualSearch, setIndividualSearch] = useState("");
+    const [individualMatches, setIndividualMatches] = useState<Newcomer[]>([]);
+    const [individualLoading, setIndividualLoading] = useState(false);
+    const [individualReport, setIndividualReport] = useState<{
+        detail: Newcomer;
+        timeline: NewcomerTimelineResponse;
+        interactions: NewcomerInteractionListResponse;
+        addresses: NewcomerAddressHistoryListResponse;
+    } | null>(null);
     const toast = useToast();
 
     const normalizedRange = useMemo(() => {
@@ -66,7 +84,7 @@ export function NewcomersReport() {
                 if (!cancelled) {
                     setReport(null);
                 }
-                toast.push("Failed to load newcomer report", { type: "error" });
+                    toast.push("Failed to load newcomer report", "error");
             } finally {
                 if (!cancelled) {
                     setLoading(false);
@@ -79,6 +97,62 @@ export function NewcomersReport() {
             cancelled = true;
         };
     }, [normalizedRange.end, normalizedRange.start, toast]);
+
+    useEffect(() => {
+        const term = individualSearch.trim();
+        if (term.length < 2) {
+            setIndividualMatches([]);
+            return;
+        }
+        let cancelled = false;
+        const timeout = window.setTimeout(async () => {
+            try {
+                const data = await listNewcomers({ q: term, page: 1, page_size: 6 });
+                if (!cancelled) {
+                    setIndividualMatches(data.items);
+                }
+            } catch (error) {
+                console.error("Failed to search newcomer report records:", error);
+                if (!cancelled) {
+                    setIndividualMatches([]);
+                }
+            }
+        }, 250);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timeout);
+        };
+    }, [individualSearch]);
+
+    const loadIndividualReport = async (newcomer: Newcomer) => {
+        setIndividualLoading(true);
+        try {
+            const [detail, timeline, interactions, addresses] = await Promise.all([
+                getNewcomer(newcomer.id),
+                getNewcomerTimeline(newcomer.id),
+                listNewcomerInteractions(newcomer.id),
+                listNewcomerAddressHistory(newcomer.id),
+            ]);
+            setIndividualReport({ detail, timeline, interactions, addresses });
+            setIndividualSearch(`${detail.first_name} ${detail.last_name}`.trim());
+            setIndividualMatches([]);
+        } catch (error) {
+            console.error("Failed to load individual newcomer report:", error);
+            toast.push("Failed to load individual newcomer report", "error");
+        } finally {
+            setIndividualLoading(false);
+        }
+    };
+
+    const downloadIndividualReport = () => {
+        if (!individualReport) return;
+        const blob = new Blob([JSON.stringify(individualReport, null, 2)], { type: "application/json" });
+        const anchor = document.createElement("a");
+        anchor.href = URL.createObjectURL(blob);
+        anchor.download = `individual-newcomer-report-${individualReport.detail.newcomer_code}.json`;
+        anchor.click();
+        URL.revokeObjectURL(anchor.href);
+    };
 
     if (loading) {
         return <div className="p-8 text-center text-muted">Loading newcomer reporting...</div>;
@@ -109,6 +183,74 @@ export function NewcomersReport() {
                 </div>
                 <DateRangeControls value={dateRange} onChange={setDateRange} />
             </div>
+
+            <Card className="p-6">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-lg font-semibold text-ink">Individual Newcomer Report</h3>
+                        <p className="text-sm text-muted">Profile, timeline, interactions, addresses, and sponsorship linkage.</p>
+                    </div>
+                    <button
+                        className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
+                        disabled={!individualReport}
+                        onClick={downloadIndividualReport}
+                    >
+                        Download JSON
+                    </button>
+                </div>
+                <div className="relative max-w-xl">
+                    <input
+                        className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-ink"
+                        value={individualSearch}
+                        onChange={(event) => {
+                            setIndividualSearch(event.target.value);
+                            setIndividualReport(null);
+                        }}
+                        placeholder="Search newcomer by name, ID, or service"
+                    />
+                    {individualMatches.length > 0 && (
+                        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+                            {individualMatches.map((item) => (
+                                <button
+                                    key={item.id}
+                                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent/10"
+                                    onClick={() => loadIndividualReport(item)}
+                                >
+                                    <span className="block font-medium text-ink">{item.first_name} {item.last_name}</span>
+                                    <span className="text-xs text-muted">{item.newcomer_code} - {item.status}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {individualLoading ? (
+                    <div className="mt-4 text-sm text-muted">Loading individual report...</div>
+                ) : individualReport ? (
+                    <div className="mt-5 grid gap-4 md:grid-cols-3">
+                        <MetricPanel title="Profile" rows={[
+                            ["Name", `${individualReport.detail.first_name} ${individualReport.detail.last_name}`],
+                            ["Number of family", String(individualReport.detail.family_size ?? "-")],
+                            ["Service", individualReport.detail.service_type || "-"],
+                            ["Arrival", formatDate(individualReport.detail.arrival_date)],
+                            ["Status", individualReport.detail.status],
+                            ["Sponsor", individualReport.detail.sponsored_by_member_name || "-"],
+                            ["Origin country", individualReport.detail.country || "-"],
+                        ]} />
+                        <MetricPanel title="Activity" rows={[
+                            ["Timeline events", String(individualReport.timeline.total)],
+                            ["Interactions", String(individualReport.interactions.total)],
+                            ["Last interaction", formatDate(individualReport.detail.last_interaction_at)],
+                            ["Follow-up due", formatDate(individualReport.detail.followup_due_date)],
+                        ]} />
+                        <MetricPanel title="Address" rows={[
+                            ["Temporary", [individualReport.detail.temporary_address_city, individualReport.detail.temporary_address_province].filter(Boolean).join(", ") || "-"],
+                            ["Current", [individualReport.detail.current_address_city, individualReport.detail.current_address_province].filter(Boolean).join(", ") || "-"],
+                            ["History rows", String(individualReport.addresses.total)],
+                            ["Country", individualReport.detail.country || "-"],
+                        ]} />
+                    </div>
+                ) : null}
+            </Card>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                 <StatCard
@@ -366,6 +508,22 @@ export function NewcomersReport() {
                         </div>
                     )}
                 </Card>
+            </div>
+        </div>
+    );
+}
+
+function MetricPanel({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+    return (
+        <div className="rounded-xl border border-border bg-bg/70 p-4">
+            <div className="text-sm font-semibold text-ink">{title}</div>
+            <div className="mt-3 space-y-2 text-sm">
+                {rows.map(([label, value]) => (
+                    <div key={label} className="flex justify-between gap-3">
+                        <span className="text-muted">{label}</span>
+                        <span className="text-right font-medium text-ink">{value}</span>
+                    </div>
+                ))}
             </div>
         </div>
     );
