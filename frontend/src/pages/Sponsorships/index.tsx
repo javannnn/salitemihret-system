@@ -1,7 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Download, Filter, Loader2, PlusCircle, RefreshCcw, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CreditCard,
+  Download,
+  Filter,
+  HeartHandshake,
+  Loader2,
+  PlusCircle,
+  RefreshCcw,
+  Search,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 
 import { PhoneInput } from "@/components/PhoneInput";
 import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
@@ -20,12 +36,15 @@ import {
   SponsorshipListResponse,
   SponsorshipMetrics,
   SponsorshipPayload,
+  SponsorshipPrescreeningItem,
+  SponsorshipPrescreeningResponse,
   SponsorshipSponsorContext,
   StaffSummary,
   createSponsorshipBudgetRound,
   createNewcomer,
   createSponsorship,
   deleteSponsorship,
+  exportSponsorshipPrescreeningExcel,
   exportSponsorshipsCsv,
   exportSponsorshipsExcel,
   deleteSponsorshipBudgetRound,
@@ -35,6 +54,7 @@ import {
   getSponsorshipMetrics,
   listSponsorshipBudgetRounds,
   listNewcomers,
+  listSponsorshipPrescreening,
   listSponsorships,
   listStaff,
   searchMembers,
@@ -145,6 +165,18 @@ const STATUS_STYLES: Record<Sponsorship["status"], string> = {
   Closed: "bg-neutral-50 text-neutral-600 border-neutral-200",
 };
 
+const PRESCREEN_ELIGIBILITY_STYLES: Record<SponsorshipPrescreeningItem["eligibility"], string> = {
+  Eligible: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  Review: "border-amber-200 bg-amber-50 text-amber-700",
+  NotEligible: "border-rose-200 bg-rose-50 text-rose-700",
+};
+
+const PRESCREEN_CRITERION_STYLES = {
+  Pass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  Review: "border-amber-200 bg-amber-50 text-amber-700",
+  Fail: "border-rose-200 bg-rose-50 text-rose-700",
+};
+
 const BUDGET_CONSUMING_STATUSES = new Set<Sponsorship["status"]>([
   "Submitted",
   "Approved",
@@ -248,6 +280,24 @@ function formatDate(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+}
+
+function eligibilityLabel(value: SponsorshipPrescreeningItem["eligibility"]) {
+  return value === "NotEligible" ? "Not eligible" : value;
+}
+
+function tenureLabel(months?: number | null) {
+  if (months === null || months === undefined) return "Start date missing";
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (!years) return `${remainingMonths} mo`;
+  return remainingMonths ? `${years} yr ${remainingMonths} mo` : `${years} yr`;
+}
+
+function PrescreenCriterionIcon({ status }: { status: "Pass" | "Review" | "Fail" }) {
+  if (status === "Pass") return <CheckCircle2 className="h-3.5 w-3.5" />;
+  if (status === "Fail") return <XCircle className="h-3.5 w-3.5" />;
+  return <AlertTriangle className="h-3.5 w-3.5" />;
 }
 
 type PaymentContinuityMonth = {
@@ -615,13 +665,24 @@ export default function SponsorshipWorkspace() {
   );
 
   const viewParam = searchParams.get("view");
-  const [activeView, setActiveView] = useState<"cases" | "budget">(
-    viewParam === "budget" ? "budget" : "cases",
+  const [activeView, setActiveView] = useState<"cases" | "prescreen" | "budget">(
+    viewParam === "budget" ? "budget" : viewParam === "prescreen" ? "prescreen" : "cases",
   );
 
   const [metrics, setMetrics] = useState<SponsorshipMetrics | null>(null);
   const [sponsorships, setSponsorships] = useState<SponsorshipListResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [prescreening, setPrescreening] = useState<SponsorshipPrescreeningResponse | null>(null);
+  const [prescreenLoading, setPrescreenLoading] = useState(false);
+  const [prescreenRefreshTick, setPrescreenRefreshTick] = useState(0);
+  const [expandedPrescreenMemberId, setExpandedPrescreenMemberId] = useState<number | null>(null);
+  const [selectedPrescreenMemberIds, setSelectedPrescreenMemberIds] = useState<Set<number>>(new Set());
+  const [prescreenFilters, setPrescreenFilters] = useState({
+    q: "",
+    eligibility: "",
+    volunteer: "",
+    page: 1,
+  });
   const [filterOpen, setFilterOpen] = useState(false);
   const [apiCaps, setApiCaps] = useState<ApiCapabilities | null>(null);
   const [filters, setFilters] = useState({
@@ -703,6 +764,7 @@ export default function SponsorshipWorkspace() {
   const [statusSubmitting, setStatusSubmitting] = useState(false);
   const listRequestRef = useRef(0);
   const debouncedQuery = useDebouncedValue(filters.q, 350);
+  const debouncedPrescreenQuery = useDebouncedValue(prescreenFilters.q, 350);
   const debouncedSponsorSearch = useDebouncedValue(sponsorSearch.trim(), 300);
   const debouncedMemberSearch = useDebouncedValue(memberSearch.trim(), 300);
   const debouncedBeneficiarySearch = useDebouncedValue(beneficiarySearch.trim(), 300);
@@ -729,7 +791,7 @@ export default function SponsorshipWorkspace() {
   );
 
   useEffect(() => {
-    const nextView = viewParam === "budget" ? "budget" : "cases";
+    const nextView = viewParam === "budget" ? "budget" : viewParam === "prescreen" ? "prescreen" : "cases";
     if (nextView !== activeView) {
       setActiveView(nextView);
     }
@@ -779,6 +841,18 @@ export default function SponsorshipWorkspace() {
   const budgetCacheKey = useMemo(
     () => `sponsorships:budget:${JSON.stringify(budgetListPayload)}`,
     [budgetListPayload]
+  );
+
+  const prescreenPayload = useMemo(
+    () => ({
+      page: prescreenFilters.page,
+      page_size: PAGE_SIZE,
+      q: debouncedPrescreenQuery || undefined,
+      eligibility: (prescreenFilters.eligibility || undefined) as SponsorshipPrescreeningItem["eligibility"] | undefined,
+      volunteer:
+        prescreenFilters.volunteer === "" ? undefined : prescreenFilters.volunteer === "true",
+    }),
+    [debouncedPrescreenQuery, prescreenFilters.eligibility, prescreenFilters.page, prescreenFilters.volunteer],
   );
 
   useEffect(() => {
@@ -839,6 +913,30 @@ export default function SponsorshipWorkspace() {
       active = false;
     };
   }, [budgetListPayload, budgetCacheKey, activeView, canView, toast, budgetRefreshTick]);
+
+  useEffect(() => {
+    if (!canView || activeView !== "prescreen") return;
+    let active = true;
+    setPrescreenLoading(true);
+    listSponsorshipPrescreening(prescreenPayload)
+      .then((response) => {
+        if (active) setPrescreening(response);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) toast.push("Unable to load sponsorship pre-screening.");
+      })
+      .finally(() => {
+        if (active) setPrescreenLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeView, canView, prescreenPayload, prescreenRefreshTick, toast]);
+
+  useEffect(() => {
+    setSelectedPrescreenMemberIds(new Set());
+  }, [debouncedPrescreenQuery, prescreenFilters.eligibility, prescreenFilters.volunteer]);
 
   useEffect(() => {
     setBudgetEdits({});
@@ -1229,11 +1327,20 @@ export default function SponsorshipWorkspace() {
   }
 
   const totalPages = sponsorships ? Math.ceil(sponsorships.total / PAGE_SIZE) : 1;
+  const prescreenTotalPages = prescreening ? Math.max(1, Math.ceil(prescreening.total / PAGE_SIZE)) : 1;
   const visibleCaseItems = sponsorships?.items ?? [];
+  const visiblePrescreenItems = prescreening?.items ?? [];
   const selectedCaseArray = Array.from(selectedCaseIds).sort((a, b) => a - b);
+  const selectedPrescreenArray = Array.from(selectedPrescreenMemberIds).sort((a, b) => a - b);
   const selectedVisibleCount = visibleCaseItems.filter((item) => selectedCaseIds.has(item.id)).length;
   const allVisibleSelected = visibleCaseItems.length > 0 && selectedVisibleCount === visibleCaseItems.length;
   const anyCaseSelected = selectedCaseArray.length > 0;
+  const selectedVisiblePrescreenCount = visiblePrescreenItems.filter((item) =>
+    selectedPrescreenMemberIds.has(item.member_id),
+  ).length;
+  const allVisiblePrescreenSelected =
+    visiblePrescreenItems.length > 0 && selectedVisiblePrescreenCount === visiblePrescreenItems.length;
+  const anyPrescreenSelected = selectedPrescreenArray.length > 0;
   const activeFilters = [
     filters.status && `Status: ${filters.status}`,
     filters.beneficiary_type && `Immigrant: ${filters.beneficiary_type}`,
@@ -1249,12 +1356,14 @@ export default function SponsorshipWorkspace() {
     if (activeView === "budget") {
       setBudgetRefreshTick((prev) => prev + 1);
       setRoundRefreshTick((prev) => prev + 1);
+    } else if (activeView === "prescreen") {
+      setPrescreenRefreshTick((prev) => prev + 1);
     }
   };
 
-  const handleViewChange = (view: "cases" | "budget") => {
+  const handleViewChange = (view: "cases" | "prescreen" | "budget") => {
     setActiveView(view);
-    updateSearchParams({ view: view === "budget" ? "budget" : null });
+    updateSearchParams({ view: view === "cases" ? null : view });
   };
 
   useEffect(() => {
@@ -1284,6 +1393,45 @@ export default function SponsorshipWorkspace() {
     setNewcomerFieldErrors({});
   };
 
+  const handleStartFromPrescreen = async (item: SponsorshipPrescreeningItem) => {
+    handleWizardOpen();
+    setWizardForm((prev) => ({
+      ...prev,
+      sponsor_member_id: item.member_id,
+      sponsor_name: item.member_name,
+    }));
+    setSponsorSearch(item.member_name);
+    try {
+      const context = await getSponsorContext(item.member_id);
+      setSponsorContext(context);
+    } catch (error) {
+      console.error(error);
+      setSponsorContext({
+        member_id: item.member_id,
+        member_name: item.member_name,
+        member_status: item.member_status,
+        member_phone: item.member_phone,
+        member_email: item.member_email,
+        marital_status: null,
+        spouse_name: null,
+        spouse_phone: null,
+        spouse_email: null,
+        last_sponsorship_id: item.last_sponsorship_id,
+        last_sponsorship_date: item.last_sponsorship_date,
+        last_sponsorship_name: item.last_beneficiary_name,
+        last_sponsorship_status: item.last_sponsorship_status,
+        history_count_last_12_months: 0,
+        volunteer_services: item.volunteer_service_types,
+        father_of_repentance_id: null,
+        father_of_repentance_name: null,
+        budget_usage: null,
+        payment_history_start: null,
+        payment_history_end: null,
+        payment_history: [],
+      });
+    }
+  };
+
   const handleWizardClose = () => {
     setWizardOpen(false);
     setDraftEditingId(null);
@@ -1309,6 +1457,30 @@ export default function SponsorshipWorkspace() {
         visibleCaseItems.forEach((item) => next.delete(item.id));
       } else {
         visibleCaseItems.forEach((item) => next.add(item.id));
+      }
+      return next;
+    });
+  };
+
+  const handleTogglePrescreenSelection = (memberId: number) => {
+    setSelectedPrescreenMemberIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisiblePrescreen = () => {
+    setSelectedPrescreenMemberIds((prev) => {
+      const next = new Set(prev);
+      if (allVisiblePrescreenSelected) {
+        visiblePrescreenItems.forEach((item) => next.delete(item.member_id));
+      } else {
+        visiblePrescreenItems.forEach((item) => next.add(item.member_id));
       }
       return next;
     });
@@ -1356,6 +1528,32 @@ export default function SponsorshipWorkspace() {
     } catch (error) {
       console.error(error);
       toast.push(`Unable to export sponsorship cases as ${format.toUpperCase()}.`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handlePrescreenExport = async () => {
+    if (exportingFormat) return;
+    setExportingFormat("xlsx");
+    const scope = anyPrescreenSelected ? "selected" : "filtered";
+    const stamp = new Date().toISOString().slice(0, 10);
+    try {
+      const blob = await exportSponsorshipPrescreeningExcel({
+        q: debouncedPrescreenQuery || undefined,
+        eligibility: (prescreenFilters.eligibility || undefined) as SponsorshipPrescreeningItem["eligibility"] | undefined,
+        volunteer: prescreenFilters.volunteer === "" ? undefined : prescreenFilters.volunteer === "true",
+        ids: anyPrescreenSelected ? selectedPrescreenArray.join(",") : undefined,
+      });
+      triggerBlobDownload(blob, `sponsorship-pre-screening-${scope}-${stamp}.xlsx`);
+      toast.push(
+        anyPrescreenSelected
+          ? `${selectedPrescreenArray.length} selected member${selectedPrescreenArray.length === 1 ? "" : "s"} exported (Excel).`
+          : "Filtered pre-screening roster exported (Excel).",
+      );
+    } catch (error) {
+      console.error(error);
+      toast.push("Unable to export sponsorship pre-screening as Excel.");
     } finally {
       setExportingFormat(null);
     }
@@ -2080,6 +2278,12 @@ export default function SponsorshipWorkspace() {
               Cases
             </Button>
             <Button
+              variant={activeView === "prescreen" ? "solid" : "ghost"}
+              onClick={() => handleViewChange("prescreen")}
+            >
+              Pre-screening
+            </Button>
+            <Button
               variant={activeView === "budget" ? "solid" : "ghost"}
               onClick={() => handleViewChange("budget")}
             >
@@ -2124,6 +2328,20 @@ export default function SponsorshipWorkspace() {
               </Button>
             </>
           )}
+          {activeView === "prescreen" && (
+            <Button
+              variant="ghost"
+              onClick={handlePrescreenExport}
+              disabled={Boolean(exportingFormat) || prescreenLoading}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {exportingFormat === "xlsx"
+                ? "Preparing Excel…"
+                : anyPrescreenSelected
+                  ? `Export selected Excel (${selectedPrescreenArray.length})`
+                  : "Export filtered Excel"}
+            </Button>
+          )}
           <Button variant="ghost" onClick={handleRefresh}>
             <RefreshCcw className="h-4 w-4 mr-2" /> Refresh
           </Button>
@@ -2135,6 +2353,7 @@ export default function SponsorshipWorkspace() {
         </div>
       </div>
 
+      {activeView !== "prescreen" && (
       <div data-tour="sponsorship-metrics" className="grid gap-3 md:grid-cols-4 xl:grid-cols-5">
         <Card className="p-4">
           <p className="text-xs uppercase text-mute">Active cases</p>
@@ -2160,6 +2379,7 @@ export default function SponsorshipWorkspace() {
           <p className="text-2xl font-semibold">{metrics?.suspended_cases ?? "—"}</p>
         </Card>
       </div>
+      )}
 
       {activeView === "cases" && (
         <>
@@ -2470,6 +2690,362 @@ export default function SponsorshipWorkspace() {
         </div>
           </Card>
         </>
+      )}
+
+      {activeView === "prescreen" && (
+        <div className="space-y-4">
+          <Card className="overflow-hidden border-slate-200">
+            <div className="border-b border-border bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-5 text-white">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-emerald-300">
+                    <ShieldCheck className="h-4 w-4" />
+                    Sponsor readiness
+                  </div>
+                  <h2 className="text-xl font-semibold">Member sponsorship pre-screening</h2>
+                  <p className="mt-1 text-sm text-slate-300">
+                    A live qualification view using membership tenure, payment health, sponsorship history, and volunteer evidence.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-xs text-slate-300">
+                  Required: active member, {prescreening?.tenure_requirement_months ?? 12}+ months, current payment,
+                  and configured consecutive-payment streak.
+                </div>
+              </div>
+            </div>
+            <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
+              {[
+                { label: "Screened", value: prescreening?.summary.total, tone: "text-slate-900" },
+                { label: "Eligible", value: prescreening?.summary.eligible, tone: "text-emerald-700" },
+                { label: "Needs review", value: prescreening?.summary.review, tone: "text-amber-700" },
+                { label: "Not eligible", value: prescreening?.summary.not_eligible, tone: "text-rose-700" },
+                { label: "Volunteers", value: prescreening?.summary.volunteers, tone: "text-sky-700" },
+                { label: "Payments current", value: prescreening?.summary.payments_current, tone: "text-violet-700" },
+              ].map((metric) => (
+                <div key={metric.label} className="px-4 py-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-mute">{metric.label}</p>
+                  <p className={`mt-1 text-2xl font-semibold ${metric.tone}`}>{metric.value ?? "—"}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_220px_190px_auto] lg:items-center">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-mute" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search member, email, phone, or username"
+                  value={prescreenFilters.q}
+                  onChange={(event) =>
+                    setPrescreenFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))
+                  }
+                />
+              </div>
+              <Select
+                value={prescreenFilters.eligibility}
+                onChange={(event) =>
+                  setPrescreenFilters((prev) => ({ ...prev, eligibility: event.target.value, page: 1 }))
+                }
+              >
+                <option value="">All eligibility</option>
+                <option value="Eligible">Eligible</option>
+                <option value="Review">Needs review</option>
+                <option value="NotEligible">Not eligible</option>
+              </Select>
+              <Select
+                value={prescreenFilters.volunteer}
+                onChange={(event) =>
+                  setPrescreenFilters((prev) => ({ ...prev, volunteer: event.target.value, page: 1 }))
+                }
+              >
+                <option value="">All volunteer evidence</option>
+                <option value="true">Volunteer evidence found</option>
+                <option value="false">No volunteer evidence</option>
+              </Select>
+              <Button
+                variant="ghost"
+                onClick={() => setPrescreenFilters({ q: "", eligibility: "", volunteer: "", page: 1 })}
+              >
+                Clear filters
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">Qualification roster</p>
+                <p className="text-xs text-mute">Expand a member to see every signal and the evidence behind it.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {anyPrescreenSelected && <Badge>{selectedPrescreenArray.length} selected</Badge>}
+                <Badge>{prescreening?.total ?? 0} members</Badge>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1420px] table-fixed text-sm">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-mute">
+                  <tr>
+                    <th className="w-[44px] px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={allVisiblePrescreenSelected}
+                        onChange={handleToggleSelectAllVisiblePrescreen}
+                        aria-label="Select all visible pre-screening members"
+                        className="accent-accent"
+                      />
+                    </th>
+                    <th className="w-[230px] px-4 py-3">Member</th>
+                    <th className="w-[190px] px-4 py-3">Decision</th>
+                    <th className="w-[190px] px-4 py-3">Membership</th>
+                    <th className="w-[220px] px-4 py-3">Payment continuity</th>
+                    <th className="w-[220px] px-4 py-3">Sponsorship history</th>
+                    <th className="w-[210px] px-4 py-3">Volunteer evidence</th>
+                    <th className="w-[160px] px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prescreenLoading ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-mute">
+                        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                        Calculating member eligibility...
+                      </td>
+                    </tr>
+                  ) : prescreening?.items.length ? (
+                    prescreening.items.map((item) => {
+                      const expanded = expandedPrescreenMemberId === item.member_id;
+                      const paymentCriterion = item.criteria.find((criterion) => criterion.code === "payment_current");
+                      const tenureCriterion = item.criteria.find((criterion) => criterion.code === "membership_tenure");
+                      return (
+                        <Fragment key={item.member_id}>
+                          <tr
+                            className="border-t border-border/70 align-top transition-colors hover:bg-muted/20"
+                          >
+                            <td className="px-3 py-4">
+                              <input
+                                type="checkbox"
+                                checked={selectedPrescreenMemberIds.has(item.member_id)}
+                                onChange={() => handleTogglePrescreenSelection(item.member_id)}
+                                aria-label={`Select ${item.member_name} for export`}
+                                className="accent-accent"
+                              />
+                            </td>
+                            <td className="px-4 py-4">
+                              <button
+                                className="flex items-start gap-3 text-left"
+                                onClick={() => setExpandedPrescreenMemberId(expanded ? null : item.member_id)}
+                              >
+                                <span className="mt-0.5 rounded-lg border border-border bg-muted/40 p-1.5">
+                                  <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                                </span>
+                                <span>
+                                  <span className="block font-semibold text-ink">{item.member_name}</span>
+                                  <span className="block text-xs text-mute">@{item.username}</span>
+                                  <span className="mt-1 block text-xs text-mute">{item.member_phone || item.member_email || "No contact"}</span>
+                                </span>
+                              </button>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div>
+                                <Badge className={PRESCREEN_ELIGIBILITY_STYLES[item.eligibility]}>
+                                  {eligibilityLabel(item.eligibility)}
+                                </Badge>
+                              </div>
+                              <div className="mt-3 flex items-center gap-2">
+                                <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+                                  <div
+                                    className={`h-full rounded-full ${
+                                      item.eligibility === "Eligible"
+                                        ? "bg-emerald-500"
+                                        : item.eligibility === "Review"
+                                          ? "bg-amber-500"
+                                          : "bg-rose-500"
+                                    }`}
+                                    style={{ width: `${item.score}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs font-semibold">{item.score}/100</span>
+                              </div>
+                              {item.blocking_reasons.length > 0 && (
+                                <p className="mt-2 max-w-[210px] text-xs text-rose-700">{item.blocking_reasons[0]}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <CalendarDays className="h-4 w-4 text-sky-600" />
+                                <span className="font-medium">{tenureLabel(item.tenure_months)}</span>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-mute">
+                                <span className="block text-[10px] font-medium uppercase tracking-wide">Started</span>
+                                <span className="block text-ink/80">{formatDate(item.join_date)}</span>
+                              </p>
+                              {tenureCriterion && (
+                                <div className="mt-3">
+                                  <Badge className={PRESCREEN_CRITERION_STYLES[tenureCriterion.status]}>
+                                    {tenureCriterion.status}
+                                  </Badge>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <CreditCard className="h-4 w-4 text-violet-600" />
+                                <span className="font-medium">
+                                  {item.consecutive_payment_months}/{item.required_consecutive_payment_months} months
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-mute">
+                                <span className="block text-[10px] font-medium uppercase tracking-wide">Last paid</span>
+                                <span className="block text-ink/80">{formatDate(item.last_payment_at)}</span>
+                              </p>
+                              {paymentCriterion && (
+                                <div className="mt-3">
+                                  <Badge className={PRESCREEN_CRITERION_STYLES[paymentCriterion.status]}>
+                                    {paymentCriterion.status === "Pass"
+                                      ? "Current"
+                                      : item.payment_overdue_days
+                                        ? `${item.payment_overdue_days} days overdue`
+                                        : paymentCriterion.status}
+                                  </Badge>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <p className="font-medium">{item.sponsorship_count} total cases</p>
+                              <p className="mt-1 text-xs text-mute">
+                                {item.active_sponsorship_count} active · {item.completed_sponsorship_count} completed
+                              </p>
+                              <p className="mt-2 max-w-[190px] text-xs text-mute">
+                                Last: {item.last_beneficiary_name || "No sponsorship history"} {item.last_sponsorship_date ? `· ${formatDate(item.last_sponsorship_date)}` : ""}
+                              </p>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <HeartHandshake className={`h-4 w-4 ${item.is_volunteer ? "text-emerald-600" : "text-slate-400"}`} />
+                                <span className="font-medium">{item.is_volunteer ? `${item.volunteer_service_count} records` : "Not found"}</span>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-mute">
+                                <span className="block text-[10px] font-medium uppercase tracking-wide">Last service</span>
+                                <span className="block text-ink/80">{formatDate(item.last_volunteer_service_date)}</span>
+                              </p>
+                              {item.volunteer_match_method && (
+                                <div className="mt-3">
+                                  <Badge className="border-sky-200 bg-sky-50 text-sky-700">
+                                    Matched by {item.volunteer_match_method}
+                                  </Badge>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col items-end gap-2">
+                                {canManage && item.eligibility === "Eligible" && (
+                                  <Button className="px-3 py-1.5 text-xs" onClick={() => handleStartFromPrescreen(item)}>
+                                    Start sponsorship
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  className="px-3 py-1.5 text-xs"
+                                  onClick={() => navigate(`/members/${item.member_id}/edit`)}
+                                >
+                                  View member
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                          {expanded && (
+                            <tr key={`${item.member_id}-details`} className="border-t border-border bg-slate-50/70">
+                              <td colSpan={8} className="px-5 py-5">
+                                <motion.div
+                                  initial={{ opacity: 0, y: -4 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="grid gap-5 lg:grid-cols-[1.3fr_1fr_1fr]"
+                                >
+                                  <div>
+                                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-mute">Eligibility evidence</p>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      {item.criteria.map((criterion) => (
+                                        <div key={criterion.code} className="rounded-xl border border-border bg-white p-3">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="min-w-0 font-medium">{criterion.label}</p>
+                                            <Badge className={`shrink-0 ${PRESCREEN_CRITERION_STYLES[criterion.status]}`}>
+                                              <span className="flex items-center gap-1">
+                                                <PrescreenCriterionIcon status={criterion.status} />
+                                                {criterion.status}
+                                              </span>
+                                            </Badge>
+                                          </div>
+                                          <p className="mt-2 text-xs leading-relaxed text-mute">{criterion.detail}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-mute">Payment detail</p>
+                                    <div className="space-y-2 rounded-xl border border-border bg-white p-4 text-xs">
+                                      <div className="flex justify-between gap-3"><span className="text-mute">Last payment</span><strong>{formatDate(item.last_payment_at)}</strong></div>
+                                      <div className="flex justify-between gap-3"><span className="text-mute">Next due</span><strong>{formatDate(item.next_payment_due_at)}</strong></div>
+                                      <div className="flex justify-between gap-3"><span className="text-mute">Consecutive months</span><strong>{item.consecutive_payment_months}</strong></div>
+                                      <div className="flex justify-between gap-3"><span className="text-mute">Contribution exception</span><strong>{item.contribution_exception_reason || "None"}</strong></div>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-mute">Volunteer detail</p>
+                                    <div className="space-y-3 rounded-xl border border-border bg-white p-4 text-xs">
+                                      <div>
+                                        <span className="text-mute">Groups</span>
+                                        <p className="mt-1 font-medium">{item.volunteer_groups.join(", ") || "No group evidence"}</p>
+                                      </div>
+                                      <div>
+                                        <span className="text-mute">Service types</span>
+                                        <p className="mt-1 font-medium">{item.volunteer_service_types.join(", ") || "No service evidence"}</p>
+                                      </div>
+                                      <p className="rounded-lg bg-sky-50 p-2 text-sky-800">
+                                        Volunteer evidence is matched conservatively by phone first, then exact full name, and does not determine eligibility by itself.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-mute">
+                        No members match these pre-screening filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-border px-4 py-3">
+              <Button
+                variant="ghost"
+                className="px-3 py-1.5 text-xs"
+                disabled={prescreenFilters.page <= 1}
+                onClick={() => setPrescreenFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+              >
+                Prev
+              </Button>
+              <span className="text-xs text-mute">Page {prescreenFilters.page} of {prescreenTotalPages}</span>
+              <Button
+                variant="ghost"
+                className="px-3 py-1.5 text-xs"
+                disabled={prescreenFilters.page >= prescreenTotalPages}
+                onClick={() => setPrescreenFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
+              >
+                Next
+              </Button>
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeView === "budget" && (

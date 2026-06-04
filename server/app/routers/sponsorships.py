@@ -26,6 +26,8 @@ from app.schemas.sponsorship import (
     SponsorshipNoteOut,
     SponsorshipNotesListResponse,
     SponsorshipOut,
+    SponsorshipPrescreeningItem,
+    SponsorshipPrescreeningResponse,
     SponsorshipSponsorContext,
     SponsorshipStatusTransitionRequest,
     SponsorshipTimelineResponse,
@@ -66,6 +68,49 @@ SPONSORSHIP_EXPORT_HEADERS = [
     "assigned_staff_id",
     "created_at",
     "updated_at",
+]
+SPONSORSHIP_PRESCREENING_EXPORT_HEADERS = [
+    "member_id",
+    "member_name",
+    "username",
+    "member_status",
+    "email",
+    "phone",
+    "eligibility",
+    "score",
+    "blocking_reasons",
+    "membership_start_date",
+    "tenure_months",
+    "active_membership_status",
+    "active_membership_detail",
+    "tenure_status",
+    "tenure_detail",
+    "continuous_payment_status",
+    "continuous_payment_detail",
+    "payment_current_status",
+    "payment_current_detail",
+    "last_payment_at",
+    "next_payment_due_at",
+    "payment_overdue_days",
+    "consecutive_payment_months",
+    "required_consecutive_payment_months",
+    "pays_contribution",
+    "contribution_exception_reason",
+    "sponsorship_count",
+    "active_sponsorship_count",
+    "completed_sponsorship_count",
+    "last_sponsorship_id",
+    "last_sponsorship_date",
+    "last_sponsorship_status",
+    "last_beneficiary_name",
+    "is_volunteer",
+    "volunteer_service_count",
+    "last_volunteer_service_date",
+    "volunteer_groups",
+    "volunteer_service_types",
+    "volunteer_match_method",
+    "volunteer_evidence_status",
+    "volunteer_evidence_detail",
 ]
 _ILLEGAL_XML_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
@@ -152,6 +197,58 @@ def _format_sponsorship_row(record: Sponsorship) -> list[str]:
     ]
 
 
+def _format_prescreening_row(item: SponsorshipPrescreeningItem) -> list[str]:
+    criteria = {criterion.code: criterion for criterion in item.criteria}
+
+    def criterion_value(code: str, field: str) -> str:
+        criterion = criteria.get(code)
+        return str(getattr(criterion, field, "") or "") if criterion else ""
+
+    return [
+        str(item.member_id),
+        item.member_name,
+        item.username,
+        item.member_status,
+        item.member_email or "",
+        item.member_phone or "",
+        item.eligibility,
+        str(item.score),
+        " | ".join(item.blocking_reasons),
+        _format_date(item.join_date),
+        str(item.tenure_months if item.tenure_months is not None else ""),
+        criterion_value("membership_status", "status"),
+        criterion_value("membership_status", "detail"),
+        criterion_value("membership_tenure", "status"),
+        criterion_value("membership_tenure", "detail"),
+        criterion_value("payment_continuity", "status"),
+        criterion_value("payment_continuity", "detail"),
+        criterion_value("payment_current", "status"),
+        criterion_value("payment_current", "detail"),
+        _format_datetime(item.last_payment_at),
+        _format_datetime(item.next_payment_due_at),
+        str(item.payment_overdue_days if item.payment_overdue_days is not None else ""),
+        str(item.consecutive_payment_months),
+        str(item.required_consecutive_payment_months),
+        "Yes" if item.pays_contribution else "No",
+        item.contribution_exception_reason or "",
+        str(item.sponsorship_count),
+        str(item.active_sponsorship_count),
+        str(item.completed_sponsorship_count),
+        str(item.last_sponsorship_id or ""),
+        _format_date(item.last_sponsorship_date),
+        item.last_sponsorship_status or "",
+        item.last_beneficiary_name or "",
+        "Yes" if item.is_volunteer else "No",
+        str(item.volunteer_service_count),
+        _format_date(item.last_volunteer_service_date),
+        ", ".join(item.volunteer_groups),
+        ", ".join(item.volunteer_service_types),
+        item.volunteer_match_method or "",
+        criterion_value("volunteer_service", "status"),
+        criterion_value("volunteer_service", "detail"),
+    ]
+
+
 def _stream_csv(rows: Iterable[list[str]]) -> Iterable[str]:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -179,7 +276,7 @@ def _xlsx_safe_text(value: str) -> str:
     return xml_escape(_ILLEGAL_XML_CHARS.sub("", value))
 
 
-def _build_xlsx_bytes(headers: list[str], rows: Iterable[list[str]]) -> bytes:
+def _build_xlsx_bytes(headers: list[str], rows: Iterable[list[str]], *, sheet_name: str = "Sponsorships") -> bytes:
     sheet_xml = io.StringIO()
     sheet_xml.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
     sheet_xml.write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
@@ -210,10 +307,11 @@ def _build_xlsx_bytes(headers: list[str], rows: Iterable[list[str]]) -> bytes:
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
 </Relationships>
 """
-    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    safe_sheet_name = _xlsx_safe_text(sheet_name)
+    workbook_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="Sponsorships" sheetId="1" r:id="rId1"/>
+    <sheet name="{safe_sheet_name}" sheetId="1" r:id="rId1"/>
   </sheets>
 </workbook>
 """
@@ -404,6 +502,64 @@ def get_sponsorship_metrics(
     return sponsorships_service.get_sponsorship_metrics(db, start_date=start_date, end_date=end_date)
 
 
+@router.get("/pre-screening", response_model=SponsorshipPrescreeningResponse, status_code=status.HTTP_200_OK)
+def list_sponsorship_prescreening(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str | None = Query(None),
+    eligibility: str | None = Query(None),
+    volunteer: bool | None = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> SponsorshipPrescreeningResponse:
+    if eligibility and eligibility not in {"Eligible", "Review", "NotEligible"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid eligibility filter")
+    return sponsorships_service.list_sponsorship_prescreening(
+        db,
+        page=page,
+        page_size=page_size,
+        search=q,
+        eligibility=eligibility,
+        volunteer=volunteer,
+    )
+
+
+@router.get("/pre-screening/export.xlsx", status_code=status.HTTP_200_OK)
+def export_sponsorship_prescreening_excel(
+    q: str | None = Query(None),
+    eligibility: str | None = Query(None),
+    volunteer: bool | None = Query(None),
+    ids: str | None = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*READ_ROLES)),
+) -> Response:
+    if eligibility and eligibility not in {"Eligible", "Review", "NotEligible"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid eligibility filter")
+    selected_ids = _parse_selected_ids(ids)
+    prescreening = sponsorships_service.list_sponsorship_prescreening(
+        db,
+        page=1,
+        page_size=1_000_000,
+        search=q,
+        eligibility=eligibility,
+        volunteer=volunteer,
+        member_ids=selected_ids,
+    )
+    rows = [_format_prescreening_row(item) for item in prescreening.items]
+    content = _build_xlsx_bytes(
+        SPONSORSHIP_PRESCREENING_EXPORT_HEADERS,
+        rows,
+        sheet_name="Sponsor Pre-screening",
+    )
+    filename = "sponsorship_prescreening_selected.xlsx" if selected_ids else "sponsorship_prescreening_filtered.xlsx"
+    response = Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
+
+
 @router.get("/budget-rounds", response_model=list[SponsorshipBudgetRoundOut], status_code=status.HTTP_200_OK)
 def list_budget_rounds(
     year: int | None = Query(None, ge=2000, le=2100),
@@ -471,19 +627,34 @@ def get_sponsorship(
 @router.get("/{sponsorship_id:int}/timeline", response_model=SponsorshipTimelineResponse, status_code=status.HTTP_200_OK)
 def get_sponsorship_timeline(
     sponsorship_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipTimelineResponse:
-    return sponsorships_service.list_sponsorship_timeline(db, sponsorship_id)
+    return sponsorships_service.list_sponsorship_timeline(
+        db,
+        sponsorship_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.get("/{sponsorship_id:int}/notes", response_model=SponsorshipNotesListResponse, status_code=status.HTTP_200_OK)
 def list_sponsorship_notes(
     sponsorship_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipNotesListResponse:
-    return sponsorships_service.list_sponsorship_notes(db, sponsorship_id, current_user)
+    return sponsorships_service.list_sponsorship_notes(
+        db,
+        sponsorship_id,
+        current_user,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.post("/{sponsorship_id:int}/notes", response_model=SponsorshipNoteOut, status_code=status.HTTP_201_CREATED)

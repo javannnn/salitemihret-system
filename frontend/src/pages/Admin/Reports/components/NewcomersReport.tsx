@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     AlertTriangle,
     HandHeart,
@@ -46,11 +46,14 @@ const FOLLOWUP_COLORS = ["#dc2626", "#f59e0b", "#0f766e", "#94a3b8"];
 
 export function NewcomersReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
+    const [individualDateRange, setIndividualDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [report, setReport] = useState<NewcomerReportResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [individualSearch, setIndividualSearch] = useState("");
     const [individualMatches, setIndividualMatches] = useState<Newcomer[]>([]);
+    const [selectedNewcomer, setSelectedNewcomer] = useState<Newcomer | null>(null);
     const [individualLoading, setIndividualLoading] = useState(false);
+    const individualRequestId = useRef(0);
     const [individualReport, setIndividualReport] = useState<{
         detail: Newcomer;
         timeline: NewcomerTimelineResponse;
@@ -65,6 +68,12 @@ export function NewcomersReport() {
         }
         return dateRange;
     }, [dateRange]);
+    const normalizedIndividualRange = useMemo(() => {
+        if (individualDateRange.start && individualDateRange.end && individualDateRange.start > individualDateRange.end) {
+            return { start: individualDateRange.end, end: individualDateRange.start };
+        }
+        return individualDateRange;
+    }, [individualDateRange]);
 
     useEffect(() => {
         let cancelled = false;
@@ -100,6 +109,10 @@ export function NewcomersReport() {
 
     useEffect(() => {
         const term = individualSearch.trim();
+        if (selectedNewcomer) {
+            setIndividualMatches([]);
+            return;
+        }
         if (term.length < 2) {
             setIndividualMatches([]);
             return;
@@ -122,26 +135,51 @@ export function NewcomersReport() {
             cancelled = true;
             window.clearTimeout(timeout);
         };
-    }, [individualSearch]);
+    }, [individualSearch, selectedNewcomer]);
 
-    const loadIndividualReport = async (newcomer: Newcomer) => {
+    const loadIndividualReport = async (newcomer: Newcomer, range = normalizedIndividualRange) => {
+        const requestId = ++individualRequestId.current;
         setIndividualLoading(true);
         try {
+            const filters = {
+                start_date: range.start || undefined,
+                end_date: range.end || undefined,
+            };
             const [detail, timeline, interactions, addresses] = await Promise.all([
                 getNewcomer(newcomer.id),
-                getNewcomerTimeline(newcomer.id),
-                listNewcomerInteractions(newcomer.id),
-                listNewcomerAddressHistory(newcomer.id),
+                getNewcomerTimeline(newcomer.id, filters),
+                listNewcomerInteractions(newcomer.id, filters),
+                listNewcomerAddressHistory(newcomer.id, filters),
             ]);
-            setIndividualReport({ detail, timeline, interactions, addresses });
-            setIndividualSearch(`${detail.first_name} ${detail.last_name}`.trim());
-            setIndividualMatches([]);
+            const filteredDetail = range.start || range.end
+                ? { ...detail, last_interaction_at: interactions.items[0]?.occurred_at ?? null }
+                : detail;
+            if (requestId === individualRequestId.current) {
+                setSelectedNewcomer(newcomer);
+                setIndividualReport({ detail: filteredDetail, timeline, interactions, addresses });
+                setIndividualSearch(`${detail.first_name} ${detail.last_name}`.trim());
+                setIndividualMatches([]);
+            }
         } catch (error) {
-            console.error("Failed to load individual newcomer report:", error);
-            toast.push("Failed to load individual newcomer report", "error");
+            if (requestId === individualRequestId.current) {
+                console.error("Failed to load individual newcomer report:", error);
+                toast.push("Failed to load individual newcomer report", "error");
+            }
         } finally {
-            setIndividualLoading(false);
+            if (requestId === individualRequestId.current) {
+                setIndividualLoading(false);
+            }
         }
+    };
+
+    const changeIndividualDateRange = (next: DateRangeValue) => {
+        setIndividualDateRange(next);
+        if (!selectedNewcomer) return;
+        setIndividualReport(null);
+        const normalized = next.start && next.end && next.start > next.end
+            ? { start: next.end, end: next.start }
+            : next;
+        void loadIndividualReport(selectedNewcomer, normalized);
     };
 
     const downloadIndividualReport = () => {
@@ -190,21 +228,31 @@ export function NewcomersReport() {
                         <h3 className="text-lg font-semibold text-ink">Individual Newcomer Report</h3>
                         <p className="text-sm text-muted">Profile, timeline, interactions, addresses, and sponsorship linkage.</p>
                     </div>
-                    <button
-                        className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
-                        disabled={!individualReport}
-                        onClick={downloadIndividualReport}
-                    >
-                        Download JSON
-                    </button>
+                    <div className="flex flex-wrap items-end justify-end gap-3">
+                        <DateRangeControls
+                            value={individualDateRange}
+                            onChange={changeIndividualDateRange}
+                            label="Individual report"
+                        />
+                        <button
+                            className="h-9 rounded-lg border border-border px-3 text-sm font-medium text-ink disabled:opacity-50"
+                            disabled={!individualReport}
+                            onClick={downloadIndividualReport}
+                        >
+                            Download JSON
+                        </button>
+                    </div>
                 </div>
                 <div className="relative max-w-xl">
                     <input
                         className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-ink"
                         value={individualSearch}
                         onChange={(event) => {
+                            individualRequestId.current += 1;
                             setIndividualSearch(event.target.value);
+                            setSelectedNewcomer(null);
                             setIndividualReport(null);
+                            setIndividualLoading(false);
                         }}
                         placeholder="Search newcomer by name, ID, or service"
                     />

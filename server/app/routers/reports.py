@@ -82,6 +82,13 @@ def _payment_year_summaries(payments: list[Payment], *, minimum_years: int = 3) 
     return summaries
 
 
+def _date_in_range(value: date | datetime | None, start_date: date | None, end_date: date | None) -> bool:
+    if value is None:
+        return False
+    value_date = value.date() if isinstance(value, datetime) else value
+    return (start_date is None or value_date >= start_date) and (end_date is None or value_date <= end_date)
+
+
 def require_report_access(report_field: str, *, source_module: str | None = None) -> Callable[..., User]:
     def checker(user: User = Depends(get_current_user)) -> User:
         if not has_field_permission(user, "reports", report_field, "read"):
@@ -127,8 +134,13 @@ def newcomer_report(
 def _build_individual_member_report(
     member_id: int,
     current_user: User,
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: Session = Depends(get_db),
 ) -> IndividualMemberReportResponse:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date")
+
     financial_access = has_module_permission(current_user, "payments", "read") or has_field_permission(
         current_user, "members", "contribution", "read"
     )
@@ -187,6 +199,19 @@ def _build_individual_member_report(
     sunday_service = db.query(PaymentServiceType).filter(PaymentServiceType.code == SUNDAY_SCHOOL_SERVICE_CODE).first()
     sunday_payment_payload: list[MemberSundaySchoolPaymentOut] = []
     if sunday_service:
+        sunday_payment_query = (
+            db.query(Payment)
+            .options(selectinload(Payment.service_type))
+            .filter(Payment.member_id == member.id, Payment.service_type_id == sunday_service.id)
+        )
+        if start_date:
+            sunday_payment_query = sunday_payment_query.filter(
+                Payment.posted_at >= datetime.combine(start_date, datetime.min.time())
+            )
+        if end_date:
+            sunday_payment_query = sunday_payment_query.filter(
+                Payment.posted_at <= datetime.combine(end_date, datetime.max.time())
+            )
         sunday_payment_payload = [
             MemberSundaySchoolPaymentOut(
                 id=payment.id,
@@ -199,23 +224,33 @@ def _build_individual_member_report(
                 service_type_label=payment.service_type.label if payment.service_type else sunday_service.label,
             )
             for payment in (
-                db.query(Payment)
-                .options(selectinload(Payment.service_type))
-                .filter(Payment.member_id == member.id, Payment.service_type_id == sunday_service.id)
+                sunday_payment_query
                 .order_by(Payment.posted_at.desc())
                 .limit(25)
                 .all()
             )
         ]
 
-    detail = MemberDetailOut.from_orm(member).copy(
+    contribution_history = [
+        payment
+        for payment in member.contribution_history
+        if _date_in_range(payment.paid_at, start_date, end_date)
+    ]
+    detail = MemberDetailOut.from_orm(member)
+    detail = detail.copy(
         update={
             "sunday_school_participants": participant_payload,
             "sunday_school_payments": sunday_payment_payload,
+            "contribution_history": contribution_history,
+            "membership_events": [
+                event
+                for event in detail.membership_events
+                if _date_in_range(event.timestamp, start_date, end_date)
+            ],
         }
     )
 
-    payments = (
+    payment_query = (
         db.query(Payment)
         .options(
             selectinload(Payment.service_type),
@@ -224,18 +259,22 @@ def _build_individual_member_report(
             selectinload(Payment.household),
         )
         .filter(Payment.member_id == member.id)
-        .order_by(Payment.posted_at.desc(), Payment.id.desc())
-        .limit(100)
-        .all()
     )
+    if start_date:
+        payment_query = payment_query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        payment_query = payment_query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
+    payments = payment_query.order_by(Payment.posted_at.desc(), Payment.id.desc()).limit(100).all()
 
-    sponsorships = (
+    sponsorship_query = (
         db.query(Sponsorship)
         .filter(or_(Sponsorship.sponsor_member_id == member.id, Sponsorship.beneficiary_member_id == member.id))
-        .order_by(Sponsorship.created_at.desc(), Sponsorship.id.desc())
-        .limit(100)
-        .all()
     )
+    if start_date:
+        sponsorship_query = sponsorship_query.filter(Sponsorship.start_date >= start_date)
+    if end_date:
+        sponsorship_query = sponsorship_query.filter(Sponsorship.start_date <= end_date)
+    sponsorships = sponsorship_query.order_by(Sponsorship.created_at.desc(), Sponsorship.id.desc()).limit(100).all()
     sponsorship_payload = [
         IndividualSponsorshipReportItem(
             id=item.id,
@@ -347,19 +386,23 @@ def _build_individual_member_report(
 @router.get("/members/{member_id}/individual", response_model=IndividualMemberReportResponse)
 def individual_member_report(
     member_id: int,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_report_access("members", source_module="members")),
 ) -> IndividualMemberReportResponse:
-    return _build_individual_member_report(member_id, current_user, db)
+    return _build_individual_member_report(member_id, current_user, start_date, end_date, db)
 
 
 @router.get("/payments/members/{member_id}/individual", response_model=IndividualMemberReportResponse)
 def individual_payment_member_report(
     member_id: int,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_report_access("payments", source_module="payments")),
 ) -> IndividualMemberReportResponse:
-    return _build_individual_member_report(member_id, current_user, db)
+    return _build_individual_member_report(member_id, current_user, start_date, end_date, db)
 
 
 @router.get("/parish-councils", response_model=ParishCouncilReportResponse)

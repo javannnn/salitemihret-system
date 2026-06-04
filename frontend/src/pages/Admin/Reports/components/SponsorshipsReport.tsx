@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
     getSponsorship,
     getSponsorshipMetrics,
@@ -24,11 +24,14 @@ function formatDate(value?: string | null) {
 
 export function SponsorshipsReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
+    const [individualDateRange, setIndividualDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [metrics, setMetrics] = useState<SponsorshipMetrics | null>(null);
     const [loading, setLoading] = useState(true);
     const [caseSearch, setCaseSearch] = useState("");
     const [caseMatches, setCaseMatches] = useState<Sponsorship[]>([]);
+    const [selectedCase, setSelectedCase] = useState<Sponsorship | null>(null);
     const [individualLoading, setIndividualLoading] = useState(false);
+    const individualRequestId = useRef(0);
     const [individualReport, setIndividualReport] = useState<{
         detail: Sponsorship;
         timeline: SponsorshipTimelineResponse;
@@ -43,6 +46,12 @@ export function SponsorshipsReport() {
         return dateRange;
     }, [dateRange]);
     const hasRange = Boolean(normalizedRange.start || normalizedRange.end);
+    const normalizedIndividualRange = useMemo(() => {
+        if (individualDateRange.start && individualDateRange.end && individualDateRange.start > individualDateRange.end) {
+            return { start: individualDateRange.end, end: individualDateRange.start };
+        }
+        return individualDateRange;
+    }, [individualDateRange]);
 
     useEffect(() => {
         const fetchMetrics = async () => {
@@ -66,6 +75,10 @@ export function SponsorshipsReport() {
 
     useEffect(() => {
         const term = caseSearch.trim();
+        if (selectedCase) {
+            setCaseMatches([]);
+            return;
+        }
         if (term.length < 2) {
             setCaseMatches([]);
             return;
@@ -88,25 +101,47 @@ export function SponsorshipsReport() {
             cancelled = true;
             window.clearTimeout(timeout);
         };
-    }, [caseSearch]);
+    }, [caseSearch, selectedCase]);
 
-    const loadIndividualReport = async (caseRecord: Sponsorship) => {
+    const loadIndividualReport = async (caseRecord: Sponsorship, range = normalizedIndividualRange) => {
+        const requestId = ++individualRequestId.current;
         setIndividualLoading(true);
         try {
+            const filters = {
+                start_date: range.start || undefined,
+                end_date: range.end || undefined,
+            };
             const [detail, timeline, notes] = await Promise.all([
                 getSponsorship(caseRecord.id),
-                getSponsorshipTimeline(caseRecord.id),
-                listSponsorshipNotes(caseRecord.id),
+                getSponsorshipTimeline(caseRecord.id, filters),
+                listSponsorshipNotes(caseRecord.id, filters),
             ]);
-            setIndividualReport({ detail, timeline, notes });
-            setCaseSearch(`SP-${String(detail.id).padStart(4, "0")}`);
-            setCaseMatches([]);
+            if (requestId === individualRequestId.current) {
+                setSelectedCase(caseRecord);
+                setIndividualReport({ detail, timeline, notes });
+                setCaseSearch(`SP-${String(detail.id).padStart(4, "0")}`);
+                setCaseMatches([]);
+            }
         } catch (error) {
-            console.error("Failed to load individual sponsorship report:", error);
-            toast.push("Failed to load individual sponsorship report", "error");
+            if (requestId === individualRequestId.current) {
+                console.error("Failed to load individual sponsorship report:", error);
+                toast.push("Failed to load individual sponsorship report", "error");
+            }
         } finally {
-            setIndividualLoading(false);
+            if (requestId === individualRequestId.current) {
+                setIndividualLoading(false);
+            }
         }
+    };
+
+    const changeIndividualDateRange = (next: DateRangeValue) => {
+        setIndividualDateRange(next);
+        if (!selectedCase) return;
+        setIndividualReport(null);
+        const normalized = next.start && next.end && next.start > next.end
+            ? { start: next.end, end: next.start }
+            : next;
+        void loadIndividualReport(selectedCase, normalized);
     };
 
     const downloadIndividualReport = () => {
@@ -155,21 +190,31 @@ export function SponsorshipsReport() {
                         <h3 className="text-lg font-semibold text-ink">Individual Sponsorship Report</h3>
                         <p className="text-sm text-muted">Single-case summary with co-sponsor, immigrant, timeline, notes, and allocation details.</p>
                     </div>
-                    <button
-                        className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
-                        disabled={!individualReport}
-                        onClick={downloadIndividualReport}
-                    >
-                        Download JSON
-                    </button>
+                    <div className="flex flex-wrap items-end justify-end gap-3">
+                        <DateRangeControls
+                            value={individualDateRange}
+                            onChange={changeIndividualDateRange}
+                            label="Individual report"
+                        />
+                        <button
+                            className="h-9 rounded-lg border border-border px-3 text-sm font-medium text-ink disabled:opacity-50"
+                            disabled={!individualReport}
+                            onClick={downloadIndividualReport}
+                        >
+                            Download JSON
+                        </button>
+                    </div>
                 </div>
                 <div className="relative max-w-xl">
                     <input
                         className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-ink"
                         value={caseSearch}
                         onChange={(event) => {
+                            individualRequestId.current += 1;
                             setCaseSearch(event.target.value);
+                            setSelectedCase(null);
                             setIndividualReport(null);
+                            setIndividualLoading(false);
                         }}
                         placeholder="Search by co-sponsor or immigrant name"
                     />

@@ -185,3 +185,29 @@ def test_individual_member_report_includes_requested_client_report_fields(
         {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Settlement support"},
         {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Translation"},
     ]
+
+    filtered_response = client.get(
+        f"/reports/members/{sample_member.id}/individual",
+        params={
+            "start_date": f"{current_year - 1}-05-01",
+            "end_date": f"{current_year - 1}-05-31",
+        },
+    )
+
+    assert filtered_response.status_code == 200, filtered_response.text
+    filtered = filtered_response.json()
+    assert [item["id"] for item in filtered["payments"]] == [payment.id]
+    assert filtered["client_report_fields"]["payments"][0]["amount"] == 125.0
+    assert filtered["sponsorships"] == []
+    assert filtered["client_report_fields"]["sponsorship"]["number_sponsored"] == 0
+    assert filtered["client_report_fields"]["sponsorship"]["volunteer_rows"] == []
+
+    payment_report_response = client.get(
+        f"/reports/payments/members/{sample_member.id}/individual",
+        params={
+            "start_date": f"{current_year - 1}-05-01",
+            "end_date": f"{current_year - 1}-05-31",
+        },
+    )
+    assert payment_report_response.status_code == 200, payment_report_response.text
+    assert [item["id"] for item in payment_report_response.json()["payments"]] == [payment.id]

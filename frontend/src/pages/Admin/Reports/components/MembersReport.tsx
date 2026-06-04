@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
     ApiError,
     IndividualMemberReport,
@@ -40,6 +40,7 @@ export function MembersReport({
     individualDescription = "Full single-member report: profile, family, Sunday school, contributions, payments, sponsorships, and membership history.",
 }: MembersReportProps = {}) {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
+    const [individualDateRange, setIndividualDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [recentMembers, setRecentMembers] = useState<Member[]>([]);
     const [counts, setCounts] = useState({
         total: 0,
@@ -58,6 +59,7 @@ export function MembersReport({
     const [selectedMember, setSelectedMember] = useState<Member | null>(null);
     const [individualReport, setIndividualReport] = useState<IndividualMemberReport | null>(null);
     const [individualLoading, setIndividualLoading] = useState(false);
+    const individualRequestId = useRef(0);
     const toast = useToast();
 
     const normalizedRange = useMemo(() => {
@@ -67,6 +69,12 @@ export function MembersReport({
         return dateRange;
     }, [dateRange]);
     const hasRange = Boolean(normalizedRange.start || normalizedRange.end);
+    const normalizedIndividualRange = useMemo(() => {
+        if (individualDateRange.start && individualDateRange.end && individualDateRange.start > individualDateRange.end) {
+            return { start: individualDateRange.end, end: individualDateRange.start };
+        }
+        return individualDateRange;
+    }, [individualDateRange]);
 
     useEffect(() => {
         let cancelled = false;
@@ -161,6 +169,11 @@ export function MembersReport({
 
     useEffect(() => {
         const term = memberSearch.trim();
+        if (selectedMember) {
+            setMemberMatches([]);
+            setMemberSearchLoading(false);
+            return;
+        }
         if (term.length < 2) {
             setMemberMatches([]);
             setMemberSearchLoading(false);
@@ -193,23 +206,43 @@ export function MembersReport({
             cancelled = true;
             window.clearTimeout(timer);
         };
-    }, [memberSearch, toast]);
+    }, [memberSearch, selectedMember, toast]);
 
-    const loadIndividualReport = async (member = selectedMember) => {
+    const loadIndividualReport = async (member = selectedMember, range = normalizedIndividualRange) => {
         if (!member) {
             toast.push("Select a member first");
             return;
         }
+        const requestId = ++individualRequestId.current;
         setIndividualLoading(true);
         try {
-            const report = await getIndividualMemberReport(member.id, individualReportSource);
-            setIndividualReport(report);
+            const report = await getIndividualMemberReport(member.id, individualReportSource, {
+                start_date: range.start || undefined,
+                end_date: range.end || undefined,
+            });
+            if (requestId === individualRequestId.current) {
+                setIndividualReport(report);
+            }
         } catch (error) {
-            console.error("Failed to load individual member report:", error);
-            toast.push(parseApiErrorMessage(error, "Failed to load individual member report"), "error");
+            if (requestId === individualRequestId.current) {
+                console.error("Failed to load individual member report:", error);
+                toast.push(parseApiErrorMessage(error, "Failed to load individual member report"), "error");
+            }
         } finally {
-            setIndividualLoading(false);
+            if (requestId === individualRequestId.current) {
+                setIndividualLoading(false);
+            }
         }
+    };
+
+    const changeIndividualDateRange = (next: DateRangeValue) => {
+        setIndividualDateRange(next);
+        if (!selectedMember) return;
+        setIndividualReport(null);
+        const normalized = next.start && next.end && next.start > next.end
+            ? { start: next.end, end: next.start }
+            : next;
+        void loadIndividualReport(selectedMember, normalized);
     };
 
     const downloadIndividualReport = () => {
@@ -385,15 +418,22 @@ export function MembersReport({
                             {individualDescription}
                         </p>
                     </div>
-                    {individualReport && (
-                        <button
-                            type="button"
-                            onClick={downloadIndividualReport}
-                            className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-ink hover:bg-accent/10"
-                        >
-                            Download JSON
-                        </button>
-                    )}
+                    <div className="flex flex-wrap items-end justify-end gap-3">
+                        <DateRangeControls
+                            value={individualDateRange}
+                            onChange={changeIndividualDateRange}
+                            label="Individual report"
+                        />
+                        {individualReport && (
+                            <button
+                                type="button"
+                                onClick={downloadIndividualReport}
+                                className="h-9 rounded-lg border border-border px-3 text-sm font-medium text-ink hover:bg-accent/10"
+                            >
+                                Download JSON
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -401,14 +441,16 @@ export function MembersReport({
                         <input
                             value={memberSearch}
                             onChange={(event) => {
+                                individualRequestId.current += 1;
                                 setMemberSearch(event.target.value);
                                 setSelectedMember(null);
                                 setIndividualReport(null);
+                                setIndividualLoading(false);
                             }}
                             placeholder="Search member by name, phone, email, or username"
                             className="w-full rounded-xl border border-border bg-card/80 p-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-accent"
                         />
-                        {memberSearch.trim().length >= 2 && (
+                        {!selectedMember && memberSearch.trim().length >= 2 && (
                             <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
                                 {memberSearchLoading ? (
                                     <div className="p-3 text-sm text-muted">Searching...</div>

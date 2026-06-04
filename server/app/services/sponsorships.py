@@ -13,12 +13,14 @@ from app.models.member import Member
 from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerStatusAudit
+from app.models.payment import Payment
 from app.models.priest import Priest
 from app.models.sponsorship import Sponsorship
 from app.models.sponsorship_audit import SponsorshipStatusAudit
 from app.models.sponsorship_budget_round import SponsorshipBudgetRound
 from app.models.sponsorship_note import SponsorshipNote
 from app.models.user import User
+from app.models.volunteer_worker import VolunteerWorker
 from app.schemas.member import ContributionPaymentOut
 from app.schemas.sponsorship import (
     MemberSummary,
@@ -34,6 +36,10 @@ from app.schemas.sponsorship import (
     SponsorshipNoteOut,
     SponsorshipNotesListResponse,
     SponsorshipNotesTemplate,
+    SponsorshipPrescreeningCriterion,
+    SponsorshipPrescreeningItem,
+    SponsorshipPrescreeningResponse,
+    SponsorshipPrescreeningSummary,
     SponsorshipSponsorContext,
     SponsorshipCreate,
     SponsorshipListResponse,
@@ -47,6 +53,7 @@ from app.schemas.sponsorship import (
     SponsorshipTimelineResponse,
     SponsorshipUpdate,
 )
+from app.services.membership import refresh_membership_state
 from app.services.notifications import send_sponsorship_reminder
 
 ALLOWED_SPONSOR_STATUSES = {"Active"}
@@ -58,6 +65,8 @@ VALID_REMINDER_CHANNELS = set(get_args(SponsorshipReminderChannel))
 VALID_MOTIVATIONS = set(get_args(SponsorshipMotivation))
 VALID_NOTES_TEMPLATES = set(get_args(SponsorshipNotesTemplate))
 BUDGET_CONSUMING_STATUSES = {"Submitted", "Approved", "Active", "Suspended", "Completed", "Closed"}
+PRESCREENING_TENURE_MONTHS = 12
+PRESCREENING_ACTIVE_CASE_STATUSES = {"Submitted", "Approved", "Active", "Suspended"}
 
 
 def _coerce_literal(value: str | None) -> str | None:
@@ -568,6 +577,289 @@ def list_sponsorships(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+def _normalized_name(*parts: str | None) -> str:
+    return " ".join(" ".join(part.strip().lower().split()) for part in parts if part and part.strip())
+
+
+def _normalized_phone(value: str | None) -> str:
+    return "".join(character for character in (value or "") if character.isdigit())
+
+
+def _tenure_months(join_date: date | None, today: date) -> int | None:
+    if join_date is None:
+        return None
+    months = (today.year - join_date.year) * 12 + today.month - join_date.month
+    if today.day < join_date.day:
+        months -= 1
+    return max(0, months)
+
+
+def _prescreening_criterion(code: str, label: str, status_value: str, detail: str) -> SponsorshipPrescreeningCriterion:
+    return SponsorshipPrescreeningCriterion(
+        code=code,
+        label=label,
+        status=status_value,  # type: ignore[arg-type]
+        detail=detail,
+    )
+
+
+def list_sponsorship_prescreening(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+    search: str | None = None,
+    eligibility: str | None = None,
+    volunteer: bool | None = None,
+    member_ids: list[int] | None = None,
+) -> SponsorshipPrescreeningResponse:
+    member_query = (
+        db.query(Member)
+        .options(
+            joinedload(Member.contribution_payments),
+            joinedload(Member.payments).joinedload(Payment.service_type),
+        )
+        .filter(Member.deleted_at.is_(None))
+    )
+    if member_ids:
+        member_query = member_query.filter(Member.id.in_(member_ids))
+    if search and search.strip():
+        like = f"%{search.strip().lower()}%"
+        member_query = member_query.filter(
+            or_(
+                func.lower(Member.first_name).like(like),
+                func.lower(Member.last_name).like(like),
+                func.lower(Member.username).like(like),
+                func.lower(Member.email).like(like),
+                func.lower(func.coalesce(Member.phone, "")).like(like),
+                func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
+            )
+        )
+    members = member_query.all()
+
+    sponsorships_by_member: dict[int, list[Sponsorship]] = {}
+    for sponsorship in db.query(Sponsorship).all():
+        sponsorships_by_member.setdefault(sponsorship.sponsor_member_id, []).append(sponsorship)
+
+    volunteer_workers = (
+        db.query(VolunteerWorker)
+        .options(joinedload(VolunteerWorker.group))
+        .order_by(VolunteerWorker.service_date.desc(), VolunteerWorker.id.desc())
+        .all()
+    )
+    volunteers_by_phone: dict[str, list[VolunteerWorker]] = {}
+    volunteers_by_name: dict[str, list[VolunteerWorker]] = {}
+    for worker in volunteer_workers:
+        phone = _normalized_phone(worker.phone)
+        if len(phone) >= 7:
+            volunteers_by_phone.setdefault(phone, []).append(worker)
+        name = _normalized_name(worker.first_name, worker.last_name)
+        if name:
+            volunteers_by_name.setdefault(name, []).append(worker)
+
+    today = date.today()
+    member_name_counts: dict[str, int] = {}
+    for member in members:
+        name = _normalized_name(member.first_name, member.last_name)
+        member_name_counts[name] = member_name_counts.get(name, 0) + 1
+
+    items: list[SponsorshipPrescreeningItem] = []
+    for member in members:
+        health = refresh_membership_state(member, persist=False)
+        tenure = _tenure_months(member.join_date, today)
+        exception_reason = _coerce_literal(member.contribution_exception_reason)
+        criteria: list[SponsorshipPrescreeningCriterion] = []
+
+        status_passes = _coerce_literal(member.status) == "Active"
+        criteria.append(
+            _prescreening_criterion(
+                "membership_status",
+                "Active membership",
+                "Pass" if status_passes else "Fail",
+                f"Member status is {_coerce_literal(member.status) or 'unknown'}.",
+            )
+        )
+
+        if tenure is None:
+            tenure_status = "Review"
+            tenure_detail = "Membership start date is missing."
+        elif tenure >= PRESCREENING_TENURE_MONTHS:
+            tenure_status = "Pass"
+            tenure_detail = f"{tenure} months since {member.join_date.isoformat()}."
+        else:
+            tenure_status = "Fail"
+            tenure_detail = f"{tenure} of {PRESCREENING_TENURE_MONTHS} required months completed."
+        criteria.append(_prescreening_criterion("membership_tenure", "Membership tenure", tenure_status, tenure_detail))
+
+        if exception_reason:
+            continuity_status = "Review"
+            continuity_detail = f"Contribution exception recorded: {exception_reason}."
+        elif not member.pays_contribution:
+            continuity_status = "Fail"
+            continuity_detail = "Member is not enrolled in contribution payments and has no recorded exception."
+        elif health.consecutive_months >= health.required_consecutive_months:
+            continuity_status = "Pass"
+            continuity_detail = (
+                f"{health.consecutive_months} consecutive months; "
+                f"{health.required_consecutive_months} required."
+            )
+        else:
+            continuity_status = "Fail"
+            continuity_detail = (
+                f"{health.consecutive_months} of {health.required_consecutive_months} required consecutive months."
+            )
+        criteria.append(
+            _prescreening_criterion("payment_continuity", "Continuous payments", continuity_status, continuity_detail)
+        )
+
+        if exception_reason:
+            current_status = "Review"
+            current_detail = f"Payment currency requires review because of the {exception_reason} exception."
+        elif health.last_paid_at is None:
+            current_status = "Fail"
+            current_detail = "No contribution payment has been recorded."
+        elif (health.overdue_days or 0) > 5:
+            current_status = "Fail"
+            current_detail = f"Payment is {health.overdue_days} days overdue."
+        else:
+            current_status = "Pass"
+            current_detail = (
+                f"Last paid {health.last_paid_at.date().isoformat()}; "
+                f"next due {health.next_due_at.date().isoformat() if health.next_due_at else 'not set'}."
+            )
+        criteria.append(_prescreening_criterion("payment_current", "Payment current", current_status, current_detail))
+
+        normalized_member_phone = _normalized_phone(member.phone)
+        phone_matches = volunteers_by_phone.get(normalized_member_phone, []) if len(normalized_member_phone) >= 7 else []
+        if phone_matches:
+            volunteer_matches = phone_matches
+            volunteer_match_method = "Phone"
+        else:
+            normalized_member_name = _normalized_name(member.first_name, member.last_name)
+            volunteer_matches = (
+                volunteers_by_name.get(normalized_member_name, [])
+                if member_name_counts.get(normalized_member_name) == 1
+                else []
+            )
+            volunteer_match_method = "Exact name" if volunteer_matches else None
+        is_volunteer = bool(volunteer_matches)
+        criteria.append(
+            _prescreening_criterion(
+                "volunteer_service",
+                "Volunteer service",
+                "Pass" if is_volunteer else "Review",
+                (
+                    f"{len(volunteer_matches)} service record(s), matched by {volunteer_match_method.lower()}."
+                    if is_volunteer and volunteer_match_method
+                    else "No matching volunteer service record found; this is supporting evidence only."
+                ),
+            )
+        )
+
+        required_criteria = criteria[:4]
+        if any(criterion.status == "Fail" for criterion in required_criteria):
+            eligibility_value = "NotEligible"
+        elif any(criterion.status == "Review" for criterion in required_criteria):
+            eligibility_value = "Review"
+        else:
+            eligibility_value = "Eligible"
+        weights = [25, 25, 25, 20, 5]
+        score = sum(
+            weight if criterion.status == "Pass" else round(weight / 2) if criterion.status == "Review" else 0
+            for criterion, weight in zip(criteria, weights)
+        )
+
+        member_sponsorships = sponsorships_by_member.get(member.id, [])
+        last_sponsorship = max(
+            member_sponsorships,
+            key=lambda record: (_case_reference_date(record) or date.min, record.id),
+            default=None,
+        )
+        active_count = sum(
+            1 for record in member_sponsorships if _coerce_literal(record.status) in PRESCREENING_ACTIVE_CASE_STATUSES
+        )
+        completed_count = sum(
+            1 for record in member_sponsorships if _coerce_literal(record.status) in {"Completed", "Closed"}
+        )
+        groups = sorted({worker.group.name for worker in volunteer_matches if worker.group})
+        service_types = sorted({_coerce_literal(worker.service_type) or "Unknown" for worker in volunteer_matches})
+
+        items.append(
+            SponsorshipPrescreeningItem(
+                member_id=member.id,
+                member_name=f"{member.first_name} {member.last_name}".strip(),
+                username=member.username,
+                member_status=_coerce_literal(member.status) or "Unknown",
+                member_email=member.email,
+                member_phone=member.phone,
+                join_date=member.join_date,
+                tenure_months=tenure,
+                pays_contribution=member.pays_contribution,
+                contribution_exception_reason=exception_reason,
+                eligibility=eligibility_value,  # type: ignore[arg-type]
+                score=score,
+                criteria=criteria,
+                blocking_reasons=[criterion.detail for criterion in required_criteria if criterion.status == "Fail"],
+                last_payment_at=health.last_paid_at,
+                next_payment_due_at=health.next_due_at,
+                payment_overdue_days=health.overdue_days,
+                consecutive_payment_months=health.consecutive_months,
+                required_consecutive_payment_months=health.required_consecutive_months,
+                sponsorship_count=len(member_sponsorships),
+                active_sponsorship_count=active_count,
+                completed_sponsorship_count=completed_count,
+                last_sponsorship_id=last_sponsorship.id if last_sponsorship else None,
+                last_sponsorship_date=_case_reference_date(last_sponsorship) if last_sponsorship else None,
+                last_sponsorship_status=_coerce_literal(last_sponsorship.status) if last_sponsorship else None,
+                last_beneficiary_name=(
+                    _normalize_beneficiary_name(
+                        beneficiary_name=last_sponsorship.beneficiary_name,
+                        beneficiary_member=last_sponsorship.beneficiary_member,
+                        newcomer=last_sponsorship.newcomer,
+                    )
+                    if last_sponsorship
+                    else None
+                ),
+                is_volunteer=is_volunteer,
+                volunteer_service_count=len(volunteer_matches),
+                last_volunteer_service_date=volunteer_matches[0].service_date if volunteer_matches else None,
+                volunteer_groups=groups,
+                volunteer_service_types=service_types,
+                volunteer_match_method=volunteer_match_method,
+            )
+        )
+
+    if eligibility:
+        items = [item for item in items if item.eligibility == eligibility]
+    if volunteer is not None:
+        items = [item for item in items if item.is_volunteer is volunteer]
+
+    rank = {"Eligible": 0, "Review": 1, "NotEligible": 2}
+    items.sort(key=lambda item: (rank[item.eligibility], -item.score, item.member_name.lower()))
+    total = len(items)
+    summary = SponsorshipPrescreeningSummary(
+        total=total,
+        eligible=sum(1 for item in items if item.eligibility == "Eligible"),
+        review=sum(1 for item in items if item.eligibility == "Review"),
+        not_eligible=sum(1 for item in items if item.eligibility == "NotEligible"),
+        volunteers=sum(1 for item in items if item.is_volunteer),
+        payments_current=sum(
+            1
+            for item in items
+            if next((criterion.status for criterion in item.criteria if criterion.code == "payment_current"), None) == "Pass"
+        ),
+    )
+    start = (page - 1) * page_size
+    return SponsorshipPrescreeningResponse(
+        items=items[start : start + page_size],
+        total=total,
+        page=page,
+        page_size=page_size,
+        summary=summary,
+        tenure_requirement_months=PRESCREENING_TENURE_MONTHS,
     )
 
 
@@ -1513,15 +1805,24 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
     )
 
 
-def list_sponsorship_timeline(db: Session, sponsorship_id: int) -> SponsorshipTimelineResponse:
+def list_sponsorship_timeline(
+    db: Session,
+    sponsorship_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SponsorshipTimelineResponse:
     _ = _load_sponsorship(db, sponsorship_id)
-    audits = (
+    audits_query = (
         db.query(SponsorshipStatusAudit)
         .options(joinedload(SponsorshipStatusAudit.actor))
         .filter(SponsorshipStatusAudit.sponsorship_id == sponsorship_id)
-        .order_by(SponsorshipStatusAudit.changed_at.desc())
-        .all()
     )
+    if start_date:
+        audits_query = audits_query.filter(SponsorshipStatusAudit.changed_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        audits_query = audits_query.filter(SponsorshipStatusAudit.changed_at <= datetime.combine(end_date, datetime.max.time()))
+    audits = audits_query.order_by(SponsorshipStatusAudit.changed_at.desc()).all()
 
     items: list[SponsorshipTimelineEvent] = []
     for audit in audits:
@@ -1559,15 +1860,25 @@ def list_sponsorship_timeline(db: Session, sponsorship_id: int) -> SponsorshipTi
     return SponsorshipTimelineResponse(items=items, total=len(items))
 
 
-def list_sponsorship_notes(db: Session, sponsorship_id: int, actor: User) -> SponsorshipNotesListResponse:
+def list_sponsorship_notes(
+    db: Session,
+    sponsorship_id: int,
+    actor: User,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SponsorshipNotesListResponse:
     _ = _load_sponsorship(db, sponsorship_id)
-    notes = (
+    notes_query = (
         db.query(SponsorshipNote)
         .options(joinedload(SponsorshipNote.author))
         .filter(SponsorshipNote.sponsorship_id == sponsorship_id)
-        .order_by(SponsorshipNote.created_at.desc())
-        .all()
     )
+    if start_date:
+        notes_query = notes_query.filter(SponsorshipNote.created_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        notes_query = notes_query.filter(SponsorshipNote.created_at <= datetime.combine(end_date, datetime.max.time()))
+    notes = notes_query.order_by(SponsorshipNote.created_at.desc()).all()
     allow_all = _is_admin(actor)
 
     items: list[SponsorshipNoteOut] = []

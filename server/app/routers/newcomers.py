@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
@@ -143,6 +145,8 @@ def reactivate_newcomer(
 @router.get("/{newcomer_id:int}/interactions", response_model=NewcomerInteractionListResponse, status_code=status.HTTP_200_OK)
 def list_newcomer_interactions(
     newcomer_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*READ_ROLES)),
 ) -> NewcomerInteractionListResponse:
@@ -151,6 +155,8 @@ def list_newcomer_interactions(
         newcomer_id,
         actor_id=current_user.id,
         include_restricted=_is_admin(current_user),
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -167,19 +173,23 @@ def create_newcomer_interaction(
 @router.get("/{newcomer_id:int}/address-history", response_model=NewcomerAddressHistoryListResponse, status_code=status.HTTP_200_OK)
 def list_newcomer_address_history(
     newcomer_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> NewcomerAddressHistoryListResponse:
-    return newcomers_service.list_address_history(db, newcomer_id)
+    return newcomers_service.list_address_history(db, newcomer_id, start_date=start_date, end_date=end_date)
 
 
 @router.get("/{newcomer_id:int}/timeline", response_model=NewcomerTimelineResponse, status_code=status.HTTP_200_OK)
 def list_newcomer_timeline(
     newcomer_id: int,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*READ_ROLES)),
 ) -> NewcomerTimelineResponse:
-    return newcomers_service.list_timeline(db, newcomer_id, current_user)
+    return newcomers_service.list_timeline(db, newcomer_id, current_user, start_date=start_date, end_date=end_date)
 
 
 @router.post("/{newcomer_id:int}/convert", response_model=NewcomerOut, status_code=status.HTTP_200_OK)

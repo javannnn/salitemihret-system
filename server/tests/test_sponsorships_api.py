@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import io
 import zipfile
 
 from app.models.member import Member
+from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.member import Spouse
+from app.models.newcomer import Newcomer
+from app.models.newcomer_tracking import NewcomerAddressHistory, NewcomerInteraction, NewcomerStatusAudit
 from app.models.sponsorship import Sponsorship
+from app.models.sponsorship_audit import SponsorshipStatusAudit
+from app.models.sponsorship_note import SponsorshipNote
+from app.models.volunteer_group import VolunteerGroup
+from app.models.volunteer_worker import VolunteerWorker
 
 
 def _create_budget_round(client, authorize, user, *, slot_budget: int = 5, round_number: int = 1, year: int | None = None) -> int:
@@ -752,3 +760,257 @@ def test_sponsor_context_includes_spouse_details_when_married(
     assert payload["spouse_name"] == "Saba Kidane"
     assert payload["spouse_phone"] == "+16475550123"
     assert payload["spouse_email"] == "saba@example.com"
+
+
+def test_newcomer_individual_records_filter_by_date(
+    client,
+    authorize,
+    public_relations_user,
+    db_session,
+):
+    newcomer = Newcomer(
+        newcomer_code="NC-FILTER-001",
+        first_name="Filter",
+        last_name="Newcomer",
+        arrival_date=date(2026, 1, 1),
+        status="New",
+    )
+    db_session.add(newcomer)
+    db_session.flush()
+    db_session.add_all(
+        [
+            NewcomerInteraction(
+                newcomer_id=newcomer.id,
+                interaction_type="Call",
+                visibility="Shared",
+                note="Inside range",
+                occurred_at=datetime(2026, 1, 15, 12, 0),
+            ),
+            NewcomerInteraction(
+                newcomer_id=newcomer.id,
+                interaction_type="Call",
+                visibility="Shared",
+                note="Outside range",
+                occurred_at=datetime(2026, 2, 15, 12, 0),
+            ),
+            NewcomerAddressHistory(
+                newcomer_id=newcomer.id,
+                address_type="Current",
+                city="Inside",
+                changed_at=datetime(2026, 1, 16, 12, 0),
+            ),
+            NewcomerAddressHistory(
+                newcomer_id=newcomer.id,
+                address_type="Current",
+                city="Outside",
+                changed_at=datetime(2026, 2, 16, 12, 0),
+            ),
+            NewcomerStatusAudit(
+                newcomer_id=newcomer.id,
+                action="StatusChange",
+                from_status=None,
+                to_status="New",
+                changed_at=datetime(2026, 1, 17, 12, 0),
+            ),
+            NewcomerStatusAudit(
+                newcomer_id=newcomer.id,
+                action="Assignment",
+                from_status="New",
+                to_status="New",
+                changed_at=datetime(2026, 2, 17, 12, 0),
+            ),
+        ]
+    )
+    db_session.commit()
+    authorize(public_relations_user)
+    params = {"start_date": "2026-01-01", "end_date": "2026-01-31"}
+
+    interactions = client.get(f"/newcomers/{newcomer.id}/interactions", params=params)
+    addresses = client.get(f"/newcomers/{newcomer.id}/address-history", params=params)
+    timeline = client.get(f"/newcomers/{newcomer.id}/timeline", params=params)
+
+    assert interactions.status_code == 200, interactions.text
+    assert interactions.json()["total"] == 1
+    assert interactions.json()["items"][0]["note"] == "Inside range"
+    assert addresses.status_code == 200, addresses.text
+    assert addresses.json()["total"] == 1
+    assert addresses.json()["items"][0]["city"] == "Inside"
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json()["total"] == 3
+
+
+def test_sponsorship_individual_records_filter_by_date(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    sponsorship = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Filter Beneficiary",
+        frequency="Monthly",
+        start_date=date(2026, 1, 1),
+        status="Active",
+        monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("0.00"),
+    )
+    db_session.add(sponsorship)
+    db_session.flush()
+    db_session.add_all(
+        [
+            SponsorshipStatusAudit(
+                sponsorship_id=sponsorship.id,
+                action="StatusChange",
+                from_status="Submitted",
+                to_status="Active",
+                changed_at=datetime(2026, 1, 15, 12, 0),
+            ),
+            SponsorshipStatusAudit(
+                sponsorship_id=sponsorship.id,
+                action="Suspension",
+                from_status="Active",
+                to_status="Suspended",
+                changed_at=datetime(2026, 2, 15, 12, 0),
+            ),
+            SponsorshipNote(
+                sponsorship_id=sponsorship.id,
+                note="Inside range",
+                created_by_id=sponsorship_user.id,
+                created_at=datetime(2026, 1, 16, 12, 0),
+            ),
+            SponsorshipNote(
+                sponsorship_id=sponsorship.id,
+                note="Outside range",
+                created_by_id=sponsorship_user.id,
+                created_at=datetime(2026, 2, 16, 12, 0),
+            ),
+        ]
+    )
+    db_session.commit()
+    authorize(sponsorship_user)
+    params = {"start_date": "2026-01-01", "end_date": "2026-01-31"}
+
+    timeline = client.get(f"/sponsorships/{sponsorship.id}/timeline", params=params)
+    notes = client.get(f"/sponsorships/{sponsorship.id}/notes", params=params)
+
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json()["total"] == 1
+    assert timeline.json()["items"][0]["to_status"] == "Active"
+    assert notes.status_code == 200, notes.text
+    assert notes.json()["total"] == 1
+    assert notes.json()["items"][0]["note"] == "Inside range"
+
+
+def test_sponsorship_prescreening_calculates_eligibility_and_evidence(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    now = datetime.now(timezone.utc)
+    sample_member.contribution_last_paid_at = now
+    sample_member.contribution_next_due_at = now + timedelta(days=180)
+    db_session.add(
+        MemberContributionPayment(
+            member_id=sample_member.id,
+            amount=Decimal("450.00"),
+            currency="CAD",
+            paid_at=date.today(),
+            method="Cash",
+        )
+    )
+    group = VolunteerGroup(name="Community Support")
+    db_session.add(group)
+    db_session.flush()
+    db_session.add(
+        VolunteerWorker(
+            group_id=group.id,
+            first_name=sample_member.first_name,
+            last_name=sample_member.last_name,
+            phone=sample_member.phone,
+            service_type="GeneralService",
+            service_date=date.today(),
+        )
+    )
+    db_session.add(
+        Sponsorship(
+            sponsor_member_id=sample_member.id,
+            beneficiary_name="Previous Beneficiary",
+            frequency="Monthly",
+            start_date=date.today() - timedelta(days=30),
+            status="Active",
+            monthly_amount=Decimal("100.00"),
+            received_amount=Decimal("0.00"),
+        )
+    )
+    db_session.commit()
+    authorize(sponsorship_user)
+
+    response = client.get("/sponsorships/pre-screening", params={"q": sample_member.username})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["summary"]["eligible"] == 1
+    item = payload["items"][0]
+    assert item["member_id"] == sample_member.id
+    assert item["eligibility"] == "Eligible"
+    assert item["score"] == 100
+    assert item["consecutive_payment_months"] >= item["required_consecutive_payment_months"]
+    assert item["sponsorship_count"] == 1
+    assert item["active_sponsorship_count"] == 1
+    assert item["last_beneficiary_name"] == "Previous Beneficiary"
+    assert item["is_volunteer"] is True
+    assert item["volunteer_match_method"] == "Phone"
+    assert item["volunteer_groups"] == ["Community Support"]
+
+    export_response = client.get(
+        "/sponsorships/pre-screening/export.xlsx",
+        params={"eligibility": "Eligible", "ids": str(sample_member.id)},
+    )
+    assert export_response.status_code == 200, export_response.text
+    assert export_response.content.startswith(b"PK")
+    assert "sponsorship_prescreening_selected.xlsx" in export_response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+    assert "Sponsor Pre-screening" in workbook_xml
+    assert "continuous_payment_detail" in sheet_xml
+    assert sample_member.username in sheet_xml
+    assert "Previous Beneficiary" in sheet_xml
+
+
+def test_sponsorship_prescreening_filters_failed_members(
+    client,
+    authorize,
+    sponsorship_user,
+    db_session,
+):
+    member = Member(
+        first_name="New",
+        last_name="Applicant",
+        username="new.applicant",
+        email="new.applicant@example.com",
+        phone="+16135550177",
+        status="Active",
+        join_date=date.today(),
+        pays_contribution=True,
+    )
+    db_session.add(member)
+    db_session.commit()
+    authorize(sponsorship_user)
+
+    response = client.get(
+        "/sponsorships/pre-screening",
+        params={"eligibility": "NotEligible", "volunteer": "false"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    item = next(entry for entry in payload["items"] if entry["member_id"] == member.id)
+    assert item["eligibility"] == "NotEligible"
+    assert item["is_volunteer"] is False
+    assert any(criterion["code"] == "membership_tenure" and criterion["status"] == "Fail" for criterion in item["criteria"])
+    assert any(criterion["code"] == "payment_current" and criterion["status"] == "Fail" for criterion in item["criteria"])

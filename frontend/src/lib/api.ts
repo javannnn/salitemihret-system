@@ -1006,6 +1006,64 @@ export type SponsorshipSponsorContext = {
   payment_history?: ContributionPayment[];
 };
 
+export type SponsorshipPrescreeningCriterion = {
+  code: string;
+  label: string;
+  status: "Pass" | "Review" | "Fail";
+  detail: string;
+};
+
+export type SponsorshipPrescreeningItem = {
+  member_id: number;
+  member_name: string;
+  username: string;
+  member_status: string;
+  member_email?: string | null;
+  member_phone?: string | null;
+  join_date?: string | null;
+  tenure_months?: number | null;
+  pays_contribution: boolean;
+  contribution_exception_reason?: string | null;
+  eligibility: "Eligible" | "Review" | "NotEligible";
+  score: number;
+  criteria: SponsorshipPrescreeningCriterion[];
+  blocking_reasons: string[];
+  last_payment_at?: string | null;
+  next_payment_due_at?: string | null;
+  payment_overdue_days?: number | null;
+  consecutive_payment_months: number;
+  required_consecutive_payment_months: number;
+  sponsorship_count: number;
+  active_sponsorship_count: number;
+  completed_sponsorship_count: number;
+  last_sponsorship_id?: number | null;
+  last_sponsorship_date?: string | null;
+  last_sponsorship_status?: string | null;
+  last_beneficiary_name?: string | null;
+  is_volunteer: boolean;
+  volunteer_service_count: number;
+  last_volunteer_service_date?: string | null;
+  volunteer_groups: string[];
+  volunteer_service_types: string[];
+  volunteer_match_method?: string | null;
+};
+
+export type SponsorshipPrescreeningResponse = {
+  items: SponsorshipPrescreeningItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary: {
+    total: number;
+    eligible: number;
+    review: number;
+    not_eligible: number;
+    volunteers: number;
+    payments_current: number;
+  };
+  tenure_requirement_months: number;
+};
+
 export type VolunteerServiceType = "Holiday" | "GeneralService";
 
 export type VolunteerGroup = {
@@ -1923,6 +1981,51 @@ export async function listSponsorships(params: SponsorshipFilters = {}): Promise
   return api<SponsorshipListResponse>(`/sponsorships${query ? `?${query}` : ""}`);
 }
 
+export async function listSponsorshipPrescreening(
+  params: {
+    page?: number;
+    page_size?: number;
+    q?: string;
+    eligibility?: SponsorshipPrescreeningItem["eligibility"];
+    volunteer?: boolean;
+  } = {},
+): Promise<SponsorshipPrescreeningResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return api<SponsorshipPrescreeningResponse>(`/sponsorships/pre-screening${query ? `?${query}` : ""}`);
+}
+
+export async function exportSponsorshipPrescreeningExcel(
+  params: {
+    q?: string;
+    eligibility?: SponsorshipPrescreeningItem["eligibility"];
+    volunteer?: boolean;
+    ids?: string;
+  } = {},
+): Promise<Blob> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  const res = await authFetch(`${API_BASE}/sponsorships/pre-screening/export.xlsx${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  });
+  if (res.status === 401 && shouldHandleUnauthorized(res)) {
+    handleUnauthorized("Unauthorized");
+  }
+  if (!res.ok) {
+    const message = await res.text();
+    throw new ApiError(res.status, message || "Pre-screening export failed");
+  }
+  return res.blob();
+}
+
 export async function getSponsorship(id: number): Promise<Sponsorship> {
   return api<Sponsorship>(`/sponsorships/${id}`);
 }
@@ -2208,12 +2311,26 @@ export async function transitionSponsorshipStatus(id: number, payload: Sponsorsh
   });
 }
 
-export async function getSponsorshipTimeline(id: number): Promise<SponsorshipTimelineResponse> {
-  return api<SponsorshipTimelineResponse>(`/sponsorships/${id}/timeline`);
+export async function getSponsorshipTimeline(
+  id: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<SponsorshipTimelineResponse> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<SponsorshipTimelineResponse>(`/sponsorships/${id}/timeline${query ? `?${query}` : ""}`);
 }
 
-export async function listSponsorshipNotes(id: number): Promise<SponsorshipNotesListResponse> {
-  return api<SponsorshipNotesListResponse>(`/sponsorships/${id}/notes`);
+export async function listSponsorshipNotes(
+  id: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<SponsorshipNotesListResponse> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<SponsorshipNotesListResponse>(`/sponsorships/${id}/notes${query ? `?${query}` : ""}`);
 }
 
 export async function createSponsorshipNote(id: number, payload: SponsorshipNotePayload): Promise<SponsorshipNote> {
@@ -2312,8 +2429,15 @@ export async function reactivateNewcomer(id: number, payload: NewcomerReactivate
   });
 }
 
-export async function getNewcomerTimeline(id: number): Promise<NewcomerTimelineResponse> {
-  return api<NewcomerTimelineResponse>(`/newcomers/${id}/timeline`);
+export async function getNewcomerTimeline(
+  id: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<NewcomerTimelineResponse> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<NewcomerTimelineResponse>(`/newcomers/${id}/timeline${query ? `?${query}` : ""}`);
 }
 
 export async function convertNewcomer(id: number, payload: NewcomerConvertPayload): Promise<Newcomer> {
@@ -2323,8 +2447,15 @@ export async function convertNewcomer(id: number, payload: NewcomerConvertPayloa
   });
 }
 
-export async function listNewcomerInteractions(id: number): Promise<NewcomerInteractionListResponse> {
-  return api<NewcomerInteractionListResponse>(`/newcomers/${id}/interactions`);
+export async function listNewcomerInteractions(
+  id: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<NewcomerInteractionListResponse> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<NewcomerInteractionListResponse>(`/newcomers/${id}/interactions${query ? `?${query}` : ""}`);
 }
 
 export async function createNewcomerInteraction(id: number, payload: NewcomerInteractionPayload): Promise<NewcomerInteraction> {
@@ -2334,8 +2465,15 @@ export async function createNewcomerInteraction(id: number, payload: NewcomerInt
   });
 }
 
-export async function listNewcomerAddressHistory(id: number): Promise<NewcomerAddressHistoryListResponse> {
-  return api<NewcomerAddressHistoryListResponse>(`/newcomers/${id}/address-history`);
+export async function listNewcomerAddressHistory(
+  id: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<NewcomerAddressHistoryListResponse> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<NewcomerAddressHistoryListResponse>(`/newcomers/${id}/address-history${query ? `?${query}` : ""}`);
 }
 
 export async function listLessons(level?: Lesson["level"]): Promise<Lesson[]> {
@@ -2810,9 +2948,17 @@ export async function deleteMemberMinistry(ministryId: number): Promise<void> {
   await api<void>(`/member-ministries/${ministryId}`, { method: "DELETE" });
 }
 
-export async function getIndividualMemberReport(memberId: number, source: "members" | "payments" = "members"): Promise<IndividualMemberReport> {
+export async function getIndividualMemberReport(
+  memberId: number,
+  source: "members" | "payments" = "members",
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<IndividualMemberReport> {
   const prefix = source === "payments" ? "/reports/payments/members" : "/reports/members";
-  return api<IndividualMemberReport>(`${prefix}/${memberId}/individual`);
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<IndividualMemberReport>(`${prefix}/${memberId}/individual${query ? `?${query}` : ""}`);
 }
 
 export type PriestPayload = {

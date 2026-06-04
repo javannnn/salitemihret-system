@@ -23,6 +23,8 @@ SponsorshipPledgeChannel = Literal["InPerson", "OnlinePortal", "Phone", "EventBo
 SponsorshipReminderChannel = Literal["Email", "SMS", "Phone", "WhatsApp"]
 SponsorshipMotivation = Literal["HonorMemorial", "CommunityOutreach", "Corporate", "ParishInitiative", "Other"]
 SponsorshipNotesTemplate = Literal["FollowUp", "PaymentIssue", "Gratitude", "Escalation"]
+SponsorshipPrescreeningEligibility = Literal["Eligible", "Review", "NotEligible"]
+SponsorshipPrescreeningCriterionStatus = Literal["Pass", "Review", "Fail"]
 
 
 class MemberSummary(BaseModel):
@@ -300,6 +302,66 @@ class SponsorshipSponsorContext(BaseModel):
     payment_history_start: Optional[date]
     payment_history_end: Optional[date]
     payment_history: list[ContributionPaymentOut] = Field(default_factory=list)
+
+
+class SponsorshipPrescreeningCriterion(BaseModel):
+    code: str
+    label: str
+    status: SponsorshipPrescreeningCriterionStatus
+    detail: str
+
+
+class SponsorshipPrescreeningItem(BaseModel):
+    member_id: int
+    member_name: str
+    username: str
+    member_status: str
+    member_email: Optional[str]
+    member_phone: Optional[str]
+    join_date: Optional[date]
+    tenure_months: Optional[int]
+    pays_contribution: bool
+    contribution_exception_reason: Optional[str]
+    eligibility: SponsorshipPrescreeningEligibility
+    score: int
+    criteria: list[SponsorshipPrescreeningCriterion]
+    blocking_reasons: list[str]
+    last_payment_at: Optional[datetime]
+    next_payment_due_at: Optional[datetime]
+    payment_overdue_days: Optional[int]
+    consecutive_payment_months: int
+    required_consecutive_payment_months: int
+    sponsorship_count: int
+    active_sponsorship_count: int
+    completed_sponsorship_count: int
+    last_sponsorship_id: Optional[int]
+    last_sponsorship_date: Optional[date]
+    last_sponsorship_status: Optional[str]
+    last_beneficiary_name: Optional[str]
+    is_volunteer: bool
+    volunteer_service_count: int
+    last_volunteer_service_date: Optional[date]
+    volunteer_groups: list[str]
+    volunteer_service_types: list[str]
+    volunteer_match_method: Optional[str]
+
+
+class SponsorshipPrescreeningSummary(BaseModel):
+    total: int
+    eligible: int
+    review: int
+    not_eligible: int
+    volunteers: int
+    payments_current: int
+
+
+class SponsorshipPrescreeningResponse(BaseModel):
+    items: list[SponsorshipPrescreeningItem]
+    total: int
+    page: int
+    page_size: int
+    summary: SponsorshipPrescreeningSummary
+    tenure_requirement_months: int
 
 
 class SponsorshipTimelineEvent(BaseModel):

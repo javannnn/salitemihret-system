@@ -683,6 +683,8 @@ def list_interactions(
     *,
     actor_id: int | None,
     include_restricted: bool,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> NewcomerInteractionListResponse:
     if not db.query(Newcomer).filter(Newcomer.id == newcomer_id).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
@@ -692,6 +694,10 @@ def list_interactions(
         query = query.filter(
             (NewcomerInteraction.visibility == "Shared") | (NewcomerInteraction.created_by_id == actor_id)
         )
+    if start_date:
+        query = query.filter(NewcomerInteraction.occurred_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        query = query.filter(NewcomerInteraction.occurred_at <= datetime.combine(end_date, datetime.max.time()))
     query = query.order_by(NewcomerInteraction.occurred_at.desc())
     total = query.count()
     items = query.all()
@@ -725,20 +731,37 @@ def create_interaction(
     return interaction
 
 
-def list_address_history(db: Session, newcomer_id: int) -> NewcomerAddressHistoryListResponse:
+def list_address_history(
+    db: Session,
+    newcomer_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> NewcomerAddressHistoryListResponse:
     if not db.query(Newcomer).filter(Newcomer.id == newcomer_id).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
 
     query = (
         db.query(NewcomerAddressHistory)
         .filter(NewcomerAddressHistory.newcomer_id == newcomer_id)
-        .order_by(NewcomerAddressHistory.changed_at.desc())
     )
+    if start_date:
+        query = query.filter(NewcomerAddressHistory.changed_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        query = query.filter(NewcomerAddressHistory.changed_at <= datetime.combine(end_date, datetime.max.time()))
+    query = query.order_by(NewcomerAddressHistory.changed_at.desc())
     items = query.all()
     return NewcomerAddressHistoryListResponse(items=items, total=len(items))
 
 
-def list_timeline(db: Session, newcomer_id: int, actor: User) -> NewcomerTimelineResponse:
+def list_timeline(
+    db: Session,
+    newcomer_id: int,
+    actor: User,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> NewcomerTimelineResponse:
     newcomer = db.query(Newcomer).filter(Newcomer.id == newcomer_id).first()
     if not newcomer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
@@ -747,13 +770,16 @@ def list_timeline(db: Session, newcomer_id: int, actor: User) -> NewcomerTimelin
 
     events: list[NewcomerTimelineEvent] = []
 
-    audits = (
+    audits_query = (
         db.query(NewcomerStatusAudit)
         .options(joinedload(NewcomerStatusAudit.actor))
         .filter(NewcomerStatusAudit.newcomer_id == newcomer_id)
-        .order_by(NewcomerStatusAudit.changed_at.desc())
-        .all()
     )
+    if start_date:
+        audits_query = audits_query.filter(NewcomerStatusAudit.changed_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        audits_query = audits_query.filter(NewcomerStatusAudit.changed_at <= datetime.combine(end_date, datetime.max.time()))
+    audits = audits_query.order_by(NewcomerStatusAudit.changed_at.desc()).all()
     for audit in audits:
         label = "Status updated"
         if audit.action == "StatusChange":
@@ -786,13 +812,20 @@ def list_timeline(db: Session, newcomer_id: int, actor: User) -> NewcomerTimelin
             )
         )
 
-    interactions = (
+    interactions_query = (
         db.query(NewcomerInteraction)
         .options(joinedload(NewcomerInteraction.author))
         .filter(NewcomerInteraction.newcomer_id == newcomer_id)
-        .order_by(NewcomerInteraction.occurred_at.desc())
-        .all()
     )
+    if start_date:
+        interactions_query = interactions_query.filter(
+            NewcomerInteraction.occurred_at >= datetime.combine(start_date, datetime.min.time())
+        )
+    if end_date:
+        interactions_query = interactions_query.filter(
+            NewcomerInteraction.occurred_at <= datetime.combine(end_date, datetime.max.time())
+        )
+    interactions = interactions_query.order_by(NewcomerInteraction.occurred_at.desc()).all()
     for interaction in interactions:
         can_view = is_admin or (interaction.created_by_id == actor.id)
         detail = interaction.note if can_view else "Restricted note logged."
@@ -808,13 +841,20 @@ def list_timeline(db: Session, newcomer_id: int, actor: User) -> NewcomerTimelin
             )
         )
 
-    histories = (
+    histories_query = (
         db.query(NewcomerAddressHistory)
         .options(joinedload(NewcomerAddressHistory.actor))
         .filter(NewcomerAddressHistory.newcomer_id == newcomer_id)
-        .order_by(NewcomerAddressHistory.changed_at.desc())
-        .all()
     )
+    if start_date:
+        histories_query = histories_query.filter(
+            NewcomerAddressHistory.changed_at >= datetime.combine(start_date, datetime.min.time())
+        )
+    if end_date:
+        histories_query = histories_query.filter(
+            NewcomerAddressHistory.changed_at <= datetime.combine(end_date, datetime.max.time())
+        )
+    histories = histories_query.order_by(NewcomerAddressHistory.changed_at.desc()).all()
     for history in histories:
         address_bits = ", ".join(filter(None, [history.street, history.city, history.province, history.postal_code]))
         events.append(
