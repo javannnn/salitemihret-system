@@ -29,6 +29,7 @@ LICENSE_REMOTE_CHECK_INTERVAL_HOURS = settings.LICENSE_REMOTE_CHECK_INTERVAL_HOU
 LICENSE_REMOTE_GRACE_DAYS = settings.LICENSE_REMOTE_GRACE_DAYS
 LICENSE_REMOTE_TIMEOUT_SECONDS = settings.LICENSE_REMOTE_TIMEOUT_SECONDS
 LICENSE_REMOTE_STATE_PATH = LICENSE_DIR / "license_remote.json"
+LICENSE_CONTROL_PATH = LICENSE_DIR / "license_control.json"
 
 
 class LicenseValidationError(Exception):
@@ -301,11 +302,122 @@ def _days_remaining(target: datetime, now: datetime) -> int:
     return max(int(delta.total_seconds() // 86400) + 1, 0)
 
 
+
+def _load_license_control() -> dict[str, Any] | None:
+    control = _read_json(LICENSE_CONTROL_PATH)
+    if not isinstance(control, dict):
+        return None
+    if control.get("enabled") is False:
+        return None
+    return control
+
+
+def _apply_license_control(status: LicenseStatus, now: datetime) -> LicenseStatus:
+    control = _load_license_control()
+    if not control:
+        return status
+
+    control_state = str(control.get("state") or "").strip().lower()
+    message = str(control.get("message") or "").strip()
+    reason = str(control.get("reason") or "").strip()
+    customer = control.get("customer") or status.customer
+
+    raw_valid_until = control.get("valid_until") or control.get("expires_at")
+    valid_until = None
+
+    if raw_valid_until:
+        try:
+            valid_until = _parse_remote_datetime(str(raw_valid_until), "valid_until")
+        except LicenseValidationError:
+            return LicenseStatus(
+                state="invalid",
+                message="License control file has an invalid expiry date. Please contact Ace-Tech support.",
+                expires_at=None,
+                trial_expires_at=status.trial_expires_at,
+                days_remaining=0,
+                customer=customer,
+                payload=status.payload,
+            )
+
+    if control_state in {"revoked", "suspended", "inactive", "blocked"}:
+        return LicenseStatus(
+            state="invalid",
+            message=message or reason or "License is inactive. Please contact Ace-Tech support.",
+            expires_at=valid_until or status.expires_at,
+            trial_expires_at=status.trial_expires_at,
+            days_remaining=0,
+            customer=customer,
+            payload=status.payload,
+        )
+
+    if control_state == "expired":
+        return LicenseStatus(
+            state="expired",
+            message=message or "License has expired. Please renew to continue.",
+            expires_at=valid_until or status.expires_at,
+            trial_expires_at=status.trial_expires_at,
+            days_remaining=0,
+            customer=customer,
+            payload=status.payload,
+        )
+
+    if control_state == "active":
+        # Do not let a local control file resurrect a truly invalid base token.
+        if status.state in {"invalid", "expired"}:
+            return status
+
+        if not valid_until:
+            return status
+
+        if valid_until <= now:
+            return LicenseStatus(
+                state="expired",
+                message=message or "License has expired. Please renew to continue.",
+                expires_at=valid_until,
+                trial_expires_at=status.trial_expires_at,
+                days_remaining=0,
+                customer=customer,
+                payload=status.payload,
+            )
+
+        effective_expires_at = valid_until
+        if status.expires_at and status.expires_at < effective_expires_at:
+            effective_expires_at = status.expires_at
+
+        days_remaining = _days_remaining(effective_expires_at, now)
+
+        if effective_expires_at <= now:
+            return LicenseStatus(
+                state="expired",
+                message=message or "License has expired. Please renew to continue.",
+                expires_at=effective_expires_at,
+                trial_expires_at=status.trial_expires_at,
+                days_remaining=0,
+                customer=customer,
+                payload=status.payload,
+            )
+
+        return LicenseStatus(
+            state="active",
+            message=message or f"License active until {effective_expires_at.date().isoformat()}.",
+            expires_at=effective_expires_at,
+            trial_expires_at=status.trial_expires_at,
+            days_remaining=days_remaining,
+            customer=customer,
+            payload=status.payload,
+        )
+
+    return status
+
+
 def get_license_status() -> LicenseStatus:
     now = datetime.now(UTC)
     trial_started_at = _load_trial_started_at()
     trial_expires_at = trial_started_at + timedelta(days=DEFAULT_TRIAL_DAYS)
     token = _load_token()
+
+    def controlled(status: LicenseStatus) -> LicenseStatus:
+        return _apply_license_control(status, now)
 
     if token:
         try:
@@ -322,7 +434,7 @@ def get_license_status() -> LicenseStatus:
                     raise LicenseValidationError("License confirmation inactive")
                 remote_valid_until = remote_status["valid_until"]
                 if remote_valid_until <= now:
-                    return LicenseStatus(
+                    return controlled(LicenseStatus(
                         state="expired",
                         message="License confirmation expired. Please renew.",
                         expires_at=remote_valid_until,
@@ -330,12 +442,13 @@ def get_license_status() -> LicenseStatus:
                         days_remaining=0,
                         customer=customer,
                         payload=payload,
-                    )
+                    ))
                 if remote_valid_until < expires_at:
                     expires_at = remote_valid_until
+
             days_remaining = _days_remaining(expires_at, now)
             if expires_at <= now:
-                return LicenseStatus(
+                return controlled(LicenseStatus(
                     state="expired",
                     message="The installed license expired. Please upload a new license to continue.",
                     expires_at=expires_at,
@@ -343,8 +456,9 @@ def get_license_status() -> LicenseStatus:
                     days_remaining=0,
                     customer=customer,
                     payload=payload,
-                )
-            return LicenseStatus(
+                ))
+
+            return controlled(LicenseStatus(
                 state="active",
                 message="A valid license is active.",
                 expires_at=expires_at,
@@ -352,9 +466,9 @@ def get_license_status() -> LicenseStatus:
                 days_remaining=days_remaining,
                 customer=customer,
                 payload=payload,
-            )
+            ))
         except LicenseValidationError as exc:
-            return LicenseStatus(
+            return controlled(LicenseStatus(
                 state="invalid",
                 message=str(exc),
                 expires_at=None,
@@ -362,11 +476,11 @@ def get_license_status() -> LicenseStatus:
                 days_remaining=0,
                 customer=None,
                 payload=None,
-            )
+            ))
 
     if now <= trial_expires_at:
         days_remaining = _days_remaining(trial_expires_at, now)
-        return LicenseStatus(
+        return controlled(LicenseStatus(
             state="trial",
             message="Trial mode active.",
             expires_at=trial_expires_at,
@@ -374,9 +488,9 @@ def get_license_status() -> LicenseStatus:
             days_remaining=days_remaining,
             customer=None,
             payload=None,
-        )
+        ))
 
-    return LicenseStatus(
+    return controlled(LicenseStatus(
         state="expired",
         message="The evaluation period has ended. Install a license to continue.",
         expires_at=trial_expires_at,
@@ -384,7 +498,7 @@ def get_license_status() -> LicenseStatus:
         days_remaining=0,
         customer=None,
         payload=None,
-    )
+    ))
 
 
 def activate_license(token: str) -> LicenseStatus:

@@ -699,13 +699,13 @@ export default function AppShell() {
                   {isLicenseActive
                     ? "Permanent license activated for SaliteMihret EOTC. Full access is enabled for this deployment."
                     : licenseStatus.message}{" "}
-                  {!isLicenseActive && licenseStatus.expires_at && (
+                  {licenseStatus.expires_at && (
                     <span>
                       Expires{" "}
                       <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
                     </span>
                   )}
-                  {!isLicenseActive && licenseStatus.days_remaining >= 0 && (
+                  {licenseStatus.days_remaining >= 0 && (
                     <span className="ml-1">
                       {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
                     </span>
