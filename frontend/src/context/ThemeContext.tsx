@@ -20,7 +20,7 @@ function resolveInitialTheme(): ThemeMode {
   if (stored === "light" || stored === "dark") {
     return stored;
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "light";
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
