@@ -9,7 +9,18 @@ import { Button } from "@/components/ui";
 const CLAMP_PADDING = 16;
 
 export function TourOverlay() {
-  const { active, currentIndex, currentStep, steps, targetRect, nextStep, previousStep, skipTour, skipTourForNow } = useTour();
+  const {
+    active,
+    currentIndex,
+    currentStep,
+    steps,
+    targetRect,
+    targetMissing,
+    nextStep,
+    previousStep,
+    skipTour,
+    skipTourForNow,
+  } = useTour();
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [tooltipSize, setTooltipSize] = useState<{ width: number; height: number }>({ width: 340, height: 200 });
@@ -109,7 +120,17 @@ export function TourOverlay() {
               </div>
               <h3 className="text-lg font-semibold leading-tight text-white">{currentStep.title}</h3>
               <p className="text-sm text-slate-200 leading-relaxed">{currentStep.description}</p>
-              {!targetRect && <p className="text-xs text-amber-300">Looking for this part of the UI…</p>}
+              {currentStep.interaction && (
+                <div className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs leading-relaxed text-slate-100">
+                  <span className="font-semibold text-white">Try this:</span> {currentStep.interaction}
+                </div>
+              )}
+              {!targetRect && !targetMissing && <p className="text-xs text-amber-300">Looking for this part of the UI...</p>}
+              {targetMissing && (
+                <p className="text-xs text-amber-200">
+                  This area is not available in the current data or layout. You can continue to the next step.
+                </p>
+              )}
             </div>
             <button
               type="button"
@@ -122,17 +143,25 @@ export function TourOverlay() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex gap-2">
-              <Button variant="ghost" className="px-3 py-1.5 text-sm" onClick={skipTourForNow}>
+              <Button
+                variant="ghost"
+                className="border-white/20 bg-white/5 px-3 py-1.5 text-sm !text-slate-100 hover:border-white/40 hover:bg-white/10"
+                onClick={skipTourForNow}
+              >
                 Skip for now
               </Button>
-              <Button variant="ghost" className="px-3 py-1.5 text-sm" onClick={skipTour}>
+              <Button
+                variant="ghost"
+                className="border-white/20 bg-white/5 px-3 py-1.5 text-sm !text-slate-100 hover:border-white/40 hover:bg-white/10"
+                onClick={skipTour}
+              >
                 Skip forever
               </Button>
             </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
-                className="px-3 py-1.5 text-sm"
+                className="border-white/20 bg-white/5 px-3 py-1.5 text-sm !text-slate-100 hover:border-white/40 hover:bg-white/10"
                 onClick={previousStep}
                 disabled={currentIndex === 0}
               >
@@ -143,7 +172,7 @@ export function TourOverlay() {
                 className="px-3 py-1.5 text-sm"
                 onClick={currentIndex === totalSteps - 1 ? skipTour : nextStep}
               >
-                {currentIndex === totalSteps - 1 ? "Finish" : "Next"}
+                {currentIndex === totalSteps - 1 ? "Finish" : targetMissing && currentStep.optional ? "Skip step" : "Next"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>

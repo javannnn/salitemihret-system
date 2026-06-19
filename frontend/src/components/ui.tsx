@@ -25,7 +25,7 @@ export function Button({
   const solid =
     "bg-accent text-accent-foreground border-accent hover:shadow-ring hover:-translate-y-0.5";
   const ghost =
-    "border-border hover:border-accent/40 hover:bg-accent/10 text-ink dark:text-accent-foreground/90";
+    "border-border bg-card/40 text-ink hover:border-accent/40 hover:bg-accent/10";
   const soft =
     "border-transparent bg-accent/10 text-accent hover:bg-accent/20";
   // @ts-ignore

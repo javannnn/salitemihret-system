@@ -649,7 +649,11 @@ export default function AppShell() {
           <Card className="w-full max-w-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Install license</h2>
-              <Button variant="ghost" onClick={() => setLicenseModalOpen(false)}>
+              <Button
+                variant="ghost"
+                className="border-slate-200 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                onClick={() => setLicenseModalOpen(false)}
+              >
                 Close
               </Button>
             </div>
@@ -664,7 +668,11 @@ export default function AppShell() {
               placeholder="-----BEGIN LICENSE-----"
             />
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setLicenseModalOpen(false)}>
+              <Button
+                variant="ghost"
+                className="border-slate-200 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                onClick={() => setLicenseModalOpen(false)}
+              >
                 Cancel
               </Button>
               <Button onClick={handleLicenseActivate} disabled={licenseSubmitting}>
@@ -679,7 +687,11 @@ export default function AppShell() {
           <Card className="w-full max-w-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">License status</h2>
-              <Button variant="ghost" onClick={() => setLicenseStatusOpen(false)}>
+              <Button
+                variant="ghost"
+                className="border-slate-200 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                onClick={() => setLicenseStatusOpen(false)}
+              >
                 Close
               </Button>
             </div>
@@ -730,7 +742,12 @@ export default function AppShell() {
               <div className="text-sm text-mute">Loading license status…</div>
             )}
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={refreshLicense} disabled={licenseLoading}>
+              <Button
+                variant="ghost"
+                className="border-slate-200 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                onClick={refreshLicense}
+                disabled={licenseLoading}
+              >
                 Refresh
               </Button>
               {canManageLicense && (
