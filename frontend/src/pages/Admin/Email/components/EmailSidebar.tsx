@@ -44,7 +44,7 @@ export function EmailSidebar({
                 eyebrow: "text-amber-700/80",
                 iconShell: "bg-amber-500/15 text-amber-700 ring-1 ring-amber-300/50",
                 action: "border-amber-300/60 bg-white/80 text-amber-900 hover:bg-white",
-                title: "Routing attention needed",
+                title: "Email routing attention needed",
             }
             : mailStatus?.state === "ready"
                 ? {
@@ -53,7 +53,7 @@ export function EmailSidebar({
                     eyebrow: "text-emerald-700/80",
                     iconShell: "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-300/60",
                     action: "border-emerald-300/60 bg-white/80 text-emerald-900 hover:bg-white",
-                    title: "Mail flow verified",
+                    title: "Email routing verified",
                 }
                 : {
                     icon: Signal,
@@ -61,7 +61,7 @@ export function EmailSidebar({
                     eyebrow: "text-slate-500",
                     iconShell: "bg-slate-900/5 text-slate-700 ring-1 ring-slate-200",
                     action: "border-slate-300/70 bg-white/80 text-slate-900 hover:bg-white",
-                    title: "Mail flow checking",
+                    title: "Email routing checking",
                 };
     const StatusIcon = statusTone.icon;
     const mailStatusSummary = mailStatus?.summary ?? "Checking inbound routing and mailbox reachability.";
@@ -104,7 +104,7 @@ export function EmailSidebar({
                 <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                         <div className={`text-[10px] font-semibold uppercase tracking-[0.24em] ${statusTone.eyebrow}`}>
-                            Mail flow
+                            Email routing
                         </div>
                         <div className="mt-2 text-sm font-semibold leading-5">
                             {statusTone.title}

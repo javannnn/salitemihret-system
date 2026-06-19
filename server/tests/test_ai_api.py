@@ -15,7 +15,7 @@ from app.models.sponsorship import Sponsorship
 from app.models.user import User
 from app.schemas.ai import AIReportQARequest, NewcomerFollowUpDraftRequest
 from app.services.ai.models import AIProviderKind, AITextGeneration
-from app.services.ai.providers import MockAIProvider
+from app.services.ai.providers import AIProviderError, MockAIProvider
 from app.services.ai.service import AIService, AITaskDisabledError
 
 
@@ -43,6 +43,23 @@ class RecordingAIProvider:
             model=model,
             content=self.content,
         )
+
+
+class FailingAIProvider:
+    kind = AIProviderKind.OPENAI_COMPATIBLE
+
+    def is_available(self) -> bool:
+        return True
+
+    def generate_text(
+        self,
+        *,
+        model: str,
+        messages,
+        temperature: float,
+        max_tokens: int,
+    ) -> AITextGeneration:
+        raise AIProviderError("AI provider connection failed: [Errno 111] Connection refused")
 
 
 def test_ai_capabilities_returns_catalog():
@@ -827,6 +844,35 @@ def test_report_qa_answers_from_broader_system_context_after_confirmation(
     assert provider.captured_messages
     assert "Broader system metadata JSON" in provider.captured_messages[-1].content
     assert "How do I reset a user's password?" in provider.captured_messages[-1].content
+
+
+def test_report_qa_falls_back_to_report_data_when_provider_is_unavailable(
+    db_session,
+    admin_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "AI_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai_compatible")
+    monkeypatch.setattr(settings, "AI_REPORT_QA_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_DEFAULT_CHAT_MODEL", "qwen2.5-3b-instruct-q4_k_m")
+    service = AIService(provider=FailingAIProvider())
+
+    payload = service.answer_report_question(
+        db_session,
+        user=admin_user,
+        payload=AIReportQARequest(
+            question="Summarize payments and members",
+            modules=["members", "payments"],
+        ),
+    )
+
+    assert payload.status == "answered"
+    assert payload.provider == "grounded"
+    assert payload.model == "report-data-fallback"
+    assert "configured AI provider is unavailable" in payload.warnings[0]
+    assert any("Connection refused" in warning for warning in payload.warnings)
+    assert "Mock provider output" not in payload.warnings
+    assert payload.answer
 
 
 def test_report_qa_answers_user_management_features_in_plain_language(

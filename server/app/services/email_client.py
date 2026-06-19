@@ -200,7 +200,6 @@ def get_inbox_status() -> InboxStatus:
         )
 
     if mx_lookup_succeeded and public_mx_hosts and not mx_aligned:
-        mx_list = ", ".join(public_mx_hosts)
         return InboxStatus(
             state="mx_mismatch",
             configured=True,
@@ -211,12 +210,10 @@ def get_inbox_status() -> InboxStatus:
             imap_host=imap_host or None,
             imap_port=imap_port,
             public_mx_hosts=public_mx_hosts,
-            summary=(
-                f"Public mail for {mailbox_domain} routes to {mx_list}, but this inbox is connected to {imap_host}."
-            ),
+            summary="The domain's public mail records point to a different provider than the inbox connected here.",
             details=(
-                "Messages sent from outside follow the public MX records first. Create the mailbox on that "
-                "provider or repoint the domain MX records to the host used by this inbox."
+                "Messages from outside follow the public mail records first. Connect the app to the mailbox "
+                "provider used by those records, or update the domain mail records to match this inbox."
             ),
         )
 

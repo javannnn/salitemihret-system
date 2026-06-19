@@ -921,6 +921,9 @@ function formatModelLabel(model: string) {
     if (model === "report-rules") {
         return "report rules";
     }
+    if (model === "report-data-fallback") {
+        return "provider fallback";
+    }
     return model;
 }
 

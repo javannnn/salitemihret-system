@@ -146,16 +146,19 @@ class AIService:
                 question=normalized_payload.question,
                 report_modules=context.applied_modules,
             )
-            generation = self.provider.generate_text(
-                model=settings.AI_DEFAULT_CHAT_MODEL,
-                messages=build_broader_report_qa_messages(
-                    normalized_payload,
-                    report_context=context.prompt_context,
-                    system_context=system_context,
-                ),
-                temperature=0.1,
-                max_tokens=700,
-            )
+            try:
+                generation = self.provider.generate_text(
+                    model=settings.AI_DEFAULT_CHAT_MODEL,
+                    messages=build_broader_report_qa_messages(
+                        normalized_payload,
+                        report_context=context.prompt_context,
+                        system_context=system_context,
+                    ),
+                    temperature=0.1,
+                    max_tokens=700,
+                )
+            except AIProviderError as exc:
+                return _report_provider_fallback(normalized_payload, context=context, error=exc)
             warnings = [
                 "Broader system answer uses approved API/schema metadata and may be incomplete or inferred.",
                 *list(generation.warnings),
@@ -179,12 +182,15 @@ class AIService:
             response = build_mock_report_answer(normalized_payload, context=context)
             return response.model_copy(update={"model": settings.AI_DEFAULT_CHAT_MODEL or response.model})
 
-        generation = self.provider.generate_text(
-            model=settings.AI_DEFAULT_CHAT_MODEL,
-            messages=build_report_qa_messages(normalized_payload, prompt_context=context.prompt_context),
-            temperature=0.1,
-            max_tokens=700,
-        )
+        try:
+            generation = self.provider.generate_text(
+                model=settings.AI_DEFAULT_CHAT_MODEL,
+                messages=build_report_qa_messages(normalized_payload, prompt_context=context.prompt_context),
+                temperature=0.1,
+                max_tokens=700,
+            )
+        except AIProviderError as exc:
+            return _report_provider_fallback(normalized_payload, context=context, error=exc)
         warnings = list(generation.warnings) + context.warnings
         return AIReportAnswerResponse(
             task="report_qa",
@@ -202,6 +208,28 @@ class AIService:
 
 def get_ai_service() -> AIService:
     return AIService()
+
+
+def _report_provider_fallback(
+    payload: AIReportQARequest,
+    *,
+    context,
+    error: AIProviderError,
+) -> AIReportAnswerResponse:
+    response = build_mock_report_answer(payload, context=context)
+    warnings = [
+        "The configured AI provider is unavailable, so this answer used live report data and deterministic report rules.",
+        f"Provider error: {error}",
+        *[warning for warning in response.warnings if "Mock provider output" not in warning],
+    ]
+    return response.model_copy(
+        update={
+            "provider": "grounded",
+            "model": "report-data-fallback",
+            "warnings": warnings,
+            "requires_human_review": True,
+        }
+    )
 
 
 def _split_subject(content: str) -> tuple[str | None, str]:

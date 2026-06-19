@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -97,12 +97,10 @@ def get_email(
 @router.post("/send", status_code=status.HTTP_202_ACCEPTED)
 def send_email(
     payload: SendEmailRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _: object = Depends(require_super_admin),
 ) -> dict[str, object]:
     try:
-        print("DEBUG: send_email entered")
         recipients: list[str] = []
         if payload.audience:
             audience = payload.audience
@@ -165,8 +163,7 @@ def send_email(
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Attachment error: {str(e)}")
 
-        background_tasks.add_task(
-            _send_email_task,
+        accepted, refused = email_client.send_email(
             subject=payload.subject,
             to=recipients,
             cc=[str(c) for c in payload.cc],
@@ -177,34 +174,14 @@ def send_email(
             attachments=attachments_data,
         )
 
-        print(f"DEBUG: send_email success, recipients={len(recipients)}")
-        return {"status": "accepted", "refused": []}
+        if not accepted:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email could not be sent from this server. The SMTP connection is unavailable.",
+            )
+
+        return {"status": "accepted", "refused": refused}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"DEBUG: send_email error: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal Error: {str(e)}")
-
-
-def _send_email_task(
-    subject: str,
-    to: list[str],
-    cc: list[str] | None,
-    bcc: list[str] | None,
-    body_html: str | None,
-    body_text: str | None,
-    reply_to: str | None,
-    attachments: list[dict],
-) -> None:
-    email_client.send_email(
-        subject=subject,
-        to=to,
-        cc=cc,
-        bcc=bcc,
-        body_html=body_html,
-        body_text=body_text,
-        reply_to=reply_to,
-        attachments=attachments,
-    )
