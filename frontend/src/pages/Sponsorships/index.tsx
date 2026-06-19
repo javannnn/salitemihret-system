@@ -24,7 +24,7 @@ import { Badge, Button, Card, Input, Select, Textarea } from "@/components/ui";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/components/Toast";
 import { useTour } from "@/context/TourContext";
-import { getCache, setCache } from "@/lib/cache";
+import { clearCachePrefix, getCache, setCache } from "@/lib/cache";
 import {
   ApiCapabilities,
   ApiError,
@@ -675,6 +675,8 @@ export default function SponsorshipWorkspace() {
   const [prescreening, setPrescreening] = useState<SponsorshipPrescreeningResponse | null>(null);
   const [prescreenLoading, setPrescreenLoading] = useState(false);
   const [prescreenRefreshTick, setPrescreenRefreshTick] = useState(0);
+  const [listRefreshTick, setListRefreshTick] = useState(0);
+  const [metricsRefreshTick, setMetricsRefreshTick] = useState(0);
   const [expandedPrescreenMemberId, setExpandedPrescreenMemberId] = useState<number | null>(null);
   const [selectedPrescreenMemberIds, setSelectedPrescreenMemberIds] = useState<Set<number>>(new Set());
   const [prescreenFilters, setPrescreenFilters] = useState({
@@ -881,7 +883,7 @@ export default function SponsorshipWorkspace() {
           setLoading(false);
         }
       });
-  }, [listPayload, listCacheKey, canView, toast]);
+  }, [listPayload, listCacheKey, canView, toast, listRefreshTick]);
 
   useEffect(() => {
     if (!canView || activeView !== "budget") return;
@@ -992,7 +994,7 @@ export default function SponsorshipWorkspace() {
         console.error(error);
         toast.push("Unable to load sponsorship metrics.");
       });
-  }, [canView, toast]);
+  }, [canView, toast, metricsRefreshTick]);
 
   useEffect(() => {
     setSelectedCaseIds(new Set());
@@ -1352,7 +1354,9 @@ export default function SponsorshipWorkspace() {
   ].filter(Boolean);
 
   const handleRefresh = () => {
-    setFilters((prev) => ({ ...prev }));
+    clearCachePrefix("sponsorships:");
+    setListRefreshTick((prev) => prev + 1);
+    setMetricsRefreshTick((prev) => prev + 1);
     if (activeView === "budget") {
       setBudgetRefreshTick((prev) => prev + 1);
       setRoundRefreshTick((prev) => prev + 1);

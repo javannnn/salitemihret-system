@@ -210,4 +210,10 @@ def test_individual_member_report_includes_requested_client_report_fields(
         },
     )
     assert payment_report_response.status_code == 200, payment_report_response.text
-    assert [item["id"] for item in payment_report_response.json()["payments"]] == [payment.id]
+    payment_report = payment_report_response.json()
+    assert [item["id"] for item in payment_report["payments"]] == [payment.id]
+    assert payment_report["sponsorships"] == []
+    assert payment_report["client_report_fields"]["sponsorship"]["number_sponsored"] == 0
+    assert payment_report["client_report_fields"]["sponsorship"]["last_sponsored_date"] is None
+    assert payment_report["client_report_fields"]["sponsorship"]["last_sponsor_status"] is None
+    assert payment_report["client_report_fields"]["sponsorship"]["volunteer_rows"] == []

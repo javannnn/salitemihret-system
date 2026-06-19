@@ -24,3 +24,11 @@ export function setCache<T>(key: string, value: T): void {
 export function clearCache(key: string): void {
   memoryCache.delete(key);
 }
+
+export function clearCachePrefix(prefix: string): void {
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) {
+      memoryCache.delete(key);
+    }
+  }
+}

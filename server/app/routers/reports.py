@@ -137,6 +137,7 @@ def _build_individual_member_report(
     start_date: date | None = None,
     end_date: date | None = None,
     db: Session = Depends(get_db),
+    include_sponsorship_details: bool = True,
 ) -> IndividualMemberReportResponse:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date must be on or before end date")
@@ -266,15 +267,17 @@ def _build_individual_member_report(
         payment_query = payment_query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
     payments = payment_query.order_by(Payment.posted_at.desc(), Payment.id.desc()).limit(100).all()
 
-    sponsorship_query = (
-        db.query(Sponsorship)
-        .filter(or_(Sponsorship.sponsor_member_id == member.id, Sponsorship.beneficiary_member_id == member.id))
-    )
-    if start_date:
-        sponsorship_query = sponsorship_query.filter(Sponsorship.start_date >= start_date)
-    if end_date:
-        sponsorship_query = sponsorship_query.filter(Sponsorship.start_date <= end_date)
-    sponsorships = sponsorship_query.order_by(Sponsorship.created_at.desc(), Sponsorship.id.desc()).limit(100).all()
+    sponsorships: list[Sponsorship] = []
+    if include_sponsorship_details:
+        sponsorship_query = (
+            db.query(Sponsorship)
+            .filter(or_(Sponsorship.sponsor_member_id == member.id, Sponsorship.beneficiary_member_id == member.id))
+        )
+        if start_date:
+            sponsorship_query = sponsorship_query.filter(Sponsorship.start_date >= start_date)
+        if end_date:
+            sponsorship_query = sponsorship_query.filter(Sponsorship.start_date <= end_date)
+        sponsorships = sponsorship_query.order_by(Sponsorship.created_at.desc(), Sponsorship.id.desc()).limit(100).all()
     sponsorship_payload = [
         IndividualSponsorshipReportItem(
             id=item.id,
@@ -402,7 +405,14 @@ def individual_payment_member_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_report_access("payments", source_module="payments")),
 ) -> IndividualMemberReportResponse:
-    return _build_individual_member_report(member_id, current_user, start_date, end_date, db)
+    return _build_individual_member_report(
+        member_id,
+        current_user,
+        start_date,
+        end_date,
+        db,
+        include_sponsorship_details=False,
+    )
 
 
 @router.get("/parish-councils", response_model=ParishCouncilReportResponse)

@@ -61,6 +61,7 @@ export function MembersReport({
     const [individualLoading, setIndividualLoading] = useState(false);
     const individualRequestId = useRef(0);
     const toast = useToast();
+    const isPaymentReport = individualReportSource === "payments";
 
     const normalizedRange = useMemo(() => {
         if (dateRange.start && dateRange.end && dateRange.start > dateRange.end) {
@@ -572,42 +573,44 @@ export function MembersReport({
                                 </div>
                             </div>
 
-                            <div className="rounded-xl border border-border bg-background/40 p-4">
-                                <h4 className="font-semibold text-ink">Sponsorship Report Fields</h4>
-                                <div className="mt-3 space-y-2 text-sm">
-                                    <div className="flex justify-between gap-3"><span className="text-muted">Membership date</span><span className="text-ink">{formatDate(individualReport.client_report_fields.sponsorship.membership_date)}</span></div>
-                                    <div className="flex justify-between gap-3"><span className="text-muted">Last sponsored date</span><span className="text-ink">{formatDate(individualReport.client_report_fields.sponsorship.last_sponsored_date)}</span></div>
-                                    <div className="flex justify-between gap-3"><span className="text-muted">Number sponsored</span><span className="text-ink">{individualReport.client_report_fields.sponsorship.number_sponsored}</span></div>
-                                    <div className="flex justify-between gap-3"><span className="text-muted">Last sponsor status</span><span className="text-ink">{individualReport.client_report_fields.sponsorship.last_sponsor_status || "-"}</span></div>
-                                    {individualReport.client_report_fields.sponsorship.payment_information_by_year.slice(0, 5).map((summary) => (
-                                        <div key={`payment-year-${summary.year}`} className="flex justify-between gap-3">
-                                            <span className="text-muted">Payment information · {summary.year}</span>
-                                            <span className="font-medium text-ink">{formatMoney(summary.total_amount, summary.currency)} ({summary.payment_count})</span>
-                                        </div>
-                                    ))}
-                                    {individualReport.client_report_fields.sponsorship.volunteer_rows.slice(0, 5).map((row, index) => (
-                                        <div key={`volunteer-${row.volunteer_date}-${row.service_type}-${index}`} className="flex justify-between gap-3">
-                                            <span className="text-muted">Volunteer · {formatDate(row.volunteer_date)}</span>
-                                            <span className="font-medium text-ink">{row.service_type}</span>
-                                        </div>
-                                    ))}
-                                    {individualReport.sponsorships.slice(0, 5).map((sponsorship) => (
-                                        <div key={`sponsorship-${sponsorship.id}`} className="flex justify-between gap-3">
-                                            <span className="text-muted">{sponsorship.role} · {sponsorship.beneficiary_name}</span>
-                                            <span className="font-medium text-ink">{sponsorship.status}</span>
-                                        </div>
-                                    ))}
-                                    {individualReport.membership_events.slice(0, 5).map((event) => (
-                                        <div key={`${event.type}-${event.timestamp}`} className="flex justify-between gap-3">
-                                            <span className="text-muted">{event.type} · {formatDate(event.timestamp)}</span>
-                                            <span className="font-medium text-ink">{event.label}</span>
-                                        </div>
-                                    ))}
-                                    {individualReport.sponsorships.length === 0 && individualReport.membership_events.length === 0 && (
-                                        <div className="text-muted">No sponsorship or membership event records found.</div>
-                                    )}
+                            {!isPaymentReport && (
+                                <div className="rounded-xl border border-border bg-background/40 p-4">
+                                    <h4 className="font-semibold text-ink">Sponsorship Report Fields</h4>
+                                    <div className="mt-3 space-y-2 text-sm">
+                                        <div className="flex justify-between gap-3"><span className="text-muted">Membership date</span><span className="text-ink">{formatDate(individualReport.client_report_fields.sponsorship.membership_date)}</span></div>
+                                        <div className="flex justify-between gap-3"><span className="text-muted">Last sponsored date</span><span className="text-ink">{formatDate(individualReport.client_report_fields.sponsorship.last_sponsored_date)}</span></div>
+                                        <div className="flex justify-between gap-3"><span className="text-muted">Number sponsored</span><span className="text-ink">{individualReport.client_report_fields.sponsorship.number_sponsored}</span></div>
+                                        <div className="flex justify-between gap-3"><span className="text-muted">Last sponsor status</span><span className="text-ink">{individualReport.client_report_fields.sponsorship.last_sponsor_status || "-"}</span></div>
+                                        {individualReport.client_report_fields.sponsorship.payment_information_by_year.slice(0, 5).map((summary) => (
+                                            <div key={`payment-year-${summary.year}`} className="flex justify-between gap-3">
+                                                <span className="text-muted">Payment information · {summary.year}</span>
+                                                <span className="font-medium text-ink">{formatMoney(summary.total_amount, summary.currency)} ({summary.payment_count})</span>
+                                            </div>
+                                        ))}
+                                        {individualReport.client_report_fields.sponsorship.volunteer_rows.slice(0, 5).map((row, index) => (
+                                            <div key={`volunteer-${row.volunteer_date}-${row.service_type}-${index}`} className="flex justify-between gap-3">
+                                                <span className="text-muted">Volunteer · {formatDate(row.volunteer_date)}</span>
+                                                <span className="font-medium text-ink">{row.service_type}</span>
+                                            </div>
+                                        ))}
+                                        {individualReport.sponsorships.slice(0, 5).map((sponsorship) => (
+                                            <div key={`sponsorship-${sponsorship.id}`} className="flex justify-between gap-3">
+                                                <span className="text-muted">{sponsorship.role} · {sponsorship.beneficiary_name}</span>
+                                                <span className="font-medium text-ink">{sponsorship.status}</span>
+                                            </div>
+                                        ))}
+                                        {individualReport.membership_events.slice(0, 5).map((event) => (
+                                            <div key={`${event.type}-${event.timestamp}`} className="flex justify-between gap-3">
+                                                <span className="text-muted">{event.type} · {formatDate(event.timestamp)}</span>
+                                                <span className="font-medium text-ink">{event.label}</span>
+                                            </div>
+                                        ))}
+                                        {individualReport.sponsorships.length === 0 && individualReport.membership_events.length === 0 && (
+                                            <div className="text-muted">No sponsorship or membership event records found.</div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </div>
                 )}

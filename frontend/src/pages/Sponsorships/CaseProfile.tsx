@@ -187,6 +187,12 @@ export default function SponsorshipCaseProfile() {
     setTimeline(data);
   };
 
+  const refreshSponsorContext = async (record = sponsorship) => {
+    if (!record) return;
+    const context = await getSponsorContext(record.sponsor.id);
+    setSponsorContext(context);
+  };
+
   const handleNoteSubmit = async () => {
     if (!sponsorship || !noteDraft.trim()) return;
     setNoteSubmitting(true);
@@ -218,7 +224,7 @@ export default function SponsorshipCaseProfile() {
         reason: statusReason.trim() || undefined,
       });
       setSponsorship(updated);
-      await refreshTimeline();
+      await Promise.all([refreshTimeline(), refreshSponsorContext(updated)]);
       toast.push("Case updated.");
       setStatusModal({ open: false, nextStatus: null, title: "", reasonRequired: false });
     } catch (error) {
