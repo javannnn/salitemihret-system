@@ -7,6 +7,6 @@ function normalizeFlag(value: string | boolean | undefined): boolean {
 }
 
 export const SHOW_BETA_BADGE = normalizeFlag(env.VITE_SHOW_BETA_TAG ?? "true");
-export const BETA_BADGE_TEXT = env.VITE_BETA_LABEL ?? "Beta";
+export const BETA_BADGE_TEXT = env.VITE_BETA_LABEL ?? "Awaiting UAT";
 export const BETA_BADGE_SUBTEXT =
-  env.VITE_BETA_MESSAGE ?? "Preview build • Feedback welcome";
+  env.VITE_BETA_MESSAGE ?? "Ready for user acceptance testing";
