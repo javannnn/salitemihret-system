@@ -1359,6 +1359,8 @@ def transition_sponsorship_status(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin approval required for this transition")
     if target == "Rejected" and not (payload.reason and payload.reason.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rejection requires a reason")
+    if target == "Suspended" and not (payload.reason and payload.reason.strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decline requires a reason")
 
     now = datetime.utcnow()
     action = "StatusChange"
@@ -1396,6 +1398,7 @@ def transition_sponsorship_status(
         sponsorship.rejection_reason = payload.reason.strip()
         action = "Rejection"
     elif target == "Suspended":
+        sponsorship.rejection_reason = payload.reason.strip()
         action = "Suspension"
     elif target == "Active" and current == "Suspended":
         action = "Reactivation"
@@ -1422,10 +1425,10 @@ def transition_sponsorship_status(
 
 def delete_sponsorship(db: Session, sponsorship_id: int) -> None:
     sponsorship = _load_sponsorship(db, sponsorship_id)
-    if sponsorship.status not in {"Draft", "Rejected", "Completed"}:
+    if sponsorship.status not in {"Rejected", "Suspended"} or not sponsorship.rejection_reason:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Draft, Rejected, or Completed sponsorship cases can be deleted.",
+            detail="Only declined or rejected sponsorship cases with a reason can be deleted.",
         )
     db.delete(sponsorship)
     db.commit()

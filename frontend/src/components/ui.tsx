@@ -12,7 +12,7 @@ export function Card({ className = "", ...props }: ComponentProps<"div">) {
   );
 }
 
-type ButtonVariant = "solid" | "ghost" | "soft";
+type ButtonVariant = "solid" | "ghost" | "soft" | "outline";
 
 export function Button({
   variant = "solid",
@@ -28,10 +28,12 @@ export function Button({
     "border-border bg-card/40 text-ink hover:border-accent/40 hover:bg-accent/10";
   const soft =
     "border-transparent bg-accent/10 text-accent hover:bg-accent/20";
+  const outline =
+    "border-border bg-transparent text-ink hover:border-accent/50 hover:bg-muted/50";
   // @ts-ignore
   const disabled = props.disabled ? "opacity-50 cursor-not-allowed" : "";
   const variantClass =
-    variant === "solid" ? solid : variant === "soft" ? soft : ghost;
+    variant === "solid" ? solid : variant === "soft" ? soft : variant === "outline" ? outline : ghost;
 
   if ("href" in props && props.href) {
     return (

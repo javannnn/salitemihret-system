@@ -60,6 +60,10 @@ function statusLabel(status?: string | null) {
   return status === "Suspended" ? "Declined" : status || "-";
 }
 
+function canDeleteSponsorshipCase(record: Sponsorship) {
+  return (record.status === "Suspended" || record.status === "Rejected") && Boolean(record.rejection_reason?.trim());
+}
+
 function beneficiaryLabel(record: Sponsorship) {
   if (record.newcomer) {
     return {
@@ -374,7 +378,7 @@ export default function SponsorshipCaseProfile() {
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() => openStatusModal("Suspended", "Decline case", false)}
+                  onClick={() => openStatusModal("Suspended", "Decline case", true)}
                 >
                   Decline
                 </Button>
@@ -389,14 +393,14 @@ export default function SponsorshipCaseProfile() {
               </Button>
             )}
             {sponsorship.status === "Completed" && (
-              <>
-                <Button variant="ghost" onClick={() => openStatusModal("Active", "Reverse completed case", true)}>
-                  Reverse
-                </Button>
-                <Button variant="ghost" onClick={handleDeleteCase}>
-                  Delete
-                </Button>
-              </>
+              <Button variant="ghost" onClick={() => openStatusModal("Active", "Reverse completed case", true)}>
+                Reverse
+              </Button>
+            )}
+            {canDeleteSponsorshipCase(sponsorship) && (
+              <Button variant="ghost" onClick={handleDeleteCase}>
+                Delete
+              </Button>
             )}
           </div>
         )}

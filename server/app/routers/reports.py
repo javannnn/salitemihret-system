@@ -145,11 +145,6 @@ def _build_individual_member_report(
     financial_access = has_module_permission(current_user, "payments", "read") or has_field_permission(
         current_user, "members", "contribution", "read"
     )
-    if not financial_access:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Individual member report requires finance access because it includes payment history.",
-        )
 
     member = (
         db.query(Member)
@@ -199,7 +194,7 @@ def _build_individual_member_report(
 
     sunday_service = db.query(PaymentServiceType).filter(PaymentServiceType.code == SUNDAY_SCHOOL_SERVICE_CODE).first()
     sunday_payment_payload: list[MemberSundaySchoolPaymentOut] = []
-    if sunday_service:
+    if sunday_service and financial_access:
         sunday_payment_query = (
             db.query(Payment)
             .options(selectinload(Payment.service_type))
@@ -232,11 +227,15 @@ def _build_individual_member_report(
             )
         ]
 
-    contribution_history = [
-        payment
-        for payment in member.contribution_history
-        if _date_in_range(payment.paid_at, start_date, end_date)
-    ]
+    contribution_history = (
+        [
+            payment
+            for payment in member.contribution_history
+            if _date_in_range(payment.paid_at, start_date, end_date)
+        ]
+        if financial_access
+        else []
+    )
     detail = MemberDetailOut.from_orm(member)
     detail = detail.copy(
         update={
@@ -251,21 +250,23 @@ def _build_individual_member_report(
         }
     )
 
-    payment_query = (
-        db.query(Payment)
-        .options(
-            selectinload(Payment.service_type),
-            selectinload(Payment.receipts),
-            selectinload(Payment.member),
-            selectinload(Payment.household),
+    payments: list[Payment] = []
+    if financial_access:
+        payment_query = (
+            db.query(Payment)
+            .options(
+                selectinload(Payment.service_type),
+                selectinload(Payment.receipts),
+                selectinload(Payment.member),
+                selectinload(Payment.household),
+            )
+            .filter(Payment.member_id == member.id)
         )
-        .filter(Payment.member_id == member.id)
-    )
-    if start_date:
-        payment_query = payment_query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time()))
-    if end_date:
-        payment_query = payment_query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
-    payments = payment_query.order_by(Payment.posted_at.desc(), Payment.id.desc()).limit(100).all()
+        if start_date:
+            payment_query = payment_query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time()))
+        if end_date:
+            payment_query = payment_query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
+        payments = payment_query.order_by(Payment.posted_at.desc(), Payment.id.desc()).limit(100).all()
 
     sponsorships: list[Sponsorship] = []
     if include_sponsorship_details:
@@ -286,8 +287,8 @@ def _build_individual_member_report(
             status=item.status,
             program=item.program,
             frequency=item.frequency,
-            monthly_amount=item.monthly_amount,
-            received_amount=item.received_amount,
+            monthly_amount=item.monthly_amount if financial_access else None,
+            received_amount=item.received_amount if financial_access else None,
             start_date=item.start_date,
             end_date=item.end_date,
             notes=item.notes,
@@ -349,12 +350,12 @@ def _build_individual_member_report(
             )
             for payment in payments
         ],
-        payment_years=payment_years,
+        payment_years=payment_years if financial_access else [],
         sponsorship=ClientSponsorshipReportFields(
             first_name=member.first_name,
             last_name=member.last_name,
             membership_date=member.join_date,
-            payment_information_by_year=payment_years,
+            payment_information_by_year=payment_years if financial_access else [],
             volunteer_rows=volunteer_rows,
             last_sponsored_date=last_sponsored_case.last_sponsored_date if last_sponsored_case else None,
             number_sponsored=len(sponsored_cases),

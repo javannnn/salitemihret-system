@@ -445,10 +445,16 @@ function nextActionLabel(status: Sponsorship["status"]) {
     case "Suspended":
       return "Resume";
     case "Completed":
-      return "Reverse or Delete";
+      return "Reverse";
+    case "Rejected":
+      return "Delete";
     default:
       return "View";
   }
+}
+
+function canDeleteSponsorshipCase(item: Sponsorship) {
+  return (item.status === "Suspended" || item.status === "Rejected") && Boolean(item.rejection_reason?.trim());
 }
 
 function resolveOptionLabel(options: SelectOption[], value?: string | null) {
@@ -2633,7 +2639,7 @@ export default function SponsorshipWorkspace() {
                         )}
                         {canManage && item.status === "Active" && (
                           <>
-                            <Button size="sm" variant="outline" onClick={() => openStatusModal(item, "Suspended", "Decline case", false)}>
+                            <Button size="sm" variant="outline" onClick={() => openStatusModal(item, "Suspended", "Decline case", true)}>
                               Decline
                             </Button>
                             <Button size="sm" onClick={() => openStatusModal(item, "Completed", "Complete case", false)}>
@@ -2651,7 +2657,7 @@ export default function SponsorshipWorkspace() {
                             Reverse
                           </Button>
                         )}
-                        {canManage && ["Draft", "Rejected", "Completed"].includes(item.status) && (
+                        {canManage && canDeleteSponsorshipCase(item) && (
                           <Button size="sm" variant="ghost" onClick={() => handleDeleteCase(item)}>
                             Delete
                           </Button>

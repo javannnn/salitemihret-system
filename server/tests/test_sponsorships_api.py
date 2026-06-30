@@ -655,6 +655,105 @@ def test_rejecting_sponsorship_releases_budget_round_slots(
     assert second_resp.status_code == 201, second_resp.text
 
 
+def test_declined_sponsorship_requires_reason_before_delete(
+    client,
+    authorize,
+    sponsorship_user,
+    admin_user,
+    sample_member,
+):
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=2)
+    authorize(sponsorship_user)
+    create_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Decline Delete",
+            "monthly_amount": "90.00",
+            "start_date": date.today().isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    sponsorship_id = create_resp.json()["id"]
+    authorize(admin_user)
+    approve_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Approved", "reason": "Approved for support"},
+    )
+    assert approve_resp.status_code == 200, approve_resp.text
+    authorize(sponsorship_user)
+    activate_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Active"},
+    )
+    assert activate_resp.status_code == 200, activate_resp.text
+
+    missing_reason_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Suspended"},
+    )
+    assert missing_reason_resp.status_code == 400, missing_reason_resp.text
+
+    decline_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Suspended", "reason": "Sponsor withdrew support"},
+    )
+    assert decline_resp.status_code == 200, decline_resp.text
+    assert decline_resp.json()["status"] == "Suspended"
+    assert decline_resp.json()["rejection_reason"] == "Sponsor withdrew support"
+
+    delete_resp = client.delete(f"/sponsorships/{sponsorship_id}")
+    assert delete_resp.status_code == 204, delete_resp.text
+
+
+def test_completed_sponsorship_cannot_be_deleted(
+    client,
+    authorize,
+    sponsorship_user,
+    admin_user,
+    sample_member,
+):
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=2)
+    authorize(sponsorship_user)
+    create_resp = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Completed Delete",
+            "monthly_amount": "90.00",
+            "start_date": date.today().isoformat(),
+            "status": "Submitted",
+            "frequency": "Monthly",
+            "budget_round_id": round_id,
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    sponsorship_id = create_resp.json()["id"]
+    authorize(admin_user)
+    approve_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Approved", "reason": "Approved for support"},
+    )
+    assert approve_resp.status_code == 200, approve_resp.text
+    authorize(sponsorship_user)
+    activate_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Active"},
+    )
+    assert activate_resp.status_code == 200, activate_resp.text
+    complete_resp = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Completed"},
+    )
+    assert complete_resp.status_code == 200, complete_resp.text
+
+    delete_resp = client.delete(f"/sponsorships/{sponsorship_id}")
+    assert delete_resp.status_code == 400, delete_resp.text
+
+
 def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, admin_user, sample_member):
     authorize(sponsorship_user)
     round_id = _create_budget_round(client, authorize, admin_user, slot_budget=10)

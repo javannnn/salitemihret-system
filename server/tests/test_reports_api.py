@@ -62,6 +62,32 @@ def _individual_report_user() -> User:
     return user
 
 
+def _individual_non_financial_report_user() -> User:
+    role = Role(
+        name="IndividualNonFinancialReporter",
+        module_permissions={
+            "reports": {"read": True, "write": False},
+            "members": {"read": True, "write": False},
+        },
+        field_permissions={
+            "reports": {
+                "members": {"read": True, "write": False},
+            },
+            "members": {
+                "contribution": {"read": False, "write": False},
+            },
+        },
+    )
+    user = User(
+        email="individual.nonfinancial@example.com",
+        username="individual.nonfinancial",
+        hashed_password="hash",
+        is_active=True,
+    )
+    user.roles.append(role)
+    return user
+
+
 def test_newcomer_report_denies_hidden_report_type(client, authorize):
     authorize(_report_user(can_view_newcomers=False))
 
@@ -217,3 +243,49 @@ def test_individual_member_report_includes_requested_client_report_fields(
     assert payment_report["client_report_fields"]["sponsorship"]["last_sponsored_date"] is None
     assert payment_report["client_report_fields"]["sponsorship"]["last_sponsor_status"] is None
     assert payment_report["client_report_fields"]["sponsorship"]["volunteer_rows"] == []
+
+
+def test_individual_member_report_without_finance_access_hides_financial_sections(
+    client,
+    authorize,
+    db_session,
+    sample_member,
+):
+    authorize(_individual_non_financial_report_user())
+    service_type = PaymentServiceType(code="donation-hidden", label="Donation")
+    db_session.add(service_type)
+    db_session.commit()
+    db_session.refresh(service_type)
+    payment = Payment(
+        amount=Decimal("125.00"),
+        currency="CAD",
+        service_type_id=service_type.id,
+        member_id=sample_member.id,
+        posted_at=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        status="Completed",
+    )
+    sponsorship = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="New Immigrant",
+        frequency="Monthly",
+        start_date=date(2026, 4, 1),
+        status="Active",
+        monthly_amount=Decimal("150.00"),
+        received_amount=Decimal("150.00"),
+    )
+    db_session.add_all([payment, sponsorship])
+    db_session.commit()
+
+    response = client.get(f"/reports/members/{sample_member.id}/individual")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["financial_access"] is False
+    assert payload["member"]["id"] == sample_member.id
+    assert payload["payments"] == []
+    assert payload["contribution_history"] == []
+    assert payload["client_report_fields"]["payments"] == []
+    assert payload["client_report_fields"]["payment_years"] == []
+    assert payload["client_report_fields"]["sponsorship"]["payment_information_by_year"] == []
+    assert payload["sponsorships"][0]["monthly_amount"] is None
+    assert payload["sponsorships"][0]["received_amount"] is None

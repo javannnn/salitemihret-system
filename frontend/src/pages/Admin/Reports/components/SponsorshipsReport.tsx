@@ -22,6 +22,14 @@ function formatDate(value?: string | null) {
     return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
 }
 
+function formatCadValue(value?: number | string | null) {
+    if (value === undefined || value === null || value === "") return "-";
+    const normalized = typeof value === "string" ? value.replace(/[$,]/g, "").trim() : value;
+    const numeric = Number(normalized);
+    if (!Number.isFinite(numeric)) return String(value);
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD" }).format(numeric);
+}
+
 export function SponsorshipsReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [individualDateRange, setIndividualDateRange] = useState<DateRangeValue>({ start: "", end: "" });
@@ -236,24 +244,20 @@ export function SponsorshipsReport() {
                 {individualLoading ? (
                     <div className="mt-4 text-sm text-muted">Loading individual report...</div>
                 ) : individualReport ? (
-                    <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    <div className="mt-5 grid gap-4 md:grid-cols-2">
                         <ReportPanel title="Case" rows={[
                             ["Case", `SP-${String(individualReport.detail.id).padStart(4, "0")}`],
                             ["Status", individualReport.detail.status === "Suspended" ? "Declined" : individualReport.detail.status],
                             ["Immigrant", individualReport.detail.beneficiary_name],
                             ["Start", formatDate(individualReport.detail.start_date)],
+                            ["Monthly amount", formatCadValue(individualReport.detail.monthly_amount)],
                         ]} />
                         <ReportPanel title="Co-sponsor" rows={[
                             ["Name", `${individualReport.detail.sponsor.first_name} ${individualReport.detail.sponsor.last_name}`],
                             ["Status", individualReport.detail.sponsor_status || "-"],
-                            ["Bond", individualReport.detail.payment_information || "-"],
+                            ["Deposit", formatCadValue(individualReport.detail.payment_information)],
                             ["Last sponsored", formatDate(individualReport.detail.last_sponsored_date)],
-                        ]} />
-                        <ReportPanel title="Records" rows={[
-                            ["Timeline events", String(individualReport.timeline.total)],
-                            ["Notes", String(individualReport.notes.total)],
-                            ["Allocated slots", String(individualReport.detail.budget_slots || 0)],
-                            ["Used slots", String(individualReport.detail.used_slots || 0)],
+                            ["Frequency", individualReport.detail.frequency || "-"],
                         ]} />
                     </div>
                 ) : null}

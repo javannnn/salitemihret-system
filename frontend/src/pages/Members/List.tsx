@@ -160,6 +160,7 @@ export default function MembersList() {
   const canBulk = permissions.bulkActions;
   const canImport = permissions.importMembers;
   const canExport = permissions.exportMembers;
+  const canViewGiving = permissions.editFinance || permissions.canReadField("members", "contribution");
 
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const listRequestRef = useRef(0);
@@ -1581,7 +1582,7 @@ export default function MembersList() {
                         <th className="px-4 py-3 text-left">Member</th>
                         <th className="px-4 py-3 text-left">Status</th>
                         <th className="px-4 py-3 text-left">Family</th>
-                        <th className="px-4 py-3 text-left">Giving</th>
+                        {canViewGiving && <th className="px-4 py-3 text-left">Giving</th>}
                         <th className="px-4 py-3 text-left">Contact</th>
                         <th className="px-4 py-3 text-left">Location</th>
                         <th className="px-4 py-3 text-right">Actions</th>
@@ -1609,9 +1610,11 @@ export default function MembersList() {
                             <td className="px-4 py-4">
                               <div className="h-4 w-16 rounded bg-border animate-pulse" />
                             </td>
-                            <td className="px-4 py-4">
-                              <div className="h-4 w-20 rounded bg-border animate-pulse" />
-                            </td>
+                            {canViewGiving && (
+                              <td className="px-4 py-4">
+                                <div className="h-4 w-20 rounded bg-border animate-pulse" />
+                              </td>
+                            )}
                             <td className="px-4 py-4">
                               <div className="h-3 w-28 rounded bg-border animate-pulse" />
                             </td>
@@ -1707,6 +1710,7 @@ export default function MembersList() {
                                   {member.has_father_confessor ? "Father Confessor assigned" : "No Father Confessor"}
                                 </div>
                               </td>
+                              {canViewGiving && (
                               <td className="px-4 py-4 text-sm text-mute align-top">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span
@@ -1732,6 +1736,7 @@ export default function MembersList() {
                                   </div>
                                 )}
                               </td>
+                              )}
                               <td className="px-4 py-4 text-sm text-mute space-y-1 align-top">
                                 {member.email && <div>{member.email}</div>}
                                 <div>{member.phone}</div>
