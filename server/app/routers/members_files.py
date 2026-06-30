@@ -14,6 +14,7 @@ from app.models.member import Member
 from app.models.user import User
 from app.schemas.member import AvatarUploadResponse, ContributionExceptionAttachmentUploadResponse
 from app.services.audit import record_member_changes, snapshot_member
+from app.services.member_access import assert_can_mutate_member_record
 
 router = APIRouter(prefix="/members", tags=["members"])
 
@@ -92,6 +93,7 @@ def upload_member_avatar(
     )
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
 
     old_snapshot = snapshot_member(member)
     old_path = member.avatar_path
@@ -142,6 +144,7 @@ def upload_contribution_exception_attachment(
     )
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
     should_set_low_income = _is_low_income_exception(exception_reason) and not _is_low_income_exception(
         member.contribution_exception_reason
     )
@@ -208,6 +211,7 @@ def delete_contribution_exception_attachment(
     )
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
     if not member.contribution_exception_attachment_path:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 

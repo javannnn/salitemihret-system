@@ -11,7 +11,7 @@ from app.models.payment import Payment, PaymentServiceType
 from app.models.sponsorship import Sponsorship
 from app.models.ministry import Ministry
 from app.models.tag import Tag
-from app.models.user import UserInvitation, UserMemberLink
+from app.models.user import User, UserInvitation, UserMemberLink
 
 def test_list_members_requires_auth(client):
     response = client.get("/members")
@@ -210,6 +210,57 @@ def test_update_member_preserves_existing_username(client, authorize, registrar_
     db_session.expire_all()
     member = db_session.get(Member, sample_member.id)
     assert member.username == original_username
+
+
+def test_linked_account_user_cannot_update_own_member_record(
+    client,
+    authorize,
+    registrar_user,
+    sample_member,
+    db_session,
+):
+    db_session.add(UserMemberLink(user_id=registrar_user.id, member_id=sample_member.id, status="linked"))
+    db_session.commit()
+    db_session.refresh(registrar_user)
+
+    authorize(registrar_user)
+    response = client.patch(
+        f"/members/{sample_member.id}",
+        json={"first_name": "Self"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert "cannot edit their own member record" in response.text
+
+
+def test_super_admin_can_update_own_linked_member_record(
+    client,
+    authorize,
+    sample_member,
+    db_session,
+):
+    super_admin = User(
+        email="member.superadmin@example.com",
+        username="member.superadmin",
+        full_name="Member Super Admin",
+        hashed_password="hash",
+        is_active=True,
+        is_super_admin=True,
+    )
+    db_session.add(super_admin)
+    db_session.commit()
+    db_session.add(UserMemberLink(user_id=super_admin.id, member_id=sample_member.id, status="linked"))
+    db_session.commit()
+    db_session.refresh(super_admin)
+
+    authorize(super_admin)
+    response = client.patch(
+        f"/members/{sample_member.id}",
+        json={"first_name": "Allowed"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["first_name"] == "Allowed"
 
 
 def test_patch_member_updates_status(client, authorize, admin_user, sample_member, db_session):
@@ -452,7 +503,16 @@ def test_permanent_delete_archived_member_unlinks_safe_dependencies(
         sponsored_by_member_id=sample_member.id,
         converted_member_id=sample_member.id,
     )
-    member_link = UserMemberLink(user_id=admin_user.id, member_id=sample_member.id, status="linked")
+    linked_user = User(
+        email="safe-delete-linked@example.com",
+        username="safe.delete.linked",
+        full_name="Safe Delete Linked",
+        hashed_password="hash",
+        is_active=True,
+    )
+    db_session.add(linked_user)
+    db_session.commit()
+    member_link = UserMemberLink(user_id=linked_user.id, member_id=sample_member.id, status="linked")
     invitation = UserInvitation(
         email="delete@example.com",
         username="delete.invite",
@@ -470,8 +530,9 @@ def test_permanent_delete_archived_member_unlinks_safe_dependencies(
     response = client.delete(f"/members/{sample_member.id}/permanent")
     assert response.status_code == 204, response.text
 
+    sample_member_id = sample_member.id
     db_session.expire_all()
-    assert db_session.get(Member, sample_member.id) is None
+    assert db_session.get(Member, sample_member_id) is None
     assert db_session.get(Payment, payment.id).member_id is None
     assert db_session.get(Sponsorship, sponsorship.id).beneficiary_member_id is None
     refreshed_newcomer = db_session.get(Newcomer, newcomer.id)

@@ -7,6 +7,7 @@ export type WhoAmI = {
   username: string;
   roles: string[];
   is_super_admin: boolean;
+  linked_member_id?: number | null;
   full_name: string | null;
   must_change_password: boolean;
   permissions: {

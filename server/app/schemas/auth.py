@@ -24,6 +24,7 @@ class WhoAmIResponse(BaseModel):
     username: str
     roles: list[str]
     is_super_admin: bool = False
+    linked_member_id: int | None = None
     full_name: str | None = None
     must_change_password: bool = False
     permissions: EffectivePermissionSnapshot

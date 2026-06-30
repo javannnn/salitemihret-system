@@ -39,6 +39,7 @@ from app.schemas.member import (
     MemberTimelineResponse,
 )
 from app.services.audit import record_member_changes, snapshot_member
+from app.services.member_access import assert_can_mutate_member_record
 from app.services.member_deletion import build_member_permanent_delete_impact, permanently_delete_member_record
 from app.services.member_timeline import list_member_timeline
 from app.services.members_query import apply_member_sort, build_members_query
@@ -691,6 +692,7 @@ def update_member(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
 
     old_snapshot = snapshot_member(member)
     previous_is_tither = member.is_tither
@@ -900,6 +902,7 @@ def update_member_spouse(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
 
     previous_snapshot = snapshot_member(member)
     desired_status = payload.marital_status if payload.marital_status is not None else member.marital_status
@@ -971,6 +974,7 @@ def create_member_contribution(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
 
     amount = Decimal(str(payload.amount)).quantize(Decimal("0.01"))
     if amount <= 0:
@@ -1048,6 +1052,7 @@ def delete_member(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    assert_can_mutate_member_record(current_user, member.id)
 
     old_snapshot = snapshot_member(member)
     member.deleted_at = datetime.utcnow()
@@ -1070,6 +1075,7 @@ def permanently_delete_member(
     current_user=Depends(get_current_user),
 ) -> Response:
     member = _get_archived_member_or_404(db, member_id)
+    assert_can_mutate_member_record(current_user, member.id)
     impact = build_member_permanent_delete_impact(db, member)
     if not impact.can_delete:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_blocked_permanent_delete_message(impact))
@@ -1095,6 +1101,7 @@ def restore_member(
     )
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found or not archived")
+    assert_can_mutate_member_record(current_user, member.id)
 
     old_snapshot = snapshot_member(member)
     member.deleted_at = None

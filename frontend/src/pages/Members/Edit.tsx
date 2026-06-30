@@ -778,7 +778,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
   const isCreateMode = mode === "create";
   const memberId = id ? Number(id) : null;
   const permissions = usePermissions();
-  const disableAll = !permissions.editCore && !permissions.editSpiritual && !permissions.editStatus;
+  const isOwnLinkedMember =
+    !isCreateMode &&
+    !user?.is_super_admin &&
+    Boolean(user?.linked_member_id && memberId === user.linked_member_id);
+  const disableAll = isOwnLinkedMember || (!permissions.editCore && !permissions.editSpiritual && !permissions.editStatus);
   const disableCore = disableAll || !permissions.editCore;
   const disableFinance = disableAll || !permissions.editFinance;
   const disableSpiritual = disableAll || !permissions.editSpiritual;
@@ -1376,7 +1380,10 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     }
   }, [member?.marital_status]);
 
-  const canDelete = !isCreateMode && (user?.roles.some((role) => role === "Admin" || role === "PublicRelations") ?? false);
+  const canDelete =
+    !isCreateMode &&
+    !isOwnLinkedMember &&
+    (user?.roles.some((role) => role === "Admin" || role === "PublicRelations") ?? false);
 
   const handleChange =
     (field: keyof MemberDetail) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -1726,7 +1733,11 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     event.preventDefault();
     if (!member) return;
     if (!canSubmit) {
-      toast.push("You do not have permission to update this member.");
+      toast.push(
+        isOwnLinkedMember
+          ? "Your linked member record is read-only. Ask a Super Admin to make changes."
+          : "You do not have permission to update this member."
+      );
       return;
     }
     let normalizedContribution: number | null = null;
@@ -2294,7 +2305,7 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
     permissions.hasRole("FinanceAdmin") ||
     permissions.hasRole("Registrar") ||
     permissions.hasRole("PublicRelations");
-  const canManageExceptionAttachment = hasExceptionAttachmentRole;
+  const canManageExceptionAttachment = hasExceptionAttachmentRole && !isOwnLinkedMember;
   const canUploadExceptionAttachmentNow = canManageExceptionAttachment && !isCreateMode && Boolean(member.id);
   const exceptionAttachmentName =
     member.contribution_exception_attachment_path?.split("/").pop() || null;
@@ -2368,7 +2379,17 @@ function EditMemberInner({ mode = "edit" }: EditMemberProps) {
           {memberLoading && !member && (
             <Card className="p-4 text-sm text-mute">Loading member details…</Card>
           )}
-          {disableAll && (
+          {isOwnLinkedMember ? (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 rounded-lg p-4 flex items-start gap-3">
+              <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium">Linked member record is read-only</div>
+                <p className="text-sm leading-relaxed">
+                  This member profile is linked to your user account. Only a Super Admin can edit linked account member records.
+                </p>
+              </div>
+            </div>
+          ) : disableAll && (
             <div className="border border-amber-200 bg-amber-50 text-amber-900 rounded-lg p-4 flex items-start gap-3">
               <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
               <div>

@@ -17,6 +17,11 @@ def whoami(user: User = Depends(get_current_user)) -> WhoAmIResponse:
         username=user.username,
         full_name=user.full_name,
         is_super_admin=user.is_super_admin,
+        linked_member_id=(
+            user.member_link.member_id
+            if user.member_link and user.member_link.status == "linked"
+            else None
+        ),
         must_change_password=user.must_change_password,
         roles=[role.name for role in user.roles],
         permissions=permissions,
