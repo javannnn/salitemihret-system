@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_roles
+from app.auth.deps import require_field_permission, require_roles
 from app.core.db import get_db
 from app.models.sponsorship import Sponsorship
 from app.models.user import User
@@ -353,9 +353,11 @@ def list_sponsorships(
     end_date: date | None = Query(None),
     created_from: date | None = Query(None),
     created_to: date | None = Query(None),
+    ids: str | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
     ) -> SponsorshipListResponse:
+    selected_ids = _parse_selected_ids(ids)
     return sponsorships_service.list_sponsorships(
         db,
         page=page,
@@ -377,6 +379,7 @@ def list_sponsorships(
         end_date=end_date,
         created_from=created_from,
         created_to=created_to,
+        ids=selected_ids,
     )
 
 
@@ -573,7 +576,7 @@ def list_budget_rounds(
 def create_budget_round(
     payload: SponsorshipBudgetRoundCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
+    _: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.create_budget_round(db, payload)
 
@@ -583,7 +586,7 @@ def update_budget_round(
     round_id: int,
     payload: SponsorshipBudgetRoundUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
+    _: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> SponsorshipBudgetRoundOut:
     return sponsorships_service.update_budget_round(db, round_id, payload)
 
@@ -592,7 +595,7 @@ def update_budget_round(
 def delete_budget_round(
     round_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(*BUDGET_MANAGE_ROLES)),
+    _: User = Depends(require_field_permission("sponsorships", "budget_rounds", "write")),
 ) -> None:
     sponsorships_service.delete_budget_round(db, round_id)
 

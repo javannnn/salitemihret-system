@@ -882,6 +882,7 @@ export type Sponsorship = {
 };
 
 export type SponsorshipFilters = {
+  ids?: string;
   status?: string;
   program?: string;
   sponsor_id?: number;

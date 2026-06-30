@@ -56,6 +56,7 @@ import {
   listNewcomers,
   listSponsorshipPrescreening,
   listSponsorships,
+  parseApiErrorMessage,
   listStaff,
   searchMembers,
   transitionSponsorshipStatus,
@@ -726,6 +727,7 @@ export default function SponsorshipWorkspace() {
   const [budgetMonth, setBudgetMonth] = useState(String(today.getMonth() + 1));
   const [budgetYear, setBudgetYear] = useState(String(today.getFullYear()));
   const [budgetCases, setBudgetCases] = useState<SponsorshipListResponse | null>(null);
+  const [budgetTargetCase, setBudgetTargetCase] = useState<Sponsorship | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
   const [budgetRefreshTick, setBudgetRefreshTick] = useState(0);
   const [budgetEdits, setBudgetEdits] = useState<Record<number, BudgetDraft>>({});
@@ -769,6 +771,7 @@ export default function SponsorshipWorkspace() {
     reasonRequired: false,
   });
   const [statusReason, setStatusReason] = useState("");
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
   const listRequestRef = useRef(0);
   const debouncedQuery = useDebouncedValue(filters.q, 350);
@@ -805,6 +808,40 @@ export default function SponsorshipWorkspace() {
     }
   }, [viewParam, activeView]);
 
+  useEffect(() => {
+    const budgetCaseParam = searchParams.get("budget_case");
+    if (!budgetCaseParam || activeView !== "budget") return;
+    const budgetCaseId = Number(budgetCaseParam);
+    if (!Number.isFinite(budgetCaseId) || budgetCaseId < 1) {
+      updateSearchParams({ budget_case: null });
+      return;
+    }
+    if (budgetTargetCase?.id === budgetCaseId) return;
+    let active = true;
+    getSponsorship(budgetCaseId)
+      .then((record) => {
+        if (!active) return;
+        setBudgetTargetCase(record);
+        setBudgetEdits((prev) => ({
+          ...prev,
+          [record.id]: {
+            budget_round_id: String(record.budget_round_id ?? ""),
+            budget_slots: String(record.budget_slots || 1),
+          },
+        }));
+        setBudgetRefreshTick((prev) => prev + 1);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(error);
+        toast.push(parseApiErrorMessage(error, "Unable to open budget allocation."), "error");
+        updateSearchParams({ budget_case: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeView, budgetTargetCase?.id, searchParams, toast, updateSearchParams]);
+
   const listPayload = useMemo(
     () => ({
       page: filters.page,
@@ -837,13 +874,19 @@ export default function SponsorshipWorkspace() {
   );
 
   const budgetListPayload = useMemo(
-    () => ({
-      page: 1,
-      page_size: 100,
-      budget_month: budgetMonth ? Number(budgetMonth) : undefined,
-      budget_year: budgetYear ? Number(budgetYear) : undefined,
-    }),
-    [budgetMonth, budgetYear]
+    () => budgetTargetCase
+      ? {
+          page: 1,
+          page_size: 1,
+          ids: String(budgetTargetCase.id),
+        }
+      : {
+          page: 1,
+          page_size: 100,
+          budget_month: budgetMonth ? Number(budgetMonth) : undefined,
+          budget_year: budgetYear ? Number(budgetYear) : undefined,
+        },
+    [budgetMonth, budgetTargetCase, budgetYear]
   );
 
   const budgetCacheKey = useMemo(
@@ -1656,11 +1699,7 @@ export default function SponsorshipWorkspace() {
       toast.push("Budget updated.");
     } catch (error) {
       console.error(error);
-      if (error instanceof ApiError) {
-        toast.push(error.body || "Unable to update budget.");
-      } else {
-        toast.push("Unable to update budget.");
-      }
+      toast.push(parseApiErrorMessage(error, "Unable to update budget."), "error");
     } finally {
       setBudgetSavingId(null);
     }
@@ -2230,8 +2269,33 @@ export default function SponsorshipWorkspace() {
 
   const openStatusModal = (sponsorship: Sponsorship, nextStatus: Sponsorship["status"], title: string, reasonRequired: boolean) => {
     setStatusReason("");
+    setStatusError(null);
     setStatusModal({ open: true, sponsorship, nextStatus, title, reasonRequired });
   };
+
+  const closeStatusModal = () => {
+    setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false });
+    setStatusReason("");
+    setStatusError(null);
+  };
+
+  const openBudgetAllocation = (item: Sponsorship) => {
+    setBudgetTargetCase(item);
+    setBudgetEdits((prev) => ({
+      ...prev,
+      [item.id]: {
+        budget_round_id: String(item.budget_round_id ?? ""),
+        budget_slots: String(item.budget_slots || 1),
+      },
+    }));
+    setActiveView("budget");
+    updateSearchParams({ view: "budget", budget_case: String(item.id) });
+    setBudgetRefreshTick((prev) => prev + 1);
+    closeStatusModal();
+  };
+
+  const isBudgetTransitionError = (message: string) =>
+    /budget round|remaining slot|remaining slots|round .*full/i.test(message);
 
   const handleStatusTransition = async () => {
     if (!statusModal.sponsorship || !statusModal.nextStatus) return;
@@ -2245,11 +2309,13 @@ export default function SponsorshipWorkspace() {
         reason: statusReason.trim() || undefined,
       });
       toast.push("Case updated.");
-      setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false });
+      closeStatusModal();
       handleRefresh();
     } catch (error) {
       console.error(error);
-      toast.push("Unable to update case.");
+      const message = parseApiErrorMessage(error, "Unable to update case.");
+      setStatusError(message);
+      toast.push(message, "error");
     } finally {
       setStatusSubmitting(false);
     }
@@ -2264,11 +2330,7 @@ export default function SponsorshipWorkspace() {
       handleRefresh();
     } catch (error) {
       console.error(error);
-      if (error instanceof ApiError) {
-        toast.push(error.body || "Unable to delete sponsorship case.");
-      } else {
-        toast.push("Unable to delete sponsorship case.");
-      }
+      toast.push(parseApiErrorMessage(error, "Unable to delete sponsorship case."), "error");
     }
   };
 
@@ -2633,9 +2695,15 @@ export default function SponsorshipWorkspace() {
                           </>
                         )}
                         {canManage && item.status === "Approved" && (
-                          <Button size="sm" onClick={() => openStatusModal(item, "Active", "Activate case", false)}>
-                            Activate
-                          </Button>
+                          item.budget_round_id ? (
+                            <Button size="sm" onClick={() => openStatusModal(item, "Active", "Activate case", false)}>
+                              Activate
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => openBudgetAllocation(item)}>
+                              Assign budget
+                            </Button>
+                          )
                         )}
                         {canManage && item.status === "Active" && (
                           <>
@@ -3287,7 +3355,10 @@ export default function SponsorshipWorkspace() {
                 <label className="text-xs uppercase text-mute block mb-1">Allocated month</label>
                 <Select
                   value={budgetMonth}
-                  onChange={(event) => setBudgetMonth(event.target.value)}
+                  onChange={(event) => {
+                    setBudgetTargetCase(null);
+                    setBudgetMonth(event.target.value);
+                  }}
                 >
                   {MONTH_OPTIONS.map((month) => (
                     <option key={month.value} value={month.value}>
@@ -3300,7 +3371,10 @@ export default function SponsorshipWorkspace() {
                 <label className="text-xs uppercase text-mute block mb-1">Allocated year</label>
                 <Select
                   value={budgetYear}
-                  onChange={(event) => setBudgetYear(event.target.value)}
+                  onChange={(event) => {
+                    setBudgetTargetCase(null);
+                    setBudgetYear(event.target.value);
+                  }}
                 >
                   {YEAR_OPTIONS.map((year) => (
                     <option key={year} value={String(year)}>
@@ -3316,6 +3390,23 @@ export default function SponsorshipWorkspace() {
             <p className="mt-3 text-xs text-mute">
               Manage round assignments and slot requests. Used slots are consumed automatically when a case moves out of draft.
             </p>
+            {budgetTargetCase && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <span>
+                  Showing SP-{String(budgetTargetCase.id).padStart(4, "0")} because it needs a budget round before the next status change.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setBudgetTargetCase(null);
+                    updateSearchParams({ budget_case: null });
+                  }}
+                >
+                  Show month allocation
+                </Button>
+              </div>
+            )}
           </Card>
 
           <div className="grid gap-3 md:grid-cols-3">
@@ -4514,7 +4605,7 @@ export default function SponsorshipWorkspace() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+              onClick={closeStatusModal}
             />
             <motion.div
               className="fixed inset-x-0 top-24 mx-auto w-full max-w-lg bg-card border border-border rounded-2xl z-50 p-6 space-y-4"
@@ -4526,21 +4617,36 @@ export default function SponsorshipWorkspace() {
                 <h3 className="text-lg font-semibold">{statusModal.title}</h3>
                 <Button
                   variant="ghost"
-                  onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+                  onClick={closeStatusModal}
                 >
                   Close
                 </Button>
               </div>
+              <p className="text-sm text-mute">
+                Update SP-{String(statusModal.sponsorship.id).padStart(4, "0")} to {statusModal.nextStatus}.
+              </p>
               {statusModal.reasonRequired && (
                 <div>
                   <label className="text-xs uppercase text-mute block mb-1">Reason</label>
                   <Textarea value={statusReason} onChange={(event) => setStatusReason(event.target.value)} rows={4} />
                 </div>
               )}
+              {statusError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <p>{statusError}</p>
+                  {isBudgetTransitionError(statusError) && (
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" onClick={() => openBudgetAllocation(statusModal.sponsorship!)}>
+                        Open budget allocation
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setStatusModal({ open: false, sponsorship: null, nextStatus: null, title: "", reasonRequired: false })}
+                  onClick={closeStatusModal}
                 >
                   Cancel
                 </Button>

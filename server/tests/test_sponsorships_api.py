@@ -754,6 +754,71 @@ def test_completed_sponsorship_cannot_be_deleted(
     assert delete_resp.status_code == 400, delete_resp.text
 
 
+def test_active_legacy_sponsorship_without_budget_can_complete(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    sponsorship = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Legacy Active",
+        frequency="Monthly",
+        start_date=date.today(),
+        status="Active",
+        monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("0.00"),
+    )
+    db_session.add(sponsorship)
+    db_session.commit()
+    db_session.refresh(sponsorship)
+
+    authorize(sponsorship_user)
+    response = client.post(
+        f"/sponsorships/{sponsorship.id}/status",
+        json={"status": "Completed"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "Completed"
+
+
+def test_sponsorship_list_can_filter_by_selected_ids(client, authorize, sponsorship_user, sample_member):
+    authorize(sponsorship_user)
+    first = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Selected A",
+            "monthly_amount": "90.00",
+            "start_date": date.today().isoformat(),
+            "status": "Draft",
+            "frequency": "Monthly",
+        },
+    )
+    second = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Selected B",
+            "monthly_amount": "90.00",
+            "start_date": date.today().isoformat(),
+            "status": "Draft",
+            "frequency": "Monthly",
+        },
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    response = client.get(f"/sponsorships?ids={second.json()['id']}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["id"] == second.json()["id"]
+
+
 def test_sponsorship_csv_export_honors_filters_and_selected_ids(client, authorize, sponsorship_user, admin_user, sample_member):
     authorize(sponsorship_user)
     round_id = _create_budget_round(client, authorize, admin_user, slot_budget=10)

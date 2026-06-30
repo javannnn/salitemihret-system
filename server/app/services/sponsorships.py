@@ -548,6 +548,7 @@ def list_sponsorships(
     end_date: date | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
+    ids: list[int] | None = None,
 ) -> SponsorshipListResponse:
     query = _build_sponsorship_query(
         db,
@@ -569,6 +570,8 @@ def list_sponsorships(
         created_from=created_from,
         created_to=created_to,
     )
+    if ids:
+        query = query.filter(Sponsorship.id.in_(ids))
 
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -1367,10 +1370,19 @@ def transition_sponsorship_status(
     current_consumes_budget = _status_consumes_budget(current)
     target_consumes_budget = _status_consumes_budget(target)
     if target_consumes_budget:
-        if not sponsorship.budget_round_id:
-            _require_budget_round_for_status(target)
         desired_slots = sponsorship.budget_slots or 1
-        if not current_consumes_budget or (sponsorship.used_slots or 0) != desired_slots:
+        if not current_consumes_budget:
+            if not sponsorship.budget_round_id:
+                _require_budget_round_for_status(target)
+            _assert_round_capacity(
+                db,
+                round_id=sponsorship.budget_round_id,
+                slots_needed=desired_slots,
+                exclude_sponsorship_id=sponsorship.id,
+            )
+            sponsorship.budget_slots = desired_slots
+            sponsorship.used_slots = desired_slots
+        elif sponsorship.budget_round_id and (sponsorship.used_slots or 0) != desired_slots:
             _assert_round_capacity(
                 db,
                 round_id=sponsorship.budget_round_id,

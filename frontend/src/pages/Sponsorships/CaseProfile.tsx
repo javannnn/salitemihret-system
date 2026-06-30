@@ -18,6 +18,7 @@ import {
   getSponsorship,
   getSponsorshipTimeline,
   listSponsorshipNotes,
+  parseApiErrorMessage,
   remindSponsorship,
   transitionSponsorshipStatus,
 } from "@/lib/api";
@@ -134,6 +135,7 @@ export default function SponsorshipCaseProfile() {
     reasonRequired: false,
   });
   const [statusReason, setStatusReason] = useState("");
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
 
   const beneficiary = useMemo(() => (sponsorship ? beneficiaryLabel(sponsorship) : null), [sponsorship]);
@@ -215,8 +217,23 @@ export default function SponsorshipCaseProfile() {
 
   const openStatusModal = (nextStatus: Sponsorship["status"], title: string, reasonRequired: boolean) => {
     setStatusReason("");
+    setStatusError(null);
     setStatusModal({ open: true, nextStatus, title, reasonRequired });
   };
+
+  const closeStatusModal = () => {
+    setStatusModal({ open: false, nextStatus: null, title: "", reasonRequired: false });
+    setStatusReason("");
+    setStatusError(null);
+  };
+
+  const openBudgetAllocation = () => {
+    if (!sponsorship) return;
+    navigate(`/sponsorships?view=budget&budget_case=${sponsorship.id}`);
+  };
+
+  const isBudgetTransitionError = (message: string) =>
+    /budget round|remaining slot|remaining slots|round .*full/i.test(message);
 
   const handleStatusTransition = async () => {
     if (!sponsorship || !statusModal.nextStatus) return;
@@ -230,10 +247,12 @@ export default function SponsorshipCaseProfile() {
       setSponsorship(updated);
       await Promise.all([refreshTimeline(), refreshSponsorContext(updated)]);
       toast.push("Case updated.");
-      setStatusModal({ open: false, nextStatus: null, title: "", reasonRequired: false });
+      closeStatusModal();
     } catch (error) {
       console.error(error);
-      toast.push("Unable to update case.");
+      const message = parseApiErrorMessage(error, "Unable to update case.");
+      setStatusError(message);
+      toast.push(message, "error");
     } finally {
       setStatusSubmitting(false);
     }
@@ -269,11 +288,7 @@ export default function SponsorshipCaseProfile() {
       navigate("/sponsorships");
     } catch (error) {
       console.error(error);
-      if (error instanceof ApiError) {
-        toast.push(error.body || "Unable to delete sponsorship case.");
-      } else {
-        toast.push("Unable to delete sponsorship case.");
-      }
+      toast.push(parseApiErrorMessage(error, "Unable to delete sponsorship case."), "error");
     }
   };
 
@@ -363,9 +378,15 @@ export default function SponsorshipCaseProfile() {
               </>
             )}
             {sponsorship.status === "Approved" && (
-              <Button onClick={() => openStatusModal("Active", "Activate case", false)}>
-                Activate
-              </Button>
+              sponsorship.budget_round_id ? (
+                <Button onClick={() => openStatusModal("Active", "Activate case", false)}>
+                  Activate
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={openBudgetAllocation}>
+                  Assign budget
+                </Button>
+              )
             )}
             {sponsorship.status === "Active" && (
               <>
@@ -620,7 +641,7 @@ export default function SponsorshipCaseProfile() {
         <>
           <div
             className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-40"
-            onClick={() => setStatusModal({ open: false, nextStatus: null, title: "", reasonRequired: false })}
+            onClick={closeStatusModal}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <Card className="w-full max-w-md p-5 space-y-3">
@@ -634,7 +655,7 @@ export default function SponsorshipCaseProfile() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => setStatusModal({ open: false, nextStatus: null, title: "", reasonRequired: false })}
+                  onClick={closeStatusModal}
                 >
                   Cancel
                 </Button>
@@ -645,6 +666,18 @@ export default function SponsorshipCaseProfile() {
                   Confirm
                 </Button>
               </div>
+              {statusError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <p>{statusError}</p>
+                  {isBudgetTransitionError(statusError) && (
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" onClick={openBudgetAllocation}>
+                        Open budget allocation
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
             </Card>
           </div>
         </>
