@@ -7,7 +7,7 @@ export default function SplashScreen() {
             <div className="relative flex items-center justify-center">
                 {/* Logo Container */}
                 <motion.div
-                    className="flex items-center gap-4"
+                    className="flex flex-col items-center gap-4 px-6 text-center sm:flex-row sm:text-left"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.5 }}
@@ -20,9 +20,9 @@ export default function SplashScreen() {
                             duration: 0.8,
                             ease: [0.16, 1, 0.3, 1],
                         }}
-                        className="relative z-10 flex h-20 w-20 items-center justify-center rounded-2xl bg-black text-white shadow-2xl dark:bg-white dark:text-black"
+                        className="relative z-10 flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-black text-white shadow-2xl dark:bg-white dark:text-black sm:h-20 sm:w-20"
                     >
-                        <ShieldCheck size={48} strokeWidth={2} />
+                        <ShieldCheck className="h-10 w-10 sm:h-12 sm:w-12" strokeWidth={2} />
                     </motion.div>
 
                     {/* Text Reveal */}
@@ -36,8 +36,9 @@ export default function SplashScreen() {
                                 ease: [0.16, 1, 0.3, 1],
                             }}
                         >
-                            <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-white">
-                                SaliteOne
+                            <h1 className="max-w-[min(86vw,34rem)] text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white sm:text-4xl">
+                                StMaryEotcEdmonton-
+                                <span className="block sm:inline">Church</span>
                             </h1>
                         </motion.div>
                     </div>

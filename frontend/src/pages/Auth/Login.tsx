@@ -17,14 +17,14 @@ import {
   User,
 } from "lucide-react";
 
-function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
+function ChurchWordmarkReveal({ active }: { active: boolean }) {
   const clipId = useId().replace(/:/g, "");
   const gooId = `${clipId}-goo`;
   const gradientId = `${clipId}-gradient`;
 
   return (
-    <div className="salite-wordmark-stage" aria-label="SaliteOne">
-      <svg viewBox="0 0 860 200" className="salite-wordmark-svg" aria-hidden="true">
+    <div className="salite-wordmark-stage" aria-label="StMaryEotcEdmonton-Church">
+      <svg viewBox="0 0 1040 240" className="salite-wordmark-svg" aria-hidden="true">
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="50%" x2="100%" y2="50%">
             <stop offset="0%" stopColor="var(--logo-line-1)" />
@@ -48,23 +48,24 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
             <feBlend in="SourceGraphic" in2="goo" />
           </filter>
           <clipPath id={clipId}>
-            <text x="430" y="110" textAnchor="middle" className="salite-wordmark-mask">
-              SaliteOne
+            <text x="520" y="92" textAnchor="middle" className="salite-wordmark-mask">
+              <tspan x="520" dy="0">StMaryEotcEdmonton-</tspan>
+              <tspan x="520" dy="82">Church</tspan>
             </text>
           </clipPath>
         </defs>
 
         <motion.ellipse
           className="salite-wordmark-backdrop"
-          cx="250"
-          cy="92"
-          rx="170"
-          ry="108"
+          cx="300"
+          cy="118"
+          rx="220"
+          ry="132"
           fill={`url(#${gradientId})`}
           initial={{ opacity: 0, scale: 0.78, x: -42 }}
           animate={
             active
-              ? { opacity: [0, 0.34, 0.2, 0.24], scale: [0.78, 1, 1.1, 1.16], x: [-42, -12, 10, 18] }
+              ? { opacity: [0, 0.34, 0.2, 0.24], scale: [0.78, 1, 1.1, 1.16], x: [-42, -8, 42, 72] }
               : { opacity: 0, scale: 0.78, x: -42 }
           }
           transition={{ duration: 3.8, ease: [0.22, 1, 0.36, 1] }}
@@ -78,10 +79,10 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               animate={
                 active
                   ? {
-                      cx: [206, 250, 344, 356],
-                      cy: [104, 106, 106, 107],
-                      rx: [176, 184, 238, 258],
-                      ry: [112, 104, 82, 88],
+                      cx: [206, 316, 620, 686],
+                      cy: [118, 124, 124, 126],
+                      rx: [176, 230, 360, 390],
+                      ry: [112, 118, 112, 118],
                       opacity: [0, 0.96, 0.92, 0.9],
                     }
                   : { cx: 206, cy: 104, rx: 176, ry: 112, opacity: 0 }
@@ -97,7 +98,7 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 220, cy: 86, r: 74, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [220, 286, 394, 408], cy: [86, 88, 96, 98], r: [74, 78, 64, 68], opacity: [0, 0.9, 0.86, 0.8] }
+                  ? { cx: [220, 340, 620, 676], cy: [92, 96, 102, 104], r: [74, 88, 82, 86], opacity: [0, 0.9, 0.86, 0.8] }
                   : { cx: 220, cy: 86, r: 74, opacity: 0 }
               }
               transition={{ duration: 3.4, delay: 0.12, ease: [0.22, 1, 0.36, 1], times: [0, 0.26, 0.74, 1] }}
@@ -107,7 +108,7 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 250, cy: 112, r: 64, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [250, 344, 506, 520], cy: [112, 112, 108, 108], r: [64, 76, 70, 74], opacity: [0, 0.88, 0.82, 0.76] }
+                  ? { cx: [250, 398, 742, 782], cy: [128, 126, 126, 126], r: [64, 82, 78, 82], opacity: [0, 0.88, 0.82, 0.76] }
                   : { cx: 250, cy: 112, r: 64, opacity: 0 }
               }
               transition={{ duration: 3.5, delay: 0.24, ease: [0.22, 1, 0.36, 1], times: [0, 0.28, 0.78, 1] }}
@@ -117,7 +118,7 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 236, cy: 126, r: 54, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [236, 332, 562, 576], cy: [126, 122, 116, 114], r: [54, 68, 64, 68], opacity: [0, 0.86, 0.78, 0.74] }
+                  ? { cx: [236, 392, 836, 872], cy: [150, 146, 142, 140], r: [54, 72, 70, 74], opacity: [0, 0.86, 0.78, 0.74] }
                   : { cx: 236, cy: 126, r: 54, opacity: 0 }
               }
               transition={{ duration: 3.65, delay: 0.34, ease: [0.22, 1, 0.36, 1], times: [0, 0.3, 0.8, 1] }}
@@ -127,7 +128,7 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 188, cy: 108, r: 58, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [188, 256, 430, 428], cy: [108, 106, 110, 110], r: [58, 68, 56, 64], opacity: [0, 0.74, 0.64, 0.62] }
+                  ? { cx: [188, 320, 560, 586], cy: [116, 116, 120, 120], r: [58, 74, 68, 72], opacity: [0, 0.74, 0.64, 0.62] }
                   : { cx: 188, cy: 108, r: 58, opacity: 0 }
               }
               transition={{ duration: 3.3, delay: 0.18, ease: [0.22, 1, 0.36, 1], times: [0, 0.24, 0.76, 1] }}
@@ -137,7 +138,7 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 310, cy: 94, r: 28, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [310, 438, 640, 656], cy: [94, 98, 104, 104], r: [28, 44, 40, 42], opacity: [0, 0.76, 0.62, 0.54] }
+                  ? { cx: [310, 500, 884, 920], cy: [100, 104, 110, 110], r: [28, 48, 44, 46], opacity: [0, 0.76, 0.62, 0.54] }
                   : { cx: 310, cy: 94, r: 28, opacity: 0 }
               }
               transition={{ duration: 3.2, delay: 0.52, ease: [0.22, 1, 0.36, 1], times: [0, 0.28, 0.82, 1] }}
@@ -146,8 +147,8 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
         </g>
 
         <motion.text
-          x="430"
-          y="110"
+          x="520"
+          y="92"
           textAnchor="middle"
           className="salite-wordmark-solid"
           initial={{ opacity: 0, y: 16, filter: "blur(14px)" }}
@@ -163,10 +164,11 @@ function SaliteOneWordmarkReveal({ active }: { active: boolean }) {
             times: [0, 0.58, 1],
           }}
         >
-          SaliteOne
+          <tspan x="520" dy="0">StMaryEotcEdmonton-</tspan>
+          <tspan x="520" dy="82">Church</tspan>
         </motion.text>
       </svg>
-      <span className="sr-only">SaliteOne</span>
+      <span className="sr-only">StMaryEotcEdmonton-Church</span>
     </div>
   );
 }
@@ -292,10 +294,10 @@ export default function LoginPage() {
                   <ShieldCheck size={14} strokeWidth={2.1} />
                   <span>Secure sign-in</span>
                 </div>
-                <SaliteOneWordmarkReveal active={logoRevealActive} />
+                <ChurchWordmarkReveal active={logoRevealActive} />
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium uppercase tracking-[0.18em] text-mute">SaliteOne system</p>
+                <p className="text-sm font-medium uppercase tracking-[0.18em] text-mute">StMaryEotcEdmonton-Church system</p>
                 <p className="max-w-xs text-sm leading-6 text-mute">
                   Smooth, secure access to your workspace.
                 </p>

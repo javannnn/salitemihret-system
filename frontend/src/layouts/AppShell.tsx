@@ -437,9 +437,12 @@ export default function AppShell() {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
-                className="flex flex-col overflow-hidden whitespace-nowrap"
+                className="flex min-w-0 flex-col overflow-hidden"
               >
-                <div className="text-xl font-bold tracking-tight logo-shimmer">SaliteOne</div>
+                <div className="logo-shimmer max-w-[10.75rem] text-[0.95rem] font-bold leading-[1.05] tracking-tight">
+                  StMaryEotcEdmonton-
+                  <span className="block">Church</span>
+                </div>
                 <div className="text-xs uppercase tracking-wider text-mute font-medium">Membership Console</div>
               </motion.div>
             )}

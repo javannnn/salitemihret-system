@@ -79,7 +79,7 @@ body {
 }
 
 .salite-wordmark-svg {
-  width: min(100%, 34rem);
+  width: min(100%, 36rem);
   height: auto;
   overflow: visible;
 }
@@ -87,9 +87,9 @@ body {
 .salite-wordmark-mask,
 .salite-wordmark-solid {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 96px;
+  font-size: 66px;
   font-weight: 800;
-  letter-spacing: -7px;
+  letter-spacing: -3.5px;
   text-rendering: geometricPrecision;
 }
 
@@ -122,6 +122,6 @@ body {
   }
 
   .salite-wordmark-svg {
-    width: min(100%, 28rem);
+    width: min(100%, 30rem);
   }
 }
