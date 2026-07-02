@@ -12,7 +12,6 @@ import {
   Loader2,
   Lock,
   Moon,
-  ShieldCheck,
   Sun,
   User,
 } from "lucide-react";
@@ -65,7 +64,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
           initial={{ opacity: 0, scale: 0.78, x: -42 }}
           animate={
             active
-              ? { opacity: [0, 0.34, 0.2, 0.24], scale: [0.78, 1, 1.1, 1.16], x: [-42, -8, 42, 72] }
+              ? { opacity: [0, 0.34, 0.2, 0.24], scale: [0.78, 1, 1.08, 1.12], x: [-42, -8, 10, 18] }
               : { opacity: 0, scale: 0.78, x: -42 }
           }
           transition={{ duration: 3.8, ease: [0.22, 1, 0.36, 1] }}
@@ -79,10 +78,10 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               animate={
                 active
                   ? {
-                      cx: [206, 316, 620, 686],
+                      cx: [206, 316, 500, 520],
                       cy: [118, 124, 124, 126],
-                      rx: [176, 230, 360, 390],
-                      ry: [112, 118, 112, 118],
+                      rx: [176, 270, 500, 560],
+                      ry: [112, 122, 118, 124],
                       opacity: [0, 0.96, 0.92, 0.9],
                     }
                   : { cx: 206, cy: 104, rx: 176, ry: 112, opacity: 0 }
@@ -98,7 +97,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 220, cy: 86, r: 74, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [220, 340, 620, 676], cy: [92, 96, 102, 104], r: [74, 88, 82, 86], opacity: [0, 0.9, 0.86, 0.8] }
+                  ? { cx: [220, 340, 464, 452], cy: [92, 96, 102, 104], r: [74, 88, 92, 104], opacity: [0, 0.9, 0.86, 0.8] }
                   : { cx: 220, cy: 86, r: 74, opacity: 0 }
               }
               transition={{ duration: 3.4, delay: 0.12, ease: [0.22, 1, 0.36, 1], times: [0, 0.26, 0.74, 1] }}
@@ -108,7 +107,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 250, cy: 112, r: 64, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [250, 398, 742, 782], cy: [128, 126, 126, 126], r: [64, 82, 78, 82], opacity: [0, 0.88, 0.82, 0.76] }
+                  ? { cx: [250, 398, 606, 624], cy: [128, 126, 126, 126], r: [64, 82, 96, 108], opacity: [0, 0.88, 0.82, 0.76] }
                   : { cx: 250, cy: 112, r: 64, opacity: 0 }
               }
               transition={{ duration: 3.5, delay: 0.24, ease: [0.22, 1, 0.36, 1], times: [0, 0.28, 0.78, 1] }}
@@ -118,7 +117,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 236, cy: 126, r: 54, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [236, 392, 836, 872], cy: [150, 146, 142, 140], r: [54, 72, 70, 74], opacity: [0, 0.86, 0.78, 0.74] }
+                  ? { cx: [236, 392, 760, 798], cy: [150, 146, 142, 140], r: [54, 72, 86, 92], opacity: [0, 0.86, 0.78, 0.74] }
                   : { cx: 236, cy: 126, r: 54, opacity: 0 }
               }
               transition={{ duration: 3.65, delay: 0.34, ease: [0.22, 1, 0.36, 1], times: [0, 0.3, 0.8, 1] }}
@@ -128,7 +127,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 188, cy: 108, r: 58, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [188, 320, 560, 586], cy: [116, 116, 120, 120], r: [58, 74, 68, 72], opacity: [0, 0.74, 0.64, 0.62] }
+                  ? { cx: [188, 300, 292, 282], cy: [116, 116, 120, 120], r: [58, 80, 94, 106], opacity: [0, 0.74, 0.64, 0.62] }
                   : { cx: 188, cy: 108, r: 58, opacity: 0 }
               }
               transition={{ duration: 3.3, delay: 0.18, ease: [0.22, 1, 0.36, 1], times: [0, 0.24, 0.76, 1] }}
@@ -138,7 +137,7 @@ function ChurchWordmarkReveal({ active }: { active: boolean }) {
               initial={{ cx: 310, cy: 94, r: 28, opacity: 0 }}
               animate={
                 active
-                  ? { cx: [310, 500, 884, 920], cy: [100, 104, 110, 110], r: [28, 48, 44, 46], opacity: [0, 0.76, 0.62, 0.54] }
+                  ? { cx: [310, 500, 884, 920], cy: [100, 104, 110, 110], r: [28, 48, 58, 64], opacity: [0, 0.76, 0.62, 0.54] }
                   : { cx: 310, cy: 94, r: 28, opacity: 0 }
               }
               transition={{ duration: 3.2, delay: 0.52, ease: [0.22, 1, 0.36, 1], times: [0, 0.28, 0.82, 1] }}
@@ -290,10 +289,7 @@ export default function LoginPage() {
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(166,27,41,0.18),transparent_28%),radial-gradient(circle_at_82%_22%,rgba(239,75,143,0.2),transparent_26%),radial-gradient(circle_at_76%_78%,rgba(180,83,9,0.18),transparent_30%),linear-gradient(145deg,rgba(15,23,42,0.04),transparent_44%,rgba(15,23,42,0.08))] dark:bg-[radial-gradient(circle_at_18%_18%,rgba(214,54,73,0.24),transparent_28%),radial-gradient(circle_at_82%_22%,rgba(255,118,171,0.26),transparent_26%),radial-gradient(circle_at_76%_78%,rgba(217,119,6,0.22),transparent_30%),linear-gradient(145deg,rgba(255,255,255,0.04),transparent_44%,rgba(255,255,255,0.08))]" />
             <div className="relative flex h-full flex-col justify-between gap-10">
               <div className="space-y-6">
-                <div className="inline-flex items-center gap-2 rounded-full border border-border bg-bg/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-mute backdrop-blur">
-                  <ShieldCheck size={14} strokeWidth={2.1} />
-                  <span>Secure sign-in</span>
-                </div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mute">Welcome</p>
                 <ChurchWordmarkReveal active={logoRevealActive} />
               </div>
               <div className="space-y-2">
