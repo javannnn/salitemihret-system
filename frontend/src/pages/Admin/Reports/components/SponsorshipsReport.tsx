@@ -60,6 +60,7 @@ export function SponsorshipsReport() {
         }
         return individualDateRange;
     }, [individualDateRange]);
+    const hasIndividualRange = Boolean(normalizedIndividualRange.start || normalizedIndividualRange.end);
 
     useEffect(() => {
         const fetchMetrics = async () => {
@@ -120,7 +121,7 @@ export function SponsorshipsReport() {
                 end_date: range.end || undefined,
             };
             const [detail, timeline, notes] = await Promise.all([
-                getSponsorship(caseRecord.id),
+                getSponsorship(caseRecord.id, filters),
                 getSponsorshipTimeline(caseRecord.id, filters),
                 listSponsorshipNotes(caseRecord.id, filters),
             ]);
@@ -257,7 +258,7 @@ export function SponsorshipsReport() {
                             ["Status", individualReport.detail.sponsor_status || "-"],
                             ["Deposit", formatCadValue(individualReport.detail.payment_information)],
                             ["Last sponsored", formatDate(individualReport.detail.last_sponsored_date)],
-                            ["Frequency", individualReport.detail.frequency || "-"],
+                            [hasIndividualRange ? "Cases in range" : "Cases sponsored", String(individualReport.detail.sponsorship_case_count ?? 0)],
                         ]} />
                     </div>
                 ) : null}

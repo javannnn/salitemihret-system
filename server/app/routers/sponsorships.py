@@ -621,10 +621,12 @@ def create_sponsorship(
 @router.get("/{sponsorship_id:int}", response_model=SponsorshipOut, status_code=status.HTTP_200_OK)
 def get_sponsorship(
     sponsorship_id: int,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipOut:
-    return sponsorships_service.get_sponsorship(db, sponsorship_id)
+    return sponsorships_service.get_sponsorship(db, sponsorship_id, start_date=start_date, end_date=end_date)
 
 
 @router.get("/{sponsorship_id:int}/timeline", response_model=SponsorshipTimelineResponse, status_code=status.HTTP_200_OK)

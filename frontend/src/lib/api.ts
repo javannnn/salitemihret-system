@@ -844,6 +844,7 @@ export type Sponsorship = {
   payment_information?: string | null;
   last_sponsored_date?: string | null;
   days_since_last_sponsorship?: number | null;
+  sponsorship_case_count?: number | null;
   frequency: string;
   status: "Draft" | "Submitted" | "Approved" | "Rejected" | "Active" | "Suspended" | "Completed" | "Closed";
   monthly_amount: number;
@@ -2027,8 +2028,12 @@ export async function exportSponsorshipPrescreeningExcel(
   return res.blob();
 }
 
-export async function getSponsorship(id: number): Promise<Sponsorship> {
-  return api<Sponsorship>(`/sponsorships/${id}`);
+export async function getSponsorship(id: number, filters: { start_date?: string; end_date?: string } = {}): Promise<Sponsorship> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<Sponsorship>(`/sponsorships/${id}${query ? `?${query}` : ""}`);
 }
 
 export async function getSponsorshipMetrics(filters: { start_date?: string; end_date?: string } = {}): Promise<SponsorshipMetrics> {

@@ -349,6 +349,57 @@ def test_sponsor_context_uses_current_case_date_not_prior_history(
     assert context_resp.json()["last_sponsorship_date"] == "2025-01-15"
 
 
+def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    selected_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Selected Range Beneficiary",
+        monthly_amount=Decimal("100.00"),
+        frequency="Monthly",
+        status="Active",
+        start_date=date(2026, 1, 15),
+    )
+    second_in_range = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Second Range Beneficiary",
+        monthly_amount=Decimal("100.00"),
+        frequency="Quarterly",
+        status="Active",
+        start_date=date(2026, 1, 28),
+    )
+    outside_range = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Outside Range Beneficiary",
+        monthly_amount=Decimal("100.00"),
+        frequency="Yearly",
+        status="Active",
+        start_date=date(2026, 2, 15),
+    )
+    db_session.add_all([selected_case, second_in_range, outside_range])
+    db_session.commit()
+
+    authorize(sponsorship_user)
+    filtered_response = client.get(
+        f"/sponsorships/{selected_case.id}",
+        params={"start_date": "2026-01-01", "end_date": "2026-01-31"},
+    )
+
+    assert filtered_response.status_code == 200, filtered_response.text
+    filtered = filtered_response.json()
+    assert filtered["frequency"] == "Monthly"
+    assert filtered["sponsorship_case_count"] == 2
+
+    unfiltered_response = client.get(f"/sponsorships/{selected_case.id}")
+
+    assert unfiltered_response.status_code == 200, unfiltered_response.text
+    assert unfiltered_response.json()["sponsorship_case_count"] == 3
+
+
 def test_office_admin_cannot_create_sponsorship(
     client,
     authorize,

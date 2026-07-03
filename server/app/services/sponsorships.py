@@ -332,7 +332,7 @@ def _sync_newcomer_sponsor(db: Session, newcomer: Newcomer) -> None:
     newcomer.sponsored_by_member_id = latest_sponsorship.sponsor_member_id if latest_sponsorship else None
 
 
-def _serialize(db: Session, sponsorship: Sponsorship) -> SponsorshipOut:
+def _serialize(db: Session, sponsorship: Sponsorship, *, sponsorship_case_count: int | None = None) -> SponsorshipOut:
     received_amount = Decimal(sponsorship.received_amount or 0).quantize(Decimal("0.01"))
 
     status = _normalize_status(sponsorship.status)
@@ -373,6 +373,7 @@ def _serialize(db: Session, sponsorship: Sponsorship) -> SponsorshipOut:
         payment_information=sponsorship.payment_information,
         last_sponsored_date=sponsorship.last_sponsored_date,
         days_since_last_sponsorship=days_since_last,
+        sponsorship_case_count=sponsorship_case_count,
         frequency=sponsorship.frequency,  # type: ignore[arg-type]
         status=status,  # type: ignore[arg-type]
         monthly_amount=Decimal(sponsorship.monthly_amount or 0).quantize(Decimal("0.01")),
@@ -1094,9 +1095,41 @@ def _load_sponsorship(db: Session, sponsorship_id: int) -> Sponsorship:
     return sponsorship
 
 
-def get_sponsorship(db: Session, sponsorship_id: int) -> SponsorshipOut:
+def _count_sponsor_cases(
+    db: Session,
+    sponsor_member_id: int | None,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> int | None:
+    if sponsor_member_id is None:
+        return None
+    query = db.query(func.count(Sponsorship.id)).filter(Sponsorship.sponsor_member_id == sponsor_member_id)
+    if start_date:
+        query = query.filter(Sponsorship.start_date >= start_date)
+    if end_date:
+        query = query.filter(Sponsorship.start_date <= end_date)
+    return int(query.scalar() or 0)
+
+
+def get_sponsorship(
+    db: Session,
+    sponsorship_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SponsorshipOut:
     record = _load_sponsorship(db, sponsorship_id)
-    return _serialize(db, record)
+    return _serialize(
+        db,
+        record,
+        sponsorship_case_count=_count_sponsor_cases(
+            db,
+            record.sponsor_member_id,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+    )
 
 
 def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpdate, actor_id: int | None) -> SponsorshipOut:

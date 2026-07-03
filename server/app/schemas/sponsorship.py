@@ -153,6 +153,7 @@ class SponsorshipOut(BaseModel):
     payment_information: Optional[str]
     last_sponsored_date: Optional[date]
     days_since_last_sponsorship: Optional[int]
+    sponsorship_case_count: Optional[int] = None
     frequency: str
     status: SponsorshipStatus
     monthly_amount: Decimal
