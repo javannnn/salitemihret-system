@@ -1393,7 +1393,7 @@ export default function SchoolsWorkspace() {
                 To publish Mezmur, Lessons, or Art to the public site, please use the church website’s content tools. Sunday School content publishing from here will return once the website integration is ready.
               </p>
               <div className="flex justify-center">
-                <Button href="https://salitemihret.org" target="_blank" rel="noreferrer">
+                <Button href="https://stmaryeotcedmonton.org/services/" target="_blank" rel="noreferrer">
                   Open church website
                 </Button>
               </div>
