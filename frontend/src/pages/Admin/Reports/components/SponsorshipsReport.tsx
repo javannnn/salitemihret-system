@@ -252,6 +252,7 @@ export function SponsorshipsReport() {
                             ["Immigrant", individualReport.detail.beneficiary_name],
                             ["Start", formatDate(individualReport.detail.start_date)],
                             ["Monthly amount", formatCadValue(individualReport.detail.monthly_amount)],
+                            [hasIndividualRange ? "Contributions in range" : "Contributions received", formatCadValue(individualReport.detail.received_amount_in_range ?? individualReport.detail.received_amount)],
                         ]} />
                         <ReportPanel title="Co-sponsor" rows={[
                             ["Name", `${individualReport.detail.sponsor.first_name} ${individualReport.detail.sponsor.last_name}`],

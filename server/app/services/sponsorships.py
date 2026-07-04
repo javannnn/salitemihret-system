@@ -332,7 +332,13 @@ def _sync_newcomer_sponsor(db: Session, newcomer: Newcomer) -> None:
     newcomer.sponsored_by_member_id = latest_sponsorship.sponsor_member_id if latest_sponsorship else None
 
 
-def _serialize(db: Session, sponsorship: Sponsorship, *, sponsorship_case_count: int | None = None) -> SponsorshipOut:
+def _serialize(
+    db: Session,
+    sponsorship: Sponsorship,
+    *,
+    sponsorship_case_count: int | None = None,
+    received_amount_in_range: Decimal | None = None,
+) -> SponsorshipOut:
     received_amount = Decimal(sponsorship.received_amount or 0).quantize(Decimal("0.01"))
 
     status = _normalize_status(sponsorship.status)
@@ -378,6 +384,7 @@ def _serialize(db: Session, sponsorship: Sponsorship, *, sponsorship_case_count:
         status=status,  # type: ignore[arg-type]
         monthly_amount=Decimal(sponsorship.monthly_amount or 0).quantize(Decimal("0.01")),
         received_amount=received_amount,
+        received_amount_in_range=received_amount_in_range,
         program=program,  # type: ignore[arg-type]
         pledge_channel=pledge_channel,  # type: ignore[arg-type]
         reminder_channel=reminder_channel,  # type: ignore[arg-type]
@@ -1112,6 +1119,22 @@ def _count_sponsor_cases(
     return int(query.scalar() or 0)
 
 
+def _received_amount_for_range(
+    sponsorship: Sponsorship,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> Decimal:
+    received_amount = Decimal(sponsorship.received_amount or 0).quantize(Decimal("0.01"))
+    if start_date is None and end_date is None:
+        return received_amount
+    if start_date and sponsorship.start_date < start_date:
+        return Decimal("0.00")
+    if end_date and sponsorship.start_date > end_date:
+        return Decimal("0.00")
+    return received_amount
+
+
 def get_sponsorship(
     db: Session,
     sponsorship_id: int,
@@ -1126,6 +1149,11 @@ def get_sponsorship(
         sponsorship_case_count=_count_sponsor_cases(
             db,
             record.sponsor_member_id,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        received_amount_in_range=_received_amount_for_range(
+            record,
             start_date=start_date,
             end_date=end_date,
         ),

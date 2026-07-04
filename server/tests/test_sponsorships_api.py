@@ -360,6 +360,7 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
         sponsor_member_id=sample_member.id,
         beneficiary_name="Selected Range Beneficiary",
         monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("275.00"),
         frequency="Monthly",
         status="Active",
         start_date=date(2026, 1, 15),
@@ -368,6 +369,7 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
         sponsor_member_id=sample_member.id,
         beneficiary_name="Second Range Beneficiary",
         monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("125.00"),
         frequency="Quarterly",
         status="Active",
         start_date=date(2026, 1, 28),
@@ -376,6 +378,7 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
         sponsor_member_id=sample_member.id,
         beneficiary_name="Outside Range Beneficiary",
         monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("50.00"),
         frequency="Yearly",
         status="Active",
         start_date=date(2026, 2, 15),
@@ -393,11 +396,22 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
     filtered = filtered_response.json()
     assert filtered["frequency"] == "Monthly"
     assert filtered["sponsorship_case_count"] == 2
+    assert filtered["received_amount"] == "275.00"
+    assert filtered["received_amount_in_range"] == "275.00"
+
+    out_of_range_response = client.get(
+        f"/sponsorships/{selected_case.id}",
+        params={"start_date": "2026-02-01", "end_date": "2026-02-28"},
+    )
+
+    assert out_of_range_response.status_code == 200, out_of_range_response.text
+    assert out_of_range_response.json()["received_amount_in_range"] == "0.00"
 
     unfiltered_response = client.get(f"/sponsorships/{selected_case.id}")
 
     assert unfiltered_response.status_code == 200, unfiltered_response.text
     assert unfiltered_response.json()["sponsorship_case_count"] == 3
+    assert unfiltered_response.json()["received_amount_in_range"] == "275.00"
 
 
 def test_office_admin_cannot_create_sponsorship(

@@ -158,6 +158,7 @@ class SponsorshipOut(BaseModel):
     status: SponsorshipStatus
     monthly_amount: Decimal
     received_amount: Decimal
+    received_amount_in_range: Optional[Decimal] = None
     program: Optional[SponsorshipProgram]
     pledge_channel: Optional[SponsorshipPledgeChannel]
     reminder_channel: Optional[SponsorshipReminderChannel]

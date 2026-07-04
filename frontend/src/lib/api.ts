@@ -849,6 +849,7 @@ export type Sponsorship = {
   status: "Draft" | "Submitted" | "Approved" | "Rejected" | "Active" | "Suspended" | "Completed" | "Closed";
   monthly_amount: number;
   received_amount: number;
+  received_amount_in_range?: number | null;
   program?: SponsorshipProgram | null;
   pledge_channel?: SponsorshipPledgeChannel | null;
   reminder_channel?: SponsorshipReminderChannel | null;
