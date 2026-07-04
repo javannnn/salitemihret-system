@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.auth.deps import get_current_user
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.core.db import get_db
 from app.core.config import settings
 from app.models.user import User, UserInvitation, UserMemberLink, UserAuditLog, UserAuditActionEnum
-from app.schemas.auth import LoginRequest, TokenResponse
+from app.schemas.auth import LoginRequest, TermsAcceptanceResponse, TokenResponse
 from app.schemas.user_admin import InvitationAcceptRequest
 from app.services.user_accounts import (
     clear_temporary_password,
@@ -20,6 +21,8 @@ from app.services.user_lifecycle import get_user_auth_block_reason
 from app.services.recaptcha import verify_recaptcha, RecaptchaError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+CURRENT_TERMS_VERSION = "2026-07-03"
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -64,6 +67,19 @@ async def login(request: Request, payload: LoginRequest, db: Session = Depends(g
     roles = [role.name for role in user.roles]
     token = create_access_token(subject=str(user.id), roles=roles)
     return TokenResponse(access_token=token)
+
+
+@router.post("/terms/accept", response_model=TermsAcceptanceResponse)
+def accept_terms(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> TermsAcceptanceResponse:
+    accepted_at = now_utc()
+    user.terms_accepted_at = accepted_at
+    user.terms_version = CURRENT_TERMS_VERSION
+    db.commit()
+    return TermsAcceptanceResponse(
+        accepted=True,
+        terms_accepted_at=accepted_at.isoformat(),
+        terms_version=CURRENT_TERMS_VERSION,
+    )
 
 
 @router.post("/invitations/{token}", response_model=TokenResponse)

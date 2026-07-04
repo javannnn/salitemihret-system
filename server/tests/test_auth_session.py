@@ -113,6 +113,35 @@ def test_whoami_refreshes_last_seen_for_active_session(monkeypatch):
     assert refreshed_last_seen > previous_last_seen
 
 
+def test_terms_acceptance_required_before_feature_access(monkeypatch):
+    monkeypatch.setattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 30)
+    user_id = _create_user(
+        email="terms-required@example.com",
+        username="terms.required",
+        last_seen=datetime.now(timezone.utc),
+    )
+    token = create_access_token(subject=str(user_id), roles=[])
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with TestingSessionLocal() as db_session:
+        with pytest.raises(HTTPException) as exc_info:
+            get_current_user(
+                request=_make_request("/dashboard"),
+                credentials=credentials,
+                db=db_session,
+            )
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Terms acceptance required before accessing other features"
+
+    with TestingSessionLocal() as db_session:
+        user = get_current_user(
+            request=_make_request("/auth/terms/accept"),
+            credentials=credentials,
+            db=db_session,
+        )
+        assert user.id == user_id
+
+
 def test_chat_heartbeat_writes_timezone_aware_last_seen():
     user_id = _create_user(
         email="heartbeat-session@example.com",

@@ -83,8 +83,16 @@ def get_current_user(
 
     _enforce_session_activity(db, user)
 
+    if user.terms_accepted_at is None:
+        allowed_paths = {"/auth/whoami", "/auth/terms/accept", "/license/status"}
+        if request.url.path not in allowed_paths:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Terms acceptance required before accessing other features",
+            )
+
     if user.must_change_password:
-        allowed_paths = {"/auth/whoami", "/account/me", "/account/me/password", "/license/status"}
+        allowed_paths = {"/auth/whoami", "/auth/terms/accept", "/account/me", "/account/me/password", "/license/status"}
         if request.url.path not in allowed_paths:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

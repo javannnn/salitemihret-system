@@ -27,4 +27,12 @@ class WhoAmIResponse(BaseModel):
     linked_member_id: int | None = None
     full_name: str | None = None
     must_change_password: bool = False
+    terms_accepted_at: str | None = None
+    terms_version: str | None = None
     permissions: EffectivePermissionSnapshot
+
+
+class TermsAcceptanceResponse(BaseModel):
+    accepted: bool
+    terms_accepted_at: str
+    terms_version: str

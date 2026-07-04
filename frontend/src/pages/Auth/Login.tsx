@@ -242,7 +242,7 @@ export default function LoginPage() {
       await login(email, password, token);
       toast.push("Logged in successfully");
       const session = await whoami();
-      window.location.href = session.must_change_password ? "/account" : "/dashboard";
+      window.location.href = !session.terms_accepted_at ? "/terms" : session.must_change_password ? "/account" : "/dashboard";
     } catch (err) {
       console.error(err);
       setError(err instanceof Error && err.message ? err.message : "Login failed. Check your credentials and try again.");

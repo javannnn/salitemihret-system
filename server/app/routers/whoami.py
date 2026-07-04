@@ -23,6 +23,8 @@ def whoami(user: User = Depends(get_current_user)) -> WhoAmIResponse:
             else None
         ),
         must_change_password=user.must_change_password,
+        terms_accepted_at=user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+        terms_version=user.terms_version,
         roles=[role.name for role in user.roles],
         permissions=permissions,
     )

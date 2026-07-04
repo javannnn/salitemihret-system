@@ -10,6 +10,7 @@ import SplashScreen from "@/components/SplashScreen";
 // Lazy load pages
 const LoginPage = lazy(() => import("@/pages/Auth/Login"));
 const Onboard = lazy(() => import("@/pages/Auth/Onboard"));
+const TermsAcceptance = lazy(() => import("@/pages/Auth/TermsAcceptance"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const MembersList = lazy(() => import("@/pages/Members/List"));
 const CreateMember = lazy(() => import("@/pages/Members/Create"));
@@ -36,6 +37,14 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/onboard" element={<Onboard />} />
+        <Route
+          path="/terms"
+          element={
+            <ProtectedRoute allowPendingTerms>
+              <TermsAcceptance />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/"
           element={

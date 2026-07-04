@@ -39,6 +39,8 @@ class User(Base):
     deleted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_seen = Column(DateTime(timezone=True), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     username_changed_at = Column(DateTime(timezone=True), nullable=True)

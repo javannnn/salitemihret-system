@@ -10,6 +10,8 @@ export type WhoAmI = {
   linked_member_id?: number | null;
   full_name: string | null;
   must_change_password: boolean;
+  terms_accepted_at?: string | null;
+  terms_version?: string | null;
   permissions: {
     modules: Record<string, { read: boolean; write: boolean; visible: boolean }>;
     fields: Record<string, Record<string, { read: boolean; write: boolean }>>;
@@ -55,6 +57,12 @@ export async function whoami(): Promise<WhoAmI> {
     throw new Error("Missing token");
   }
   return api<WhoAmI>("/auth/whoami", { skipSessionRestore: true });
+}
+
+export async function acceptTerms(): Promise<{ accepted: boolean; terms_accepted_at: string; terms_version: string }> {
+  return api<{ accepted: boolean; terms_accepted_at: string; terms_version: string }>("/auth/terms/accept", {
+    method: "POST",
+  });
 }
 
 type JwtPayload = {

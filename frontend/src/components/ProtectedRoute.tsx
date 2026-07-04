@@ -7,10 +7,12 @@ import SplashScreen from "./SplashScreen";
 export default function ProtectedRoute({
   roles,
   requireSuperAdmin = false,
+  allowPendingTerms = false,
   children,
 }: {
   roles?: string[];
   requireSuperAdmin?: boolean;
+  allowPendingTerms?: boolean;
   children: React.ReactNode;
 }) {
   const { user, token, loading } = useAuth();
@@ -28,7 +30,11 @@ export default function ProtectedRoute({
     return <SplashScreen />;
   }
 
-  if (user.must_change_password && !location.pathname.startsWith("/account")) {
+  if (!user.terms_accepted_at && !allowPendingTerms && !location.pathname.startsWith("/terms")) {
+    return <Navigate to="/terms" replace state={{ from: location.pathname }} />;
+  }
+
+  if (user.terms_accepted_at && user.must_change_password && !location.pathname.startsWith("/account")) {
     return <Navigate to="/account" replace state={{ forcedPasswordChange: true }} />;
   }
 
