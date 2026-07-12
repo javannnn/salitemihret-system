@@ -13,7 +13,7 @@ from app.models.member import Member
 from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerStatusAudit
-from app.models.payment import Payment
+from app.models.payment import Payment, PaymentServiceType
 from app.models.priest import Priest
 from app.models.sponsorship import Sponsorship
 from app.models.sponsorship_audit import SponsorshipStatusAudit
@@ -1120,6 +1120,7 @@ def _count_sponsor_cases(
 
 
 def _received_amount_for_range(
+    db: Session,
     sponsorship: Sponsorship,
     *,
     start_date: date | None = None,
@@ -1128,11 +1129,22 @@ def _received_amount_for_range(
     received_amount = Decimal(sponsorship.received_amount or 0).quantize(Decimal("0.01"))
     if start_date is None and end_date is None:
         return received_amount
-    if start_date and sponsorship.start_date < start_date:
-        return Decimal("0.00")
-    if end_date and sponsorship.start_date > end_date:
-        return Decimal("0.00")
-    return received_amount
+
+    query = (
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .join(PaymentServiceType, PaymentServiceType.id == Payment.service_type_id)
+        .filter(
+            Payment.member_id == sponsorship.sponsor_member_id,
+            Payment.status == "Completed",
+            func.upper(PaymentServiceType.code) == "SPONSORSHIP",
+        )
+    )
+    if start_date:
+        query = query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        query = query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
+
+    return Decimal(query.scalar() or 0).quantize(Decimal("0.01"))
 
 
 def get_sponsorship(
@@ -1153,6 +1165,7 @@ def get_sponsorship(
             end_date=end_date,
         ),
         received_amount_in_range=_received_amount_for_range(
+            db,
             record,
             start_date=start_date,
             end_date=end_date,

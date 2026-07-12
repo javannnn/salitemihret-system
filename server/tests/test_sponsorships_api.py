@@ -10,6 +10,7 @@ from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.member import Spouse
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerAddressHistory, NewcomerInteraction, NewcomerStatusAudit
+from app.models.payment import Payment, PaymentServiceType
 from app.models.sponsorship import Sponsorship
 from app.models.sponsorship_audit import SponsorshipStatusAudit
 from app.models.sponsorship_note import SponsorshipNote
@@ -397,7 +398,7 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
     assert filtered["frequency"] == "Monthly"
     assert filtered["sponsorship_case_count"] == 2
     assert filtered["received_amount"] == "275.00"
-    assert filtered["received_amount_in_range"] == "275.00"
+    assert filtered["received_amount_in_range"] == "0.00"
 
     out_of_range_response = client.get(
         f"/sponsorships/{selected_case.id}",
@@ -412,6 +413,72 @@ def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
     assert unfiltered_response.status_code == 200, unfiltered_response.text
     assert unfiltered_response.json()["sponsorship_case_count"] == 3
     assert unfiltered_response.json()["received_amount_in_range"] == "275.00"
+
+
+def test_sponsorship_detail_sums_sponsorship_payments_in_selected_range(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    service_type = PaymentServiceType(code="SPONSORSHIP", label="Sponsorship Donation", active=True)
+    donation_type = PaymentServiceType(code="DONATION", label="General Donation", active=True)
+    selected_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Payment Range Beneficiary",
+        monthly_amount=Decimal("100.00"),
+        received_amount=Decimal("275.00"),
+        frequency="Monthly",
+        status="Active",
+        start_date=date(2026, 1, 15),
+    )
+    db_session.add_all([service_type, donation_type, selected_case])
+    db_session.flush()
+    db_session.add_all(
+        [
+            Payment(
+                member_id=sample_member.id,
+                service_type_id=service_type.id,
+                amount=Decimal("150.00"),
+                status="Completed",
+                posted_at=datetime(2026, 2, 10, 12, 0, 0),
+            ),
+            Payment(
+                member_id=sample_member.id,
+                service_type_id=service_type.id,
+                amount=Decimal("25.00"),
+                status="Pending",
+                posted_at=datetime(2026, 2, 11, 12, 0, 0),
+            ),
+            Payment(
+                member_id=sample_member.id,
+                service_type_id=donation_type.id,
+                amount=Decimal("75.00"),
+                status="Completed",
+                posted_at=datetime(2026, 2, 12, 12, 0, 0),
+            ),
+            Payment(
+                member_id=sample_member.id,
+                service_type_id=service_type.id,
+                amount=Decimal("50.00"),
+                status="Completed",
+                posted_at=datetime(2026, 3, 1, 12, 0, 0),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    authorize(sponsorship_user)
+    response = client.get(
+        f"/sponsorships/{selected_case.id}",
+        params={"start_date": "2026-02-01", "end_date": "2026-02-28"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["received_amount"] == "275.00"
+    assert payload["received_amount_in_range"] == "150.00"
 
 
 def test_office_admin_cannot_create_sponsorship(
