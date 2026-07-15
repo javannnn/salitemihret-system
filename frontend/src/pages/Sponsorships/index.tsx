@@ -88,7 +88,7 @@ import {
 } from "@/lib/validation";
 
 type WizardStep = 0 | 1 | 2 | 3;
-type BeneficiaryMode = "newcomer_existing" | "newcomer_create" | "member" | "external";
+type BeneficiaryMode = "external";
 
 type SponsorshipWizardForm = {
   sponsor_member_id: number | null;
@@ -210,7 +210,7 @@ const SLOT_OPTIONS = Array.from({ length: 100 }, (_, index) => index + 1);
 const emptyWizardForm = (): SponsorshipWizardForm => ({
   sponsor_member_id: null,
   sponsor_name: "",
-  beneficiary_mode: null,
+  beneficiary_mode: "external",
   beneficiary_member_id: null,
   newcomer_id: null,
   beneficiary_name: "",
@@ -464,8 +464,6 @@ function resolveOptionLabel(options: SelectOption[], value?: string | null) {
 }
 
 function resolveBeneficiaryMode(record: Sponsorship): BeneficiaryMode {
-  if (record.newcomer) return "newcomer_existing";
-  if (record.beneficiary_member) return "member";
   return "external";
 }
 
@@ -482,13 +480,13 @@ function splitManualBeneficiaryName(name?: string | null) {
 
 function mapSponsorshipToWizardForm(record: Sponsorship): SponsorshipWizardForm {
   const mode = resolveBeneficiaryMode(record);
-  const manualName = mode === "external" ? splitManualBeneficiaryName(record.beneficiary_name) : { firstName: "", lastName: "" };
+  const manualName = splitManualBeneficiaryName(record.beneficiary_name);
   return {
     sponsor_member_id: record.sponsor?.id ?? null,
     sponsor_name: `${record.sponsor?.first_name ?? ""} ${record.sponsor?.last_name ?? ""}`.trim(),
     beneficiary_mode: mode,
-    beneficiary_member_id: record.beneficiary_member?.id ?? null,
-    newcomer_id: record.newcomer?.id ?? null,
+    beneficiary_member_id: null,
+    newcomer_id: null,
     beneficiary_name: record.beneficiary_name || "",
     beneficiary_first_name: manualName.firstName,
     beneficiary_last_name: manualName.lastName,
@@ -589,7 +587,6 @@ export default function SponsorshipWorkspace() {
   const newcomerFamilySizeWritePermission = permissionLabel("Newcomers", "Write", "Family Size");
   const newcomerLanguagesWritePermission = permissionLabel("Newcomers", "Write", "Languages");
   const canSearchSponsors = Boolean(permissions.modules.members?.read);
-  const canSearchBeneficiaryMembers = Boolean(permissions.modules.members?.read);
   const canSearchNewcomers = Boolean(permissions.modules.newcomers?.read);
   const newcomerFieldAccess = useMemo(
     () => ({
@@ -643,18 +640,13 @@ export default function SponsorshipWorkspace() {
     if (!canSearchNewcomers) {
       missingPermissions.add(newcomersReadPermission);
     }
-    if (!canSearchBeneficiaryMembers) {
-      missingPermissions.add(membersReadPermission);
-    }
     if (!canQuickCreateNewcomer) {
       newcomerQuickCreatePermissionNeeds.forEach((permissionName) => missingPermissions.add(permissionName));
     }
     return [...missingPermissions];
   }, [
     canQuickCreateNewcomer,
-    canSearchBeneficiaryMembers,
     canSearchNewcomers,
-    membersReadPermission,
     newcomerQuickCreatePermissionNeeds,
     newcomersReadPermission,
   ]);
@@ -664,7 +656,6 @@ export default function SponsorshipWorkspace() {
     beneficiaryPermissionNeeds
   );
   const existingNewcomerPermissionHint = permissionMessage("link an existing newcomer", [newcomersReadPermission]);
-  const memberLookupPermissionHint = permissionMessage("search members here", [membersReadPermission]);
   const familySizePermissionHint = permissionMessage("edit family size", [newcomerFamilySizeWritePermission]);
   const preferredLanguagePermissionHint = permissionMessage(
     "edit preferred language",
@@ -747,12 +738,6 @@ export default function SponsorshipWorkspace() {
   const [roundSavingId, setRoundSavingId] = useState<number | "new" | null>(null);
   const [roundDeletingId, setRoundDeletingId] = useState<number | null>(null);
 
-  const [beneficiarySearch, setBeneficiarySearch] = useState("");
-  const [beneficiaryResults, setBeneficiaryResults] = useState<NewcomerListResponse | null>(null);
-  const [beneficiaryLoading, setBeneficiaryLoading] = useState(false);
-  const [memberSearch, setMemberSearch] = useState("");
-  const [memberResults, setMemberResults] = useState<Member[]>([]);
-  const [memberSearchLoading, setMemberSearchLoading] = useState(false);
   const [newcomerForm, setNewcomerForm] = useState<NewcomerQuickForm>(emptyNewcomerForm);
   const [newcomerFieldErrors, setNewcomerFieldErrors] = useState<NewcomerQuickErrors>({});
   const newcomerPhoneSnapSuggestion = useMemo(() => {
@@ -777,8 +762,6 @@ export default function SponsorshipWorkspace() {
   const debouncedQuery = useDebouncedValue(filters.q, 350);
   const debouncedPrescreenQuery = useDebouncedValue(prescreenFilters.q, 350);
   const debouncedSponsorSearch = useDebouncedValue(sponsorSearch.trim(), 300);
-  const debouncedMemberSearch = useDebouncedValue(memberSearch.trim(), 300);
-  const debouncedBeneficiarySearch = useDebouncedValue(beneficiarySearch.trim(), 300);
 
   useEffect(() => {
     getApiCapabilities()
@@ -1118,82 +1101,6 @@ export default function SponsorshipWorkspace() {
   }, [canSearchSponsors, debouncedSponsorSearch]);
 
   useEffect(() => {
-    if (!canSearchBeneficiaryMembers) {
-      setMemberResults([]);
-      setMemberSearchLoading(false);
-      return;
-    }
-    if (!memberSearch.trim() || wizardForm.beneficiary_mode !== "member") {
-      setMemberResults([]);
-      setMemberSearchLoading(false);
-    }
-  }, [canSearchBeneficiaryMembers, memberSearch, wizardForm.beneficiary_mode]);
-
-  useEffect(() => {
-    if (!canSearchBeneficiaryMembers) {
-      return;
-    }
-    if (!debouncedMemberSearch || wizardForm.beneficiary_mode !== "member") {
-      return;
-    }
-    let active = true;
-    setMemberSearchLoading(true);
-    searchMembers(debouncedMemberSearch)
-      .then((results) => {
-        if (active) {
-          setMemberResults(results.items.slice(0, 6));
-        }
-      })
-      .catch(() => null)
-      .finally(() => {
-        if (active) {
-          setMemberSearchLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [canSearchBeneficiaryMembers, debouncedMemberSearch, wizardForm.beneficiary_mode]);
-
-  useEffect(() => {
-    if (!canSearchNewcomers) {
-      setBeneficiaryResults(null);
-      setBeneficiaryLoading(false);
-      return;
-    }
-    if (!beneficiarySearch.trim() || wizardForm.beneficiary_mode !== "newcomer_existing") {
-      setBeneficiaryResults(null);
-      setBeneficiaryLoading(false);
-    }
-  }, [beneficiarySearch, canSearchNewcomers, wizardForm.beneficiary_mode]);
-
-  useEffect(() => {
-    if (!canSearchNewcomers) {
-      return;
-    }
-    if (!debouncedBeneficiarySearch || wizardForm.beneficiary_mode !== "newcomer_existing") {
-      return;
-    }
-    let active = true;
-    setBeneficiaryLoading(true);
-    listNewcomers({ q: debouncedBeneficiarySearch, page: 1, page_size: 6 })
-      .then((response) => {
-        if (active) {
-          setBeneficiaryResults(response);
-        }
-      })
-      .catch(() => null)
-      .finally(() => {
-        if (active) {
-          setBeneficiaryLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [canSearchNewcomers, debouncedBeneficiarySearch, wizardForm.beneficiary_mode]);
-
-  useEffect(() => {
     const draftParam = searchParams.get("draft");
     if (!draftParam) return;
     const draftId = Number(draftParam);
@@ -1229,15 +1136,6 @@ export default function SponsorshipWorkspace() {
         setSponsorResults([]);
         setSponsorContextAvailable(true);
 
-        const beneficiaryLabel = record.newcomer
-          ? `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim()
-          : record.beneficiary_member
-            ? `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim()
-            : record.beneficiary_name || "";
-        setBeneficiarySearch(record.newcomer ? beneficiaryLabel : "");
-        setMemberSearch(record.beneficiary_member ? beneficiaryLabel : "");
-        setBeneficiaryResults(null);
-        setMemberResults([]);
 
         const fallbackMember = {
           id: record.sponsor.id,
@@ -1438,10 +1336,6 @@ export default function SponsorshipWorkspace() {
     setSponsorContext(null);
     setSponsorSearch("");
     setSponsorResults([]);
-    setBeneficiarySearch("");
-    setBeneficiaryResults(null);
-    setMemberSearch("");
-    setMemberResults([]);
     setNewcomerForm(emptyNewcomerForm());
     setNewcomerFieldErrors({});
   };
@@ -1860,38 +1754,6 @@ export default function SponsorshipWorkspace() {
   const newcomerFieldClass = (field: keyof NewcomerQuickForm) =>
     newcomerFieldErrors[field] ? "border-rose-300 focus:border-rose-500 focus:shadow-rose-200" : "";
 
-  const handleNewcomerSelect = (newcomer: NewcomerListItem) => {
-    const label = `${newcomer.first_name} ${newcomer.last_name}`.trim();
-    setWizardForm((prev) => ({
-      ...prev,
-      beneficiary_mode: "newcomer_existing",
-      newcomer_id: newcomer.id,
-      beneficiary_member_id: null,
-      beneficiary_name: label,
-      beneficiary_first_name: "",
-      beneficiary_last_name: "",
-    }));
-    setBeneficiarySearch(label);
-    setBeneficiaryResults(null);
-    setWizardError(null);
-  };
-
-  const handleMemberSelect = (member: Member) => {
-    const label = `${member.first_name} ${member.last_name}`.trim();
-    setWizardForm((prev) => ({
-      ...prev,
-      beneficiary_mode: "member",
-      beneficiary_member_id: member.id,
-      newcomer_id: null,
-      beneficiary_name: label,
-      beneficiary_first_name: "",
-      beneficiary_last_name: "",
-    }));
-    setMemberSearch(label);
-    setMemberResults([]);
-    setWizardError(null);
-  };
-
   const toggleVolunteerService = (service: string) => {
     setWizardForm((prev) => {
       const exists = prev.volunteer_services.includes(service);
@@ -2096,11 +1958,16 @@ export default function SponsorshipWorkspace() {
         ...(formattedPostalCode ? { temporary_address_postal_code: formattedPostalCode } : {}),
         arrival_date: new Date().toISOString().slice(0, 10),
       });
+      const beneficiaryName = `${newcomer.first_name} ${newcomer.last_name}`.trim();
+      const manualName = splitManualBeneficiaryName(beneficiaryName);
       setWizardForm((prev) => ({
         ...prev,
-        newcomer_id: newcomer.id,
-        beneficiary_name: `${newcomer.first_name} ${newcomer.last_name}`.trim(),
-        beneficiary_mode: "newcomer_existing",
+        newcomer_id: null,
+        beneficiary_member_id: null,
+        beneficiary_name: beneficiaryName,
+        beneficiary_first_name: manualName.firstName,
+        beneficiary_last_name: manualName.lastName,
+        beneficiary_mode: "external",
       }));
       setWizardStep(2);
     } catch (error) {
@@ -2189,8 +2056,6 @@ export default function SponsorshipWorkspace() {
     const sponsorMemberId = wizardForm.sponsor_member_id;
     const submitPayload = (statusToSend: Sponsorship["status"]): SponsorshipPayload => ({
         sponsor_member_id: sponsorMemberId,
-        beneficiary_member_id: wizardForm.beneficiary_member_id || undefined,
-        newcomer_id: wizardForm.newcomer_id || undefined,
         beneficiary_name: beneficiaryName,
         monthly_amount: Number(wizardForm.monthly_amount),
         start_date: wizardForm.start_date,
@@ -2503,8 +2368,6 @@ export default function SponsorshipWorkspace() {
                   onChange={(event) => setFilters((prev) => ({ ...prev, beneficiary_type: event.target.value, page: 1 }))}
                 >
                   <option value="">All</option>
-                  <option value="Newcomer">Newcomer</option>
-                  <option value="Member">Member</option>
                   <option value="External">External</option>
                 </Select>
               </div>
@@ -3753,436 +3616,39 @@ export default function SponsorshipWorkspace() {
 
                 {wizardStep === 1 && (
                   <div className="space-y-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <Card
-                        className={`p-4 border-2 transition ${
-                          canSearchNewcomers
-                            ? `cursor-pointer ${wizardForm.beneficiary_mode === "newcomer_existing" ? "border-accent" : "border-border"}`
-                            : "cursor-not-allowed border-dashed border-slate-300 opacity-60"
-                        }`}
-                        onClick={() => {
-                          if (!canSearchNewcomers) return;
-                          setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_existing" }));
-                        }}
-                      >
-                        <p className="font-medium">Link existing newcomer</p>
-                        <p className="text-xs text-mute">
-                          {canSearchNewcomers ? "Search and select a current newcomer." : existingNewcomerPermissionHint}
-                        </p>
-                      </Card>
-                      <Card
-                        className={`p-4 border-2 transition ${
-                          canQuickCreateNewcomer
-                            ? `cursor-pointer ${wizardForm.beneficiary_mode === "newcomer_create" ? "border-accent" : "border-border"}`
-                            : "cursor-not-allowed border-dashed border-slate-300 opacity-60"
-                        }`}
-                        onClick={() => {
-                          if (!canQuickCreateNewcomer) return;
-                          setWizardForm((prev) => ({ ...prev, beneficiary_mode: "newcomer_create" }));
-                        }}
-                      >
-                        <p className="font-medium">Create newcomer now</p>
-                        <p className="text-xs text-mute">
-                          {canQuickCreateNewcomer ? "Quick intake and link the case." : newcomerQuickCreateHint}
-                        </p>
-                      </Card>
-                      <Card
-                        className={`p-4 cursor-pointer border-2 ${wizardForm.beneficiary_mode === "member" || wizardForm.beneficiary_mode === "external" ? "border-accent" : "border-border"}`}
-                        onClick={() =>
-                          setWizardForm((prev) => {
-                            if (canSearchBeneficiaryMembers) {
-                              return { ...prev, beneficiary_mode: "member" };
-                            }
-                            const manualName = splitManualBeneficiaryName(prev.beneficiary_name);
-                            return {
+                    <div className="space-y-3">
+                      <label className="text-xs uppercase text-mute block">External immigrant name</label>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Input
+                          placeholder="First name"
+                          value={wizardForm.beneficiary_first_name}
+                          onChange={(event) =>
+                            setWizardForm((prev) => ({
                               ...prev,
                               beneficiary_mode: "external",
                               beneficiary_member_id: null,
                               newcomer_id: null,
-                              beneficiary_first_name: prev.beneficiary_first_name || manualName.firstName,
-                              beneficiary_last_name: prev.beneficiary_last_name || manualName.lastName,
-                            };
-                          })
-                        }
-                      >
-                        <p className="font-medium">Member</p>
-                        <p className="text-xs text-mute">
-                          {canSearchBeneficiaryMembers
-                            ? "Select a registered member or enter an external immigrant manually."
-                            : `Member search is not available to you here. Ask your admin to enable: ${membersReadPermission}.`}
-                        </p>
-                      </Card>
-                    </div>
-
-                    {(!canSearchNewcomers || !canQuickCreateNewcomer || !canSearchBeneficiaryMembers) && (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-800">
-                        {beneficiaryOptionsPermissionHint}
-                      </div>
-                    )}
-
-                    {wizardForm.beneficiary_mode === "newcomer_existing" && (
-                      <div>
-                        <label className="text-xs uppercase text-mute block mb-1">Search newcomer</label>
-                        {canSearchNewcomers ? (
-                          <>
-                            <Input
-                              placeholder="Search by name"
-                              value={beneficiarySearch}
-                              onChange={(event) => setBeneficiarySearch(event.target.value)}
-                            />
-                            {beneficiaryLoading && <p className="text-xs text-mute mt-1">Searching...</p>}
-                            {beneficiaryResults?.items?.length ? (
-                              <div className="mt-2 border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
-                                {beneficiaryResults.items.map((newcomer) => (
-                                  <button
-                                    key={newcomer.id}
-                                    type="button"
-                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
-                                      wizardForm.newcomer_id === newcomer.id ? "bg-accent/10" : ""
-                                    }`}
-                                    onClick={() => handleNewcomerSelect(newcomer)}
-                                  >
-                                    {newcomer.first_name} {newcomer.last_name} • {newcomer.status}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-mute">
-                            {existingNewcomerPermissionHint}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {wizardForm.beneficiary_mode === "newcomer_create" && (
-                      canQuickCreateNewcomer ? (
-                      <Card className="p-4 space-y-3">
-                        <div className="rounded-xl border border-border/70 bg-muted/10 px-4 py-3 text-xs text-mute">
-                          Only fields you have permission to edit are shown here. Other newcomer intake fields stay hidden so this form can submit cleanly.
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <Input
-                              placeholder="First name"
-                              value={newcomerForm.first_name}
-                              className={newcomerFieldClass("first_name")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({ ...prev, first_name: event.target.value }));
-                                clearNewcomerFieldError("first_name");
-                              }}
-                            />
-                            {newcomerFieldErrors.first_name && (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.first_name}</p>
-                            )}
-                          </div>
-                          <div>
-                            <Input
-                              placeholder="Last name"
-                              value={newcomerForm.last_name}
-                              className={newcomerFieldClass("last_name")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({ ...prev, last_name: event.target.value }));
-                                clearNewcomerFieldError("last_name");
-                              }}
-                            />
-                            {newcomerFieldErrors.last_name && (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.last_name}</p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          {newcomerFieldAccess.family_size ? (
-                            <div>
-                              <Input
-                                type="number"
-                                min={1}
-                                placeholder="Family size"
-                                value={newcomerForm.family_size}
-                                className={newcomerFieldClass("family_size")}
-                                onChange={(event) => {
-                                  setNewcomerForm((prev) => ({ ...prev, family_size: event.target.value }));
-                                  clearNewcomerFieldError("family_size");
-                                }}
-                              />
-                              {newcomerFieldErrors.family_size && (
-                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.family_size}</p>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-mute">
-                              {familySizePermissionHint}
-                            </div>
-                          )}
-                          <Select
-                            value={newcomerForm.county}
-                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, county: event.target.value }))}
-                          >
-                            <option value="">Select county</option>
-                            {COUNTY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Select
-                            value={newcomerForm.country}
-                            onChange={(event) => setNewcomerForm((prev) => ({ ...prev, country: event.target.value }))}
-                          >
-                            <option value="">Select country</option>
-                            {COUNTRY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Select>
-                          {newcomerFieldAccess.preferred_language ? (
-                            <Select
-                              value={newcomerForm.preferred_language}
-                              onChange={(event) => setNewcomerForm((prev) => ({ ...prev, preferred_language: event.target.value }))}
-                            >
-                              <option value="">Preferred language</option>
-                              {LANGUAGE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </Select>
-                          ) : (
-                            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-mute">
-                              {preferredLanguagePermissionHint}
-                            </div>
-                          )}
-                        </div>
-                        <div className={`grid gap-3 ${newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email ? "md:grid-cols-2" : ""}`}>
-                          {newcomerFieldAccess.contact_phone && (
-                            <div>
-                              <label className="text-xs uppercase text-mute block mb-1">Phone</label>
-                              <PhoneInput
-                                value={newcomerForm.contact_phone}
-                                className={newcomerFieldClass("contact_phone")}
-                                onChange={(value) => {
-                                  setNewcomerForm((prev) => ({ ...prev, contact_phone: value }));
-                                  clearNewcomerFieldError("contact_phone");
-                                }}
-                              />
-                              {newcomerFieldErrors.contact_phone ? (
-                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_phone}</p>
-                              ) : (
-                                <p className="mt-1 text-xs text-mute">Use a Canadian number in +1 format.</p>
-                              )}
-                              {newcomerPhoneSnapSuggestion && (
-                                <button
-                                  type="button"
-                                  className="mt-2 text-xs font-medium text-accent underline underline-offset-2 hover:text-accent/80"
-                                  onClick={() => {
-                                    setNewcomerForm((prev) => ({ ...prev, contact_phone: newcomerPhoneSnapSuggestion }));
-                                    clearNewcomerFieldError("contact_phone");
-                                  }}
-                                >
-                                  Snap to valid Canadian format: {newcomerPhoneSnapSuggestion}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                          {newcomerFieldAccess.contact_email && (
-                            <div>
-                              <label className="text-xs uppercase text-mute block mb-1">Email</label>
-                              <Input
-                                type="email"
-                                inputMode="email"
-                                placeholder="name@example.com"
-                                value={newcomerForm.contact_email}
-                                className={newcomerFieldClass("contact_email")}
-                                onChange={(event) => {
-                                  setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }));
-                                  clearNewcomerFieldError("contact_email");
-                                }}
-                                onBlur={() =>
-                                  setNewcomerForm((prev) => ({
-                                    ...prev,
-                                    contact_email: prev.contact_email ? normalizeEmailInput(prev.contact_email) : "",
-                                  }))
-                                }
-                              />
-                              {newcomerFieldErrors.contact_email ? (
-                                <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_email}</p>
-                              ) : (
-                                <p className="mt-1 text-xs text-mute">Use a full email like `name@example.com`.</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {newcomerFieldAccess.interpreter_required && (
-                          <label className="flex items-center gap-2 text-sm text-mute">
-                            <input
-                              type="checkbox"
-                              checked={newcomerForm.interpreter_required}
-                              onChange={(event) =>
-                                setNewcomerForm((prev) => ({ ...prev, interpreter_required: event.target.checked }))
-                              }
-                            />
-                            Interpreter required
-                          </label>
-                        )}
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Input
-                            placeholder="Temp address street"
-                            value={newcomerForm.temporary_address_street}
-                            onChange={(event) =>
-                              setNewcomerForm((prev) => ({ ...prev, temporary_address_street: event.target.value }))
-                            }
-                          />
-                          <Input
-                            placeholder="Temp address city"
-                            value={newcomerForm.temporary_address_city}
-                            onChange={(event) =>
-                              setNewcomerForm((prev) => ({ ...prev, temporary_address_city: event.target.value }))
-                            }
-                          />
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Select
-                            value={newcomerForm.temporary_address_province}
-                            onChange={(event) =>
-                              setNewcomerForm((prev) => ({ ...prev, temporary_address_province: event.target.value }))
-                            }
-                          >
-                            <option value="">Select province</option>
-                            {PROVINCE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Select>
-                          <div>
-                            <label className="text-xs uppercase text-mute block mb-1">Postal code</label>
-                            <Input
-                              placeholder="A1A 1A1"
-                              value={newcomerForm.temporary_address_postal_code}
-                              className={newcomerFieldClass("temporary_address_postal_code")}
-                              onChange={(event) => {
-                                setNewcomerForm((prev) => ({
-                                  ...prev,
-                                  temporary_address_postal_code: formatCanadianPostalCode(event.target.value),
-                                }));
-                                clearNewcomerFieldError("temporary_address_postal_code");
-                              }}
-                            />
-                            {newcomerFieldErrors.temporary_address_postal_code ? (
-                              <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.temporary_address_postal_code}</p>
-                            ) : (
-                              <p className="mt-1 text-xs text-mute">Optional. Use Canadian format A1A 1A1.</p>
-                            )}
-                          </div>
-                        </div>
-                        {wizardError && (
-                          <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
-                            {wizardError}
-                          </div>
-                        )}
-                        <Button onClick={handleCreateNewcomer} disabled={wizardLoading}>
-                          {wizardLoading ? "Saving..." : "Create newcomer"}
-                        </Button>
-                      </Card>
-                      ) : (
-                        <Card className="p-4 text-sm text-mute">
-                          {newcomerQuickCreateHint}
-                        </Card>
-                      )
-                    )}
-
-                    {wizardForm.beneficiary_mode === "member" && (
-                      <div className="space-y-3">
-                        <label className="text-xs uppercase text-mute block">Member search</label>
-                        {canSearchBeneficiaryMembers ? (
-                          <>
-                            <Input
-                              placeholder="Search member"
-                              value={memberSearch}
-                              onChange={(event) => setMemberSearch(event.target.value)}
-                            />
-                            {memberSearchLoading && <p className="text-xs text-mute">Searching...</p>}
-                            {memberResults.length > 0 && (
-                              <div className="border border-border rounded-xl bg-card max-h-40 overflow-y-auto relative z-10">
-                                {memberResults.map((member) => (
-                                  <button
-                                    key={member.id}
-                                    type="button"
-                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
-                                      wizardForm.beneficiary_member_id === member.id ? "bg-accent/10" : ""
-                                    }`}
-                                    onClick={() => handleMemberSelect(member)}
-                                  >
-                                    {member.first_name} {member.last_name} • {member.status}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-mute">
-                            {memberLookupPermissionHint} You can still continue with an external immigrant.
-                          </div>
-                        )}
-                        <Button
-                          variant="ghost"
-                          onClick={() =>
-                            setWizardForm((prev) => {
-                              const manualName = splitManualBeneficiaryName(prev.beneficiary_name);
-                              return {
-                                ...prev,
-                                beneficiary_mode: "external",
-                                beneficiary_member_id: null,
-                                newcomer_id: null,
-                                beneficiary_first_name: prev.beneficiary_first_name || manualName.firstName,
-                                beneficiary_last_name: prev.beneficiary_last_name || manualName.lastName,
-                              };
-                            })
+                              beneficiary_first_name: event.target.value,
+                              beneficiary_name: `${event.target.value.trim()} ${prev.beneficiary_last_name.trim()}`.trim(),
+                            }))
                           }
-                        >
-                          Use external immigrant instead
-                        </Button>
+                        />
+                        <Input
+                          placeholder="Last name"
+                          value={wizardForm.beneficiary_last_name}
+                          onChange={(event) =>
+                            setWizardForm((prev) => ({
+                              ...prev,
+                              beneficiary_mode: "external",
+                              beneficiary_member_id: null,
+                              newcomer_id: null,
+                              beneficiary_last_name: event.target.value,
+                              beneficiary_name: `${prev.beneficiary_first_name.trim()} ${event.target.value.trim()}`.trim(),
+                            }))
+                          }
+                        />
                       </div>
-                    )}
-
-                    {wizardForm.beneficiary_mode === "external" && (
-                      <div className="space-y-3">
-                        <label className="text-xs uppercase text-mute block">External immigrant name</label>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Input
-                            placeholder="First name"
-                            value={wizardForm.beneficiary_first_name}
-                            onChange={(event) =>
-                              setWizardForm((prev) => ({
-                                ...prev,
-                                beneficiary_first_name: event.target.value,
-                                beneficiary_name: `${event.target.value.trim()} ${prev.beneficiary_last_name.trim()}`.trim(),
-                              }))
-                            }
-                          />
-                          <Input
-                            placeholder="Last name"
-                            value={wizardForm.beneficiary_last_name}
-                            onChange={(event) =>
-                              setWizardForm((prev) => ({
-                                ...prev,
-                                beneficiary_last_name: event.target.value,
-                                beneficiary_name: `${prev.beneficiary_first_name.trim()} ${event.target.value.trim()}`.trim(),
-                              }))
-                            }
-                          />
-                        </div>
-                        {canSearchBeneficiaryMembers && (
-                          <Button variant="ghost" onClick={() => setWizardForm((prev) => ({ ...prev, beneficiary_mode: "member" }))}>
-                            Switch to member selection
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                    </div>
 
                     <div className="flex justify-between">
                       <Button variant="ghost" onClick={() => setWizardStep(0)}>
@@ -4190,11 +3656,7 @@ export default function SponsorshipWorkspace() {
                       </Button>
                       <Button
                         onClick={() => setWizardStep(2)}
-                        disabled={
-                          wizardForm.beneficiary_mode === "external"
-                            ? !wizardForm.beneficiary_first_name.trim() || !wizardForm.beneficiary_last_name.trim()
-                            : !wizardForm.beneficiary_name.trim()
-                        }
+                        disabled={!wizardForm.beneficiary_first_name.trim() || !wizardForm.beneficiary_last_name.trim()}
                       >
                         Continue <ChevronRight className="h-4 w-4 ml-2" />
                       </Button>

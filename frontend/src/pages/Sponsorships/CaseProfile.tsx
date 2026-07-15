@@ -69,14 +69,14 @@ function beneficiaryLabel(record: Sponsorship) {
   if (record.newcomer) {
     return {
       label: `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim(),
-      type: "Newcomer",
+      type: "External",
       status: record.newcomer.status,
     };
   }
   if (record.beneficiary_member) {
     return {
       label: `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim(),
-      type: "Member",
+      type: "External",
       status: null,
     };
   }
