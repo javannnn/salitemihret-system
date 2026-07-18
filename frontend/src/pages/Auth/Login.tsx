@@ -241,8 +241,8 @@ export default function LoginPage() {
     }
     try {
       await login(email, password, token);
-      toast.push("Logged in successfully");
       const session = await whoami();
+      toast.push("Logged in successfully");
       window.location.href = !session.terms_accepted_at ? "/terms" : session.must_change_password ? "/account" : "/dashboard";
     } catch (err) {
       console.error(err);
