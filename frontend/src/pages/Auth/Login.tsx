@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useId } from "react";
 import { Link } from "react-router-dom";
 import { login, whoami } from "@/lib/auth";
+import { parseApiErrorMessage } from "@/lib/api";
 import { Input } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useTheme } from "@/context/ThemeContext";
@@ -245,7 +246,7 @@ export default function LoginPage() {
       window.location.href = !session.terms_accepted_at ? "/terms" : session.must_change_password ? "/account" : "/dashboard";
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error && err.message ? err.message : "Login failed. Check your credentials and try again.");
+      setError(parseApiErrorMessage(err, "Login failed. Check your credentials and try again."));
     } finally {
       setLoading(false);
     }

@@ -1787,14 +1787,57 @@ function looksLikeHtmlDocument(value: string): boolean {
   return normalized.startsWith("<!doctype html") || normalized.startsWith("<html") || normalized.includes("</html>");
 }
 
+type ApiErrorPayload = {
+  detail?: string | Array<{ msg?: string }>;
+  message?: string;
+  code?: string;
+  state?: string;
+  days_remaining?: number;
+};
+
+function formatDayCount(days: number): string {
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+function formatLicenseBlockMessage(payload: ApiErrorPayload): string | null {
+  if (payload.code !== "license_inactive" && !payload.state) {
+    return null;
+  }
+
+  const daysRemaining = typeof payload.days_remaining === "number" ? payload.days_remaining : null;
+
+  switch (payload.state) {
+    case "expired":
+      return "License expired. Sign-in is blocked until a renewed license is installed.";
+    case "invalid":
+      return "License could not be verified. Sign-in is blocked until a valid license is installed.";
+    case "trial":
+      if (daysRemaining !== null && daysRemaining > 0) {
+        return `Trial license active. ${formatDayCount(daysRemaining)} remaining before renewal is required.`;
+      }
+      return "Trial license ended. Sign-in is blocked until a license is installed.";
+    case "active":
+      if (daysRemaining !== null && daysRemaining >= 0) {
+        return `License active. ${formatDayCount(daysRemaining)} remaining.`;
+      }
+      return "License active.";
+    default:
+      if (typeof payload.detail === "string" && payload.detail.trim()) {
+        return payload.detail.trim();
+      }
+      return "License needs attention. Sign-in is blocked until the license is fixed.";
+  }
+}
+
 export function parseApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.body) {
       try {
-        const payload = JSON.parse(error.body) as {
-          detail?: string | Array<{ msg?: string }>;
-          message?: string;
-        };
+        const payload = JSON.parse(error.body) as ApiErrorPayload;
+        const licenseMessage = formatLicenseBlockMessage(payload);
+        if (licenseMessage) {
+          return licenseMessage;
+        }
         if (typeof payload.detail === "string" && payload.detail.trim()) {
           return payload.detail;
         }
