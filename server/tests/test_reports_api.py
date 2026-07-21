@@ -160,7 +160,8 @@ def test_individual_member_report_includes_requested_client_report_fields(
         )
     )
     service_type = PaymentServiceType(code="membership", label="Membership")
-    db_session.add(service_type)
+    sponsorship_service_type = PaymentServiceType(code="SPONSORSHIP", label="Sponsorship Donation")
+    db_session.add_all([service_type, sponsorship_service_type])
     db_session.flush()
     current_year = datetime.now(timezone.utc).year
     payment = Payment(
@@ -170,6 +171,22 @@ def test_individual_member_report_includes_requested_client_report_fields(
         member_id=sample_member.id,
         posted_at=datetime(current_year - 1, 5, 10, tzinfo=timezone.utc),
         status="Completed",
+    )
+    sponsorship_payment = Payment(
+        amount=Decimal("150.00"),
+        currency="CAD",
+        service_type_id=sponsorship_service_type.id,
+        member_id=sample_member.id,
+        posted_at=datetime(current_year - 1, 5, 9, tzinfo=timezone.utc),
+        status="Completed",
+    )
+    pending_sponsorship_payment = Payment(
+        amount=Decimal("50.00"),
+        currency="CAD",
+        service_type_id=sponsorship_service_type.id,
+        member_id=sample_member.id,
+        posted_at=datetime(current_year - 1, 5, 8, tzinfo=timezone.utc),
+        status="Pending",
     )
     sponsorship = Sponsorship(
         sponsor_member_id=sample_member.id,
@@ -185,7 +202,7 @@ def test_individual_member_report_includes_requested_client_report_fields(
         monthly_amount=Decimal("150.00"),
         received_amount=Decimal("150.00"),
     )
-    db_session.add_all([sample_member, payment, sponsorship])
+    db_session.add_all([sample_member, payment, sponsorship_payment, pending_sponsorship_payment, sponsorship])
     db_session.commit()
 
     response = client.get(f"/reports/members/{sample_member.id}/individual")
@@ -202,7 +219,7 @@ def test_individual_member_report_includes_requested_client_report_fields(
     assert client_fields["payments"][0]["amount"] == 125.0
     assert client_fields["payments"][0]["payment_date"].startswith(f"{current_year - 1}-05-10")
     assert len(client_fields["payment_years"]) >= 3
-    assert any(item["year"] == current_year - 1 and item["total_amount"] == 125.0 for item in client_fields["payment_years"])
+    assert any(item["year"] == current_year - 1 and item["total_amount"] == 325.0 for item in client_fields["payment_years"])
     assert client_fields["sponsorship"]["payment_information_by_year"] == client_fields["payment_years"]
     assert client_fields["sponsorship"]["last_sponsored_date"] == f"{current_year - 1}-05-01"
     assert client_fields["sponsorship"]["number_sponsored"] == 1
@@ -222,11 +239,19 @@ def test_individual_member_report_includes_requested_client_report_fields(
 
     assert filtered_response.status_code == 200, filtered_response.text
     filtered = filtered_response.json()
-    assert [item["id"] for item in filtered["payments"]] == [payment.id]
+    assert payment.id in {item["id"] for item in filtered["payments"]}
+    assert sponsorship_payment.id in {item["id"] for item in filtered["payments"]}
     assert filtered["client_report_fields"]["payments"][0]["amount"] == 125.0
-    assert filtered["sponsorships"] == []
-    assert filtered["client_report_fields"]["sponsorship"]["number_sponsored"] == 0
-    assert filtered["client_report_fields"]["sponsorship"]["volunteer_rows"] == []
+    assert [item["id"] for item in filtered["sponsorships"]] == [sponsorship.id]
+    assert filtered["sponsorships"][0]["monthly_amount"] is None
+    assert filtered["sponsorships"][0]["received_amount"] is None
+    assert filtered["sponsorships"][0]["paid_amount"] == "150.00"
+    assert filtered["sponsorships"][0]["currency"] == "CAD"
+    assert filtered["client_report_fields"]["sponsorship"]["number_sponsored"] == 1
+    assert filtered["client_report_fields"]["sponsorship"]["volunteer_rows"] == [
+        {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Settlement support"},
+        {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Translation"},
+    ]
 
     payment_report_response = client.get(
         f"/reports/payments/members/{sample_member.id}/individual",
@@ -237,7 +262,8 @@ def test_individual_member_report_includes_requested_client_report_fields(
     )
     assert payment_report_response.status_code == 200, payment_report_response.text
     payment_report = payment_report_response.json()
-    assert [item["id"] for item in payment_report["payments"]] == [payment.id]
+    assert payment.id in {item["id"] for item in payment_report["payments"]}
+    assert sponsorship_payment.id in {item["id"] for item in payment_report["payments"]}
     assert payment_report["sponsorships"] == []
     assert payment_report["client_report_fields"]["sponsorship"]["number_sponsored"] == 0
     assert payment_report["client_report_fields"]["sponsorship"]["last_sponsored_date"] is None
@@ -289,3 +315,4 @@ def test_individual_member_report_without_finance_access_hides_financial_section
     assert payload["client_report_fields"]["sponsorship"]["payment_information_by_year"] == []
     assert payload["sponsorships"][0]["monthly_amount"] is None
     assert payload["sponsorships"][0]["received_amount"] is None
+    assert payload["sponsorships"][0]["paid_amount"] is None

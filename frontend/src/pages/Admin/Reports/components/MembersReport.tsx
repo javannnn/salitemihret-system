@@ -329,14 +329,20 @@ export function MembersReport({
                                     <Field label="Last sponsored date" value={formatDate(individualReport.client_report_fields.sponsorship.last_sponsored_date)} />
                                     <Field label="Number sponsored" value={individualReport.client_report_fields.sponsorship.number_sponsored} />
                                     <Field label="Last sponsor status" value={individualReport.client_report_fields.sponsorship.last_sponsor_status || "-"} />
-                                    {canShowFinancialSections && individualReport.client_report_fields.sponsorship.payment_information_by_year.slice(0, 5).map((summary) => (
-                                        <Field key={`payment-year-${summary.year}`} label={`Payment information · ${summary.year}`} value={`${formatMoney(summary.total_amount, summary.currency)} (${summary.payment_count})`} strong />
-                                    ))}
                                     {individualReport.client_report_fields.sponsorship.volunteer_rows.slice(0, 5).map((row, index) => (
                                         <Field key={`volunteer-${row.volunteer_date}-${row.service_type}-${index}`} label={`Volunteer · ${formatDate(row.volunteer_date)}`} value={row.service_type} strong />
                                     ))}
                                     {individualReport.sponsorships.slice(0, 5).map((sponsorship) => (
-                                        <Field key={`sponsorship-${sponsorship.id}`} label={`${sponsorship.role} · ${sponsorship.beneficiary_name}`} value={sponsorship.status} strong />
+                                        <Field
+                                            key={`sponsorship-${sponsorship.id}`}
+                                            label={`${sponsorship.role} · ${sponsorship.beneficiary_name}`}
+                                            value={
+                                                canShowFinancialSections && sponsorship.paid_amount !== null && sponsorship.paid_amount !== undefined
+                                                    ? formatMoney(sponsorship.paid_amount, sponsorship.currency ?? "CAD")
+                                                    : sponsorship.status
+                                            }
+                                            strong
+                                        />
                                     ))}
                                     {individualReport.membership_events.slice(0, 5).map((event) => (
                                         <Field key={`${event.type}-${event.timestamp}`} label={`${event.type} · ${formatDate(event.timestamp)}`} value={event.label} strong />

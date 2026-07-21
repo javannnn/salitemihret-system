@@ -142,6 +142,8 @@ class IndividualSponsorshipReportItem(BaseModel):
     frequency: str
     monthly_amount: Decimal | None = None
     received_amount: Decimal | None = None
+    paid_amount: Decimal | None = None
+    currency: str | None = None
     start_date: date
     end_date: date | None = None
     notes: str | None = None

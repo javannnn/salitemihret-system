@@ -225,6 +225,8 @@ export type IndividualMemberReport = {
     frequency: string;
     monthly_amount?: number | null;
     received_amount?: number | null;
+    paid_amount?: number | null;
+    currency?: string | null;
     start_date: string;
     end_date?: string | null;
     notes?: string | null;
