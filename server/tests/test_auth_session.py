@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import asyncio
 
 import pytest
 from fastapi import HTTPException
@@ -7,10 +8,12 @@ from jose import jwt
 from starlette.requests import Request
 
 from app.auth.deps import get_current_user
-from app.auth.security import create_access_token
+from app.auth.security import create_access_token, hash_password
 from app.core.config import settings
 from app.models.user import User
+from app.routers.auth import login
 from app.routers.chat import heartbeat
+from app.schemas.auth import LoginRequest
 from conftest import TestingSessionLocal
 
 
@@ -82,6 +85,42 @@ def test_whoami_rejects_idle_session_after_thirty_minutes(monkeypatch):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Session expired due to inactivity"
+
+
+def test_login_restores_user_after_idle_session_timeout(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "RECAPTCHA_SECRET", None)
+    last_seen = datetime.now(timezone.utc) - timedelta(minutes=31)
+    user = User(
+        email="idle-relogin@example.com",
+        username="idle.relogin",
+        full_name="Idle Relogin User",
+        hashed_password=hash_password("TestPass123!"),
+        is_active=True,
+        last_login_at=last_seen,
+        last_seen=last_seen,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    response = asyncio.run(
+        login(
+            request=_make_request("/auth/login"),
+            payload=LoginRequest(email=user.email, password="TestPass123!"),
+            db=db_session,
+        )
+    )
+
+    assert response.access_token
+
+    db_session.expire_all()
+    restored = db_session.get(User, user.id)
+    assert restored is not None
+    assert restored.last_seen is not None
+    restored_last_seen = restored.last_seen
+    if restored_last_seen.tzinfo is None:
+        restored_last_seen = restored_last_seen.replace(tzinfo=timezone.utc)
+    assert restored_last_seen > last_seen
 
 
 def test_whoami_refreshes_last_seen_for_active_session(monkeypatch):

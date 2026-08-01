@@ -399,7 +399,7 @@ export default function AppShell() {
     sessionExpiredReason === "idle"
       ? "Your session was locked after 30 minutes of inactivity. Sign in again to continue."
       : sessionExpiredReason === "expired"
-        ? "Your 4-hour session ended. Please sign in again to continue working."
+        ? "Your 5-hour session ended. Please sign in again to continue working."
         : "Please sign in again to continue working.";
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
