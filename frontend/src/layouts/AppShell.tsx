@@ -18,6 +18,7 @@ import {
   recordSessionActivity,
   SessionExpiryReason,
   subscribeSessionExpired,
+  subscribeSessionRestored,
 } from "@/lib/session";
 import { attemptChunkReload } from "@/lib/recovery";
 import { useTour } from "@/context/TourContext";
@@ -246,8 +247,20 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeSessionRestored(() => {
+      setSessionExpired(false);
+      setSessionExpiredReason("expired");
+      setPassword("");
+      setShowPassword(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     setSessionExpired(false);
     setSessionExpiredReason("expired");
+    setPassword("");
+    setShowPassword(false);
   }, [user]);
 
   useEffect(() => {
@@ -312,6 +325,13 @@ export default function AppShell() {
     };
 
     const handleStorage = (event: StorageEvent) => {
+      if (event.key === "access_token" && event.newValue && !isTokenExpired(event.newValue)) {
+        setSessionExpired(false);
+        setSessionExpiredReason("expired");
+        recordSessionActivity(Date.now(), true);
+        scheduleSessionCheck();
+        return;
+      }
       if (event.key === "access_token" || event.key === "session_last_activity_at") {
         if (!checkSession()) {
           scheduleSessionCheck();
