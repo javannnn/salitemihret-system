@@ -79,6 +79,10 @@ export default function AppShell() {
   const [sessionExpiredReason, setSessionExpiredReason] = useState<SessionExpiryReason>("expired");
   const tour = useTour();
   const recaptcha = useRecaptcha();
+  const isLocalHost =
+    typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  const shouldUseRecaptcha = Boolean(recaptcha.siteKey) && !isLocalHost;
+  const recaptchaBlocking = shouldUseRecaptcha && !recaptcha.ready;
 
   const initials = useMemo(() => {
     const source = user?.full_name || user?.username || user?.user || "";
@@ -804,7 +808,12 @@ export default function AppShell() {
                     }
                     setReloginLoading(true);
                     let token: string | undefined;
-                    if (recaptcha.siteKey) {
+                    if (shouldUseRecaptcha) {
+                      if (!recaptcha.ready) {
+                        toast.push("Security verification is still loading. Please wait a moment and try again.", "error");
+                        setReloginLoading(false);
+                        return;
+                      }
                       try {
                         token = await recaptcha.execute("login");
                       } catch (err) {
@@ -889,7 +898,7 @@ export default function AppShell() {
                     </Button>
                     <Button
                       type="submit"
-                      disabled={!password || reloginLoading}
+                      disabled={!password || reloginLoading || recaptchaBlocking}
                       className="flex-1 bg-amber-600 hover:bg-amber-700 text-white border-transparent shadow-lg shadow-amber-900/10"
                     >
                       {reloginLoading ? (
@@ -897,6 +906,8 @@ export default function AppShell() {
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
                           Signing in...
                         </>
+                      ) : recaptchaBlocking ? (
+                        "Verification loading..."
                       ) : (
                         "Resume Session"
                       )}
