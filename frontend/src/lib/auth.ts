@@ -49,6 +49,7 @@ export async function login(email: string, password: string, recaptchaToken?: st
   const data = (await res.json()) as { access_token: string; token_type: string };
   setToken(data.access_token);
   recordSessionActivity(Date.now(), true);
+  resetSessionExpiryNotice();
   return data;
 }
 

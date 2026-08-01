@@ -1749,6 +1749,11 @@ async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, al
     }
   }
 
+  const currentToken = getToken();
+  if (currentToken && tokenAtRequestStart && currentToken !== tokenAtRequestStart) {
+    return markSessionPreserved(res);
+  }
+
   notifySessionExpired("unauthorized");
   clearSessionActivity();
   setToken(null);
