@@ -1,7 +1,33 @@
-import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from "react";
+import { useEffect, useMemo, useState, useCallback, lazy, Suspense, type FormEvent } from "react";
 import { NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun, ShieldAlert, User, ChevronLeft, ChevronRight, LayoutDashboard, Users, CreditCard, HeartHandshake, GraduationCap, ShieldCheck, Loader2, Mail, BarChart3, Eye, EyeOff, UserPlus, HandHeart, Building2 } from "lucide-react";
+import {
+  BarChart3,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  CreditCard,
+  Eye,
+  EyeOff,
+  GraduationCap,
+  HandHeart,
+  HeartHandshake,
+  LayoutDashboard,
+  Loader2,
+  LockKeyhole,
+  LogIn,
+  LogOut,
+  Mail,
+  Moon,
+  RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
+  Sun,
+  User,
+  UserPlus,
+  Users,
+} from "lucide-react";
 
 import { getTokenExpiry, isTokenExpired, login, logout } from "@/lib/auth";
 import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
@@ -77,13 +103,15 @@ export default function AppShell() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [reloginLoading, setReloginLoading] = useState(false);
+  const [reloginError, setReloginError] = useState("");
   const [sessionExpiredReason, setSessionExpiredReason] = useState<SessionExpiryReason>("expired");
   const tour = useTour();
   const recaptcha = useRecaptcha();
   const isLocalHost =
     typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname);
   const shouldUseRecaptcha = Boolean(recaptcha.siteKey) && !isLocalHost;
-  const recaptchaBlocking = shouldUseRecaptcha && !recaptcha.ready;
+  const recaptchaBlocking = shouldUseRecaptcha && !recaptcha.ready && !recaptcha.error;
+  const recaptchaUnavailable = shouldUseRecaptcha && Boolean(recaptcha.error);
 
   const initials = useMemo(() => {
     const source = user?.full_name || user?.username || user?.user || "";
@@ -241,6 +269,9 @@ export default function AppShell() {
   useEffect(() => {
     const unsubscribe = subscribeSessionExpired((reason) => {
       setSessionExpiredReason(reason);
+      setReloginError("");
+      setPassword("");
+      setShowPassword(false);
       setSessionExpired(true);
     });
     return unsubscribe;
@@ -252,6 +283,7 @@ export default function AppShell() {
       setSessionExpiredReason("expired");
       setPassword("");
       setShowPassword(false);
+      setReloginError("");
     });
     return unsubscribe;
   }, []);
@@ -261,6 +293,7 @@ export default function AppShell() {
     setSessionExpiredReason("expired");
     setPassword("");
     setShowPassword(false);
+    setReloginError("");
   }, [user]);
 
   useEffect(() => {
@@ -421,10 +454,61 @@ export default function AppShell() {
   const licenseCustomerLabel = isLicenseActive ? "SaliteMihret EOTC" : licenseStatus?.customer;
   const sessionExpiredMessage =
     sessionExpiredReason === "idle"
-      ? "Your session was locked after 30 minutes of inactivity. Sign in again to continue."
+      ? "We locked this workspace after 30 minutes without activity. Enter your password to pick up where you left off."
       : sessionExpiredReason === "expired"
-        ? "Your 5-hour session ended. Please sign in again to continue working."
-        : "Please sign in again to continue working.";
+        ? "This sign-in reached its 5-hour limit. Enter your password to continue without losing your place."
+        : "We could not verify this sign-in. Enter your password to reconnect securely.";
+
+  const handleSessionResume = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!password || reloginLoading) return;
+
+    const accountIdentifier = user?.user || user?.username || "";
+    if (!accountIdentifier) {
+      setReloginError("We could not identify the account to restore. Sign out and sign in again.");
+      return;
+    }
+    if (recaptchaUnavailable) {
+      setReloginError("Security verification is unavailable. Retry the check before continuing.");
+      return;
+    }
+    if (recaptchaBlocking) {
+      setReloginError("Security verification is still loading. Please wait a moment.");
+      return;
+    }
+
+    setReloginLoading(true);
+    setReloginError("");
+
+    try {
+      let token: string | undefined;
+      if (shouldUseRecaptcha) {
+        try {
+          token = await recaptcha.execute("login");
+        } catch (error) {
+          console.error("reCAPTCHA failed", error);
+          setReloginError("Security verification failed. Retry and submit your password again.");
+          return;
+        }
+      }
+
+      await login(accountIdentifier, password, token);
+      setSessionExpired(false);
+      setSessionExpiredReason("expired");
+      setPassword("");
+      setShowPassword(false);
+      setReloginError("");
+    } catch (error) {
+      console.error(error);
+      setReloginError(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "We could not restore this session. Check your connection and try again."
+      );
+    } finally {
+      setReloginLoading(false);
+    }
+  };
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -795,147 +879,174 @@ export default function AppShell() {
         {sessionExpired && (
           <>
             <motion.div
-              className="fixed inset-0 z-[100] bg-ink/70 backdrop-blur-sm"
+              className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-md"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
             />
-            <motion.div
-              className="fixed inset-0 z-[101] flex items-center justify-center px-6"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-            >
-              <Card className="max-w-md w-full p-6 space-y-6 border border-amber-300 bg-amber-50/95 text-amber-900 shadow-2xl">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
-                    <ShieldAlert className="h-6 w-6 text-amber-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-amber-900">Session Expired</h3>
-                    <p className="text-sm text-amber-800/80">{sessionExpiredMessage}</p>
-                  </div>
-                </div>
-
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!password) return;
-                    const accountIdentifier = user?.user || user?.username || "";
-                    if (!accountIdentifier) {
-                      toast.push("Unable to determine which account to restore.", "error");
-                      return;
-                    }
-                    setReloginLoading(true);
-                    let token: string | undefined;
-                    if (shouldUseRecaptcha) {
-                      if (!recaptcha.ready) {
-                        toast.push("Security verification is still loading. Please wait a moment and try again.", "error");
-                        setReloginLoading(false);
-                        return;
-                      }
-                      try {
-                        token = await recaptcha.execute("login");
-                      } catch (err) {
-                        console.error("reCAPTCHA failed", err);
-                        toast.push("Verification failed. Please retry.", "error");
-                        setReloginLoading(false);
-                        return;
-                      }
-                    }
-
-                    try {
-                      await login(accountIdentifier, password, token);
-                      setSessionExpired(false);
-                      setSessionExpiredReason("expired");
-                      setPassword("");
-                      setShowPassword(false);
-                      window.location.reload();
-                      return;
-                    } catch (error) {
-                      console.error(error);
-                      if (error instanceof Error && error.message.trim()) {
-                        toast.push(error.message, "error");
-                      } else {
-                        toast.push("Unable to restore the session.", "error");
-                      }
-                    } finally {
-                      setReloginLoading(false);
-                    }
-                  }}
-                  className="space-y-4"
-                >
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold uppercase tracking-wider text-amber-800/70">
-                      Account
-                    </label>
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-100/50 border border-amber-200/50">
-                      <div className="h-8 w-8 rounded-full bg-amber-200 flex items-center justify-center text-amber-800 font-bold text-xs">
-                        {initials}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-amber-900 truncate">
-                          {user?.full_name || user?.username}
-                        </div>
-                        <div className="text-xs text-amber-700 truncate">{user?.user}</div>
-                      </div>
+            <div className="fixed inset-0 z-[101] flex items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-6">
+              <motion.section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="session-resume-title"
+                aria-describedby="session-resume-description"
+                initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                className="relative my-auto max-h-[calc(100svh-2rem)] w-full max-w-[460px] overflow-y-auto rounded-2xl border border-white/15 bg-white text-slate-950 shadow-[0_28px_90px_rgba(0,0,0,0.38)] dark:border-white/10 dark:bg-[#101114] dark:text-white"
+              >
+                <div className="h-1 w-full bg-[#a61b29] dark:bg-[#d63649]" />
+                <div className="p-5 sm:p-7">
+                  <header className="flex items-start gap-4">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#a61b29] ring-1 ring-rose-100 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/15">
+                      <ShieldAlert className="h-5 w-5" aria-hidden="true" />
                     </div>
+                    <div className="min-w-0 pt-0.5">
+                      <p className="text-xs font-semibold text-[#a61b29] dark:text-rose-300">Workspace locked</p>
+                      <h2 id="session-resume-title" className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">
+                        Sign in to continue
+                      </h2>
+                    </div>
+                  </header>
+
+                  <p
+                    id="session-resume-description"
+                    className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-300"
+                  >
+                    {sessionExpiredMessage}
+                  </p>
+
+                  <div className="mt-5 flex items-center gap-3 border-y border-slate-200 py-4 dark:border-white/10">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">
+                      {initials}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Signed in as</p>
+                      <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                        {user?.full_name || user?.username || "Current account"}
+                      </p>
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{user?.user}</p>
+                    </div>
+                    <LockKeyhole className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-amber-800/70">
+                  <form onSubmit={handleSessionResume} className="mt-5 space-y-4" aria-busy={reloginLoading}>
+                    <div className="space-y-2">
+                      <label htmlFor="session-resume-password" className="text-sm font-medium text-slate-800 dark:text-slate-200">
                         Password
                       </label>
+                      <div className="relative">
+                        <LockKeyhole
+                          className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                          aria-hidden="true"
+                        />
+                        <Input
+                          id="session-resume-password"
+                          name="password"
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(event) => {
+                            setPassword(event.target.value);
+                            if (reloginError) setReloginError("");
+                          }}
+                          className="h-12 rounded-lg border-slate-300 bg-slate-50 pl-10 pr-12 text-slate-950 shadow-none focus:border-[#a61b29] focus:shadow-[0_0_0_3px_rgba(166,27,41,0.12)] dark:border-white/15 dark:bg-white/5 dark:text-white dark:focus:border-rose-400"
+                          placeholder="Enter your password"
+                          autoComplete="current-password"
+                          aria-invalid={Boolean(reloginError)}
+                          aria-describedby={reloginError ? "session-resume-error" : undefined}
+                          disabled={reloginLoading}
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((visible) => !visible)}
+                          className="absolute right-1.5 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-200/70 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a61b29] dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          title={showPassword ? "Hide password" : "Show password"}
+                          disabled={reloginLoading}
+                        >
+                          {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                        </button>
+                      </div>
                     </div>
-                    <div className="relative">
-                      <Input
-                        type={showPassword ? "text" : "password"}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="bg-white/80 border-amber-200 focus:border-amber-400 focus:ring-amber-400/20 pr-10"
-                        placeholder="Enter your password"
-                        autoFocus
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-800/60 hover:text-amber-900 transition-colors focus:outline-none"
-                      >
-                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="flex gap-3 pt-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="flex-1 border-amber-200 hover:bg-amber-100/50 text-amber-900"
-                      onClick={logout}
-                    >
-                      Sign out
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={!password || reloginLoading || recaptchaBlocking}
-                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white border-transparent shadow-lg shadow-amber-900/10"
-                    >
-                      {reloginLoading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Signing in...
-                        </>
-                      ) : recaptchaBlocking ? (
-                        "Verification loading..."
-                      ) : (
-                        "Resume Session"
+                    <AnimatePresence initial={false}>
+                      {reloginError && (
+                        <motion.div
+                          id="session-resume-error"
+                          role="alert"
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          className="flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-200"
+                        >
+                          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                          <span>{reloginError}</span>
+                        </motion.div>
                       )}
-                    </Button>
-                  </div>
-                </form>
-              </Card>
-            </motion.div>
+                    </AnimatePresence>
+
+                    {recaptchaBlocking && (
+                      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400" role="status">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        Preparing secure sign-in...
+                      </div>
+                    )}
+
+                    {recaptchaUnavailable && (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                        <span>{recaptcha.error}</span>
+                        <button
+                          type="button"
+                          onClick={recaptcha.retry}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 font-semibold text-[#a61b29] transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a61b29] dark:text-rose-300 dark:hover:bg-rose-500/10"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                          Retry
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2.5 pt-1 sm:flex-row-reverse">
+                      <Button
+                        type="submit"
+                        disabled={!password || reloginLoading || recaptchaBlocking || recaptchaUnavailable}
+                        className="h-11 rounded-lg border-transparent bg-[#a61b29] text-white shadow-none hover:bg-[#8f1723] hover:shadow-none disabled:translate-y-0 sm:min-w-[190px] dark:bg-[#d63649] dark:hover:bg-[#bd2d3e]"
+                      >
+                        {reloginLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                            Restoring session...
+                          </>
+                        ) : recaptchaBlocking ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                            Preparing sign-in...
+                          </>
+                        ) : (
+                          <>
+                            <LogIn className="h-4 w-4" aria-hidden="true" />
+                            Resume session
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-11 rounded-lg border-slate-200 bg-transparent text-slate-700 shadow-none hover:bg-slate-100 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+                        onClick={logout}
+                        disabled={reloginLoading}
+                      >
+                        <LogOut className="h-4 w-4" aria-hidden="true" />
+                        Sign out instead
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              </motion.section>
+            </div>
           </>
         )}
       </AnimatePresence>
@@ -966,8 +1077,8 @@ export default function AppShell() {
           </div>
         </nav>
       )}
-      <TourOverlay />
-      {!user.must_change_password && (
+      {!sessionExpired && <TourOverlay />}
+      {!user.must_change_password && !sessionExpired && (
         <ChatProvider>
           <ChatWidget />
         </ChatProvider>
