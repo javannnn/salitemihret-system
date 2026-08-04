@@ -497,7 +497,7 @@ export default function SponsorshipCaseProfile() {
                 <div>Last reminder: {formatDateTime(sponsorship.reminder_last_sent)}</div>
                 <div>Next reminder: {formatDateTime(sponsorship.reminder_next_due)}</div>
                 <div>Last sponsored date: {formatDate(sponsorship.last_sponsored_date)}</div>
-                <div>Bond: {sponsorship.payment_information || "-"}</div>
+                <div>Trust fund deposit: {sponsorship.payment_information || "-"}</div>
                 <div>
                   Last sponsored status: {sponsorship.last_status || "-"}
                   {sponsorship.last_status === "Rejected" && sponsorship.last_status_reason

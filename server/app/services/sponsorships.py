@@ -1873,6 +1873,7 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         member_id=sponsor.id,
         member_name=f"{sponsor.first_name} {sponsor.last_name}".strip(),
         member_status=sponsor.status,
+        membership_start_date=getattr(sponsor, "join_date", None),
         member_phone=getattr(sponsor, "phone", None),
         member_email=getattr(sponsor, "email", None),
         marital_status=marital_status,

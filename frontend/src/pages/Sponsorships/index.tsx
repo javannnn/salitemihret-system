@@ -257,6 +257,7 @@ const buildSponsorContextFallback = (member: Member): SponsorshipSponsorContext 
   member_id: member.id,
   member_name: `${member.first_name} ${member.last_name}`.trim(),
   member_status: member.status,
+  membership_start_date: member.join_date ?? null,
   member_phone: member.phone ?? null,
   member_email: member.email ?? null,
   marital_status: member.marital_status ?? null,
@@ -3676,9 +3677,9 @@ export default function SponsorshipWorkspace() {
                         />
                       </div>
                       <div>
-                        <label className="text-xs uppercase text-mute block mb-1">Bond</label>
+                        <label className="text-xs uppercase text-mute block mb-1">Trust fund deposit</label>
                         <Input
-                          placeholder="Membership monthly payment"
+                          placeholder="Enter deposit amount or reference"
                           value={wizardForm.payment_information}
                           onChange={(event) => setWizardForm((prev) => ({ ...prev, payment_information: event.target.value }))}
                         />
@@ -3968,7 +3969,7 @@ export default function SponsorshipWorkspace() {
                       <p className="font-medium">{wizardForm.beneficiary_name || "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Last sponsored date</p>
                       <p className="font-medium">{formatDate(wizardForm.last_sponsored_date)}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Bond</p>
+                      <p className="text-xs uppercase text-mute mt-3">Trust fund deposit</p>
                       <p className="font-medium">{wizardForm.payment_information || "—"}</p>
                       <p className="text-xs uppercase text-mute mt-3">Last sponsored status</p>
                       <p className="font-medium">{wizardForm.last_status || "—"}</p>

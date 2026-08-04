@@ -991,6 +991,7 @@ export type SponsorshipSponsorContext = {
   member_id: number;
   member_name: string;
   member_status?: string | null;
+  membership_start_date?: string | null;
   member_phone?: string | null;
   member_email?: string | null;
   marital_status?: string | null;

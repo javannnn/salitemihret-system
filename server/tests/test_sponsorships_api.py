@@ -348,6 +348,7 @@ def test_sponsor_context_uses_current_case_date_not_prior_history(
     context_resp = client.get(f"/sponsorships/sponsors/{sample_member.id}/context")
     assert context_resp.status_code == 200, context_resp.text
     assert context_resp.json()["last_sponsorship_date"] == "2025-01-15"
+    assert context_resp.json()["membership_start_date"] == sample_member.join_date.isoformat()
 
 
 def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
+    getSponsorContext,
     getSponsorship,
     getSponsorshipMetrics,
     getSponsorshipTimeline,
@@ -8,10 +10,10 @@ import {
     Sponsorship,
     SponsorshipMetrics,
     SponsorshipNotesListResponse,
+    SponsorshipSponsorContext,
     SponsorshipTimelineResponse,
 } from "@/lib/api";
-import { StatCard } from "./StatCard";
-import { AlertCircle, CheckCircle2, Clock, Heart, PieChart as PieIcon, PauseCircle, BadgeCheck } from "lucide-react";
+import { AlertCircle, BadgeCheck, CalendarDays, CheckCircle2, Clock, Heart, PauseCircle, Search } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { useToast } from "@/components/Toast";
 import { DateRangeControls, DateRangeValue } from "./DateRangeControls";
@@ -30,6 +32,12 @@ function formatCadValue(value?: number | string | null) {
     return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD" }).format(numeric);
 }
 
+function immigrantName(record: Sponsorship) {
+    if (record.newcomer) return `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim();
+    if (record.beneficiary_member) return `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim();
+    return record.beneficiary_name || "-";
+}
+
 export function SponsorshipsReport() {
     const [dateRange, setDateRange] = useState<DateRangeValue>({ start: "", end: "" });
     const [individualDateRange, setIndividualDateRange] = useState<DateRangeValue>({ start: "", end: "" });
@@ -42,6 +50,7 @@ export function SponsorshipsReport() {
     const individualRequestId = useRef(0);
     const [individualReport, setIndividualReport] = useState<{
         detail: Sponsorship;
+        sponsorContext: SponsorshipSponsorContext;
         timeline: SponsorshipTimelineResponse;
         notes: SponsorshipNotesListResponse;
     } | null>(null);
@@ -61,6 +70,14 @@ export function SponsorshipsReport() {
         return individualDateRange;
     }, [individualDateRange]);
     const hasIndividualRange = Boolean(normalizedIndividualRange.start || normalizedIndividualRange.end);
+    const visibleContributionPayments = useMemo(() => {
+        const payments = individualReport?.sponsorContext.payment_history ?? [];
+        return payments.filter((payment) => {
+            const paidDate = payment.paid_at.slice(0, 10);
+            return (!normalizedIndividualRange.start || paidDate >= normalizedIndividualRange.start)
+                && (!normalizedIndividualRange.end || paidDate <= normalizedIndividualRange.end);
+        });
+    }, [individualReport, normalizedIndividualRange.end, normalizedIndividualRange.start]);
 
     useEffect(() => {
         const fetchMetrics = async () => {
@@ -120,14 +137,15 @@ export function SponsorshipsReport() {
                 start_date: range.start || undefined,
                 end_date: range.end || undefined,
             };
-            const [detail, timeline, notes] = await Promise.all([
+            const [detail, sponsorContext, timeline, notes] = await Promise.all([
                 getSponsorship(caseRecord.id, filters),
+                getSponsorContext(caseRecord.sponsor.id),
                 getSponsorshipTimeline(caseRecord.id, filters),
                 listSponsorshipNotes(caseRecord.id, filters),
             ]);
             if (requestId === individualRequestId.current) {
                 setSelectedCase(caseRecord);
-                setIndividualReport({ detail, timeline, notes });
+                setIndividualReport({ detail, sponsorContext, timeline, notes });
                 setCaseSearch(`SP-${String(detail.id).padStart(4, "0")}`);
                 setCaseMatches([]);
             }
@@ -179,25 +197,34 @@ export function SponsorshipsReport() {
         { name: "Available", value: availableSlots, color: "#10b981" },
     ];
 
-    const executedLabel = hasRange ? "Executed (Range)" : "Executed (Month)";
+    const executedLabel = hasRange ? "Executed in range" : "Executed this month";
     const executedDescription = hasRange ? "Completed in selected range" : "Completed this month";
-    const budgetLabel = hasRange ? "Budget Utilization" : "Budget Utilization";
     const budgetDescription = hasRange ? "Based on range end month" : "Current month utilization";
 
+    const summaryItems = [
+        { label: "Active cases", value: metrics.active_cases, detail: "Currently supported", icon: Heart },
+        { label: "Awaiting review", value: metrics.submitted_cases, detail: "Submitted cases", icon: Clock },
+        { label: executedLabel, value: metrics.month_executed, detail: executedDescription, icon: CheckCircle2 },
+        { label: "Declined / paused", value: metrics.suspended_cases, detail: "Needs follow-up", icon: PauseCircle },
+        { label: "Capacity used", value: `${metrics.budget_utilization_percent}%`, detail: budgetDescription, icon: BadgeCheck },
+        { label: "Available slots", value: availableSlots, detail: "Remaining this round", icon: CalendarDays },
+    ];
+
     return (
-        <div className="space-y-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-6 pb-24 md:pb-0">
+            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
                 <div>
-                    <h2 className="text-xl font-semibold text-ink">Sponsorship Report</h2>
-                    <p className="text-sm text-muted">Monitor sponsorship pipeline and budget usage.</p>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted">Reports</p>
+                    <h2 className="text-2xl font-semibold tracking-tight text-ink">Sponsorships</h2>
+                    <p className="mt-1 text-sm text-muted">Review immigrant support, sponsor eligibility, contributions, and capacity.</p>
                 </div>
                 <DateRangeControls value={dateRange} onChange={setDateRange} />
             </div>
-            <div className="rounded-xl border border-border bg-card p-6">
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <section className="overflow-hidden rounded-2xl border border-border bg-card/70">
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border bg-muted/20 px-5 py-4 sm:px-6">
                     <div>
-                        <h3 className="text-lg font-semibold text-ink">Individual Sponsorship Report</h3>
-                        <p className="text-sm text-muted">Single-case summary with co-sponsor, immigrant, timeline, notes, and allocation details.</p>
+                        <h3 className="text-base font-semibold text-ink">Individual case report</h3>
+                        <p className="mt-1 text-sm text-muted">Find a case to see the immigrant, membership start, and dated contributions.</p>
                     </div>
                     <div className="flex flex-wrap items-end justify-end gap-3">
                         <DateRangeControls
@@ -206,7 +233,7 @@ export function SponsorshipsReport() {
                             label="Individual report"
                         />
                         <button
-                            className="h-9 rounded-lg border border-border px-3 text-sm font-medium text-ink disabled:opacity-50"
+                            className="h-9 rounded-lg border border-border bg-card px-3 text-sm font-medium text-ink transition hover:border-accent/40 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50"
                             disabled={!individualReport}
                             onClick={downloadIndividualReport}
                         >
@@ -214,9 +241,13 @@ export function SponsorshipsReport() {
                         </button>
                     </div>
                 </div>
-                <div className="relative max-w-xl">
+                <div className="px-5 py-5 sm:px-6">
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted" htmlFor="sponsorship-case-search">Search cases</label>
+                    <div className="relative max-w-2xl">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                     <input
-                        className="w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-ink"
+                        id="sponsorship-case-search"
+                        className="w-full rounded-xl border border-border bg-bg py-2.5 pl-10 pr-3 text-sm text-ink outline-none transition focus:border-accent focus:shadow-ring"
                         value={caseSearch}
                         onChange={(event) => {
                             individualRequestId.current += 1;
@@ -225,91 +256,97 @@ export function SponsorshipsReport() {
                             setIndividualReport(null);
                             setIndividualLoading(false);
                         }}
-                        placeholder="Search by co-sponsor or immigrant name"
+                        placeholder="Case ID, co-sponsor, or immigrant name"
                     />
-                    {caseMatches.length > 0 && (
-                        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+                        <AnimatePresence>
+                        {caseMatches.length > 0 && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+                        >
                             {caseMatches.map((item) => (
                                 <button
                                     key={item.id}
-                                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent/10"
+                                    className="block w-full border-b border-border/60 px-4 py-3 text-left text-sm transition last:border-0 hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                                     onClick={() => loadIndividualReport(item)}
                                 >
-                                    <span className="block font-medium text-ink">SP-{String(item.id).padStart(4, "0")} - {item.beneficiary_name}</span>
-                                    <span className="text-xs text-muted">{item.sponsor.first_name} {item.sponsor.last_name} - {item.status}</span>
+                                    <span className="block font-medium text-ink">SP-{String(item.id).padStart(4, "0")} · {immigrantName(item)}</span>
+                                    <span className="mt-0.5 block text-xs text-muted">Co-sponsor: {item.sponsor.first_name} {item.sponsor.last_name} · {item.status}</span>
                                 </button>
                             ))}
-                        </div>
-                    )}
-                </div>
+                        </motion.div>
+                        )}
+                        </AnimatePresence>
+                    </div>
                 {individualLoading ? (
-                    <div className="mt-4 text-sm text-muted">Loading individual report...</div>
+                    <div className="mt-5 flex items-center gap-2 text-sm text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Loading case report...</div>
                 ) : individualReport ? (
-                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <motion.div
+                        key={individualReport.detail.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-6 grid overflow-hidden rounded-xl border border-border md:grid-cols-2"
+                    >
                         <ReportPanel title="Case" rows={[
                             ["Case", `SP-${String(individualReport.detail.id).padStart(4, "0")}`],
                             ["Status", individualReport.detail.status === "Suspended" ? "Declined" : individualReport.detail.status],
-                            ["Immigrant", individualReport.detail.beneficiary_name],
-                            ["Start", formatDate(individualReport.detail.start_date)],
-                            ["Monthly amount", formatCadValue(individualReport.detail.monthly_amount)],
+                            ["Immigrant name", immigrantName(individualReport.detail)],
+                            ["Sponsorship start date", formatDate(individualReport.detail.start_date)],
+                            ["Monthly pledge", formatCadValue(individualReport.detail.monthly_amount)],
                             [hasIndividualRange ? "Contributions in range" : "Contributions received", formatCadValue(individualReport.detail.received_amount_in_range ?? individualReport.detail.received_amount)],
                         ]} />
-                        <ReportPanel title="Co-sponsor" rows={[
+                        <ReportPanel title="Co-sponsor membership" rows={[
                             ["Name", `${individualReport.detail.sponsor.first_name} ${individualReport.detail.sponsor.last_name}`],
                             ["Status", individualReport.detail.sponsor_status || "-"],
-                            ["Deposit", formatCadValue(individualReport.detail.payment_information)],
+                            ["Membership start date", formatDate(individualReport.sponsorContext.membership_start_date)],
+                            ["Trust fund deposit", individualReport.detail.payment_information || "-"],
                             ["Last sponsored", formatDate(individualReport.detail.last_sponsored_date)],
                             [hasIndividualRange ? "Cases in range" : "Cases sponsored", String(individualReport.detail.sponsorship_case_count ?? 0)],
                         ]} />
-                    </div>
+                        <div className="border-t border-border p-4 md:col-span-2 sm:p-5">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <h4 className="text-sm font-semibold text-ink">Monthly membership contributions</h4>
+                                <span className="text-xs text-muted">{hasIndividualRange ? "Selected date range" : "Most recent 36 months"}</span>
+                            </div>
+                            {visibleContributionPayments.length ? (
+                                <div className="mt-3 divide-y divide-border/70">
+                                    {visibleContributionPayments.slice(0, 12).map((payment) => (
+                                        <div key={payment.id} className="flex items-center justify-between gap-4 py-2.5 text-sm first:pt-0 last:pb-0">
+                                            <span className="text-muted">Given on {formatDate(payment.paid_at)}</span>
+                                            <span className="font-semibold tabular-nums text-ink">{formatCadValue(payment.amount)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="mt-3 text-sm text-muted">No monthly membership contributions found for this period.</p>
+                            )}
+                        </div>
+                    </motion.div>
                 ) : null}
-            </div>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
-                <StatCard
-                    title="Active Cases"
-                    value={metrics.active_cases}
-                    icon={Heart}
-                    description="Currently active sponsorships"
-                />
-                <StatCard
-                    title="Submitted"
-                    value={metrics.submitted_cases}
-                    icon={Clock}
-                    description="Pending approval"
-                />
-                <StatCard
-                    title={executedLabel}
-                    value={metrics.month_executed}
-                    icon={CheckCircle2}
-                    description={executedDescription}
-                />
-                <StatCard
-                    title="Suspended Cases"
-                    value={metrics.suspended_cases}
-                    icon={PauseCircle}
-                    description="On hold"
-                />
-                <StatCard
-                    title={budgetLabel}
-                    value={`${metrics.budget_utilization_percent}%`}
-                    icon={PieIcon}
-                    description={budgetDescription}
-                    trend={{
-                        value: metrics.budget_utilization_percent,
-                        label: "used",
-                        positive: metrics.budget_utilization_percent < 90,
-                    }}
-                />
-                <StatCard
-                    title="Available Slots"
-                    value={availableSlots}
-                    icon={BadgeCheck}
-                    description="Remaining this round"
-                />
-            </div>
+                </div>
+            </section>
+            <section className="overflow-hidden rounded-2xl border border-border bg-card/60">
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                    {summaryItems.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                            <div key={item.label} className="group border-b border-border p-4 transition hover:bg-muted/25 sm:border-r lg:last:border-r-0 xl:border-b-0">
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-xs font-medium text-muted">{item.label}</span>
+                                    <Icon className="h-4 w-4 text-muted transition group-hover:text-ink" />
+                                </div>
+                                <div className="mt-3 text-2xl font-semibold tabular-nums tracking-tight text-ink">{item.value}</div>
+                                <div className="mt-1 text-xs text-muted">{item.detail}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
 
-            <div className="grid gap-6 md:grid-cols-2">
-                <div className="rounded-xl border border-border bg-card p-6">
+            <div className="grid overflow-hidden rounded-2xl border border-border bg-card/60 md:grid-cols-2">
+                <div className="border-b border-border p-5 md:border-b-0 md:border-r sm:p-6">
                     <h3 className="mb-4 text-lg font-semibold text-ink">Budget Overview</h3>
                     <div className="h-[300px] w-full relative">
                         <ResponsiveContainer width="100%" height="100%">
@@ -341,8 +378,8 @@ export function SponsorshipsReport() {
                     </div>
                 </div>
 
-                <div className="space-y-6">
-                    <div className="rounded-xl border border-border bg-card p-6">
+                <div>
+                    <div className="border-b border-border p-5 sm:p-6">
                         <h3 className="mb-4 text-lg font-semibold text-ink">Case Pipeline</h3>
                         <div className="space-y-3 text-sm">
                             <div className="flex items-center justify-between">
@@ -364,7 +401,7 @@ export function SponsorshipsReport() {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-border bg-card p-6">
+                    <div className="p-5 sm:p-6">
                         <h3 className="mb-4 text-lg font-semibold text-ink">Recent Alerts</h3>
                         {metrics.alerts.length === 0 ? (
                             <div className="flex h-[200px] items-center justify-center text-muted">
@@ -389,7 +426,7 @@ export function SponsorshipsReport() {
 
 function ReportPanel({ title, rows }: { title: string; rows: Array<[string, string]> }) {
     return (
-        <div className="rounded-xl border border-border bg-bg/70 p-4">
+        <div className="border-b border-border p-4 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0 sm:p-5">
             <div className="text-sm font-semibold text-ink">{title}</div>
             <div className="mt-3 space-y-2 text-sm">
                 {rows.map(([label, value]) => (

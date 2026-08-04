@@ -325,10 +325,18 @@ export function MembersReport({
                             )}
                             {!isPaymentReport && (
                                 <ReportBox title="Sponsorship Report Fields">
-                                    <Field label="Membership date" value={formatDate(individualReport.client_report_fields.sponsorship.membership_date)} />
+                                    <Field label="Membership start date" value={formatDate(individualReport.client_report_fields.sponsorship.membership_date)} />
                                     <Field label="Last sponsored date" value={formatDate(individualReport.client_report_fields.sponsorship.last_sponsored_date)} />
                                     <Field label="Number sponsored" value={individualReport.client_report_fields.sponsorship.number_sponsored} />
                                     <Field label="Last sponsor status" value={individualReport.client_report_fields.sponsorship.last_sponsor_status || "-"} />
+                                    {canShowFinancialSections && individualReport.contribution_history.slice(0, 12).map((payment) => (
+                                        <Field
+                                            key={`sponsorship-contribution-${payment.id}`}
+                                            label={`Monthly membership contribution · ${formatDate(payment.paid_at)}`}
+                                            value={formatMoney(payment.amount, payment.currency)}
+                                            strong
+                                        />
+                                    ))}
                                     {individualReport.client_report_fields.sponsorship.volunteer_rows.slice(0, 5).map((row, index) => (
                                         <Field key={`volunteer-${row.volunteer_date}-${row.service_type}-${index}`} label={`Volunteer · ${formatDate(row.volunteer_date)}`} value={row.service_type} strong />
                                     ))}

@@ -183,28 +183,29 @@ export default function ReportsClient() {
 
     return (
         <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-bg">
-            <div className="border-b border-border bg-card px-6 py-4">
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+            <div className="border-b border-border bg-card px-4 py-3 sm:px-6 sm:py-4">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-3 sm:mb-4 sm:gap-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-ink">Reports & Analytics</h1>
-                        <p className="text-sm text-muted">Live operational reporting across members, newcomers, finance, sponsorships, parish councils, schools, and activity.</p>
+                        <h1 className="text-lg font-bold text-ink sm:text-2xl">Reports & Analytics</h1>
+                        <p className="hidden text-sm text-muted sm:block">Live operational reporting across members, newcomers, finance, sponsorships, parish councils, schools, and activity.</p>
                     </div>
                     {assistantModules.length > 0 ? (
                         <div className="flex items-center gap-3">
                             <Button
                                 variant="ghost"
-                                className="group relative h-12 overflow-hidden rounded-[20px] border border-accent/20 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(255,255,255,0.94),rgba(251,191,36,0.14))] px-4 text-ink shadow-[0_18px_42px_rgba(245,158,11,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-[0_22px_52px_rgba(245,158,11,0.16)] dark:border-amber-400/18 dark:bg-[linear-gradient(135deg,rgba(245,158,11,0.18),rgba(30,41,59,0.96),rgba(15,23,42,0.98))] dark:text-slate-50 dark:shadow-[0_20px_48px_rgba(0,0,0,0.34)] dark:hover:border-amber-300/24"
+                                className="group relative h-10 overflow-hidden rounded-xl border border-accent/20 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(255,255,255,0.94),rgba(251,191,36,0.14))] px-3 text-ink shadow-[0_18px_42px_rgba(245,158,11,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/30 hover:shadow-[0_22px_52px_rgba(245,158,11,0.16)] sm:h-12 sm:rounded-[20px] sm:px-4 dark:border-amber-400/18 dark:bg-[linear-gradient(135deg,rgba(245,158,11,0.18),rgba(30,41,59,0.96),rgba(15,23,42,0.98))] dark:text-slate-50 dark:shadow-[0_20px_48px_rgba(0,0,0,0.34)] dark:hover:border-amber-300/24"
                                 onClick={() => setAssistantOpen(true)}
                             >
                                 <span className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.52),transparent_38%),radial-gradient(circle_at_88%_18%,rgba(245,158,11,0.18),transparent_30%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(245,158,11,0.18),transparent_28%)]" />
                                 <span className="relative flex items-center gap-3">
-                                    <span className="flex h-8 w-8 items-center justify-center rounded-[14px] border border-white/60 bg-white/85 text-accent shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-amber-200">
+                                    <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/60 bg-white/85 text-accent shadow-sm sm:h-8 sm:w-8 sm:rounded-[14px] dark:border-white/10 dark:bg-white/10 dark:text-amber-200">
                                         <Sparkles size={16} />
                                     </span>
-                                    <span className="text-left leading-none">
+                                    <span className="hidden text-left leading-none sm:block">
                                         <span className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-muted dark:text-slate-300/80">Ask AI</span>
                                         <span className="mt-1 block text-sm font-semibold text-ink dark:text-slate-50">Open assistant</span>
                                     </span>
+                                    <span className="text-sm font-semibold sm:hidden">Ask AI</span>
                                     <ArrowUpRight size={16} className="ml-1 text-muted transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 dark:text-slate-300" />
                                 </span>
                             </Button>

@@ -56,7 +56,7 @@ SPONSORSHIP_EXPORT_HEADERS = [
     "frequency",
     "monthly_amount",
     "received_amount",
-    "payment_information",
+    "trust_fund_deposit",
     "last_sponsored_date",
     "start_date",
     "end_date",
