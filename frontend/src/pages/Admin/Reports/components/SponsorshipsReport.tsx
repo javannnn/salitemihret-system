@@ -220,8 +220,8 @@ export function SponsorshipsReport() {
                 </div>
                 <DateRangeControls value={dateRange} onChange={setDateRange} />
             </div>
-            <section className="overflow-hidden rounded-2xl border border-border bg-card/70">
-                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border bg-muted/20 px-5 py-4 sm:px-6">
+            <section className="relative z-30 overflow-visible rounded-2xl border border-border bg-card/70">
+                <div className="flex flex-wrap items-start justify-between gap-4 rounded-t-2xl border-b border-border bg-muted/20 px-5 py-4 sm:px-6">
                     <div>
                         <h3 className="text-base font-semibold text-ink">Individual case report</h3>
                         <p className="mt-1 text-sm text-muted">Find a case to see the immigrant, membership start, and dated contributions.</p>
@@ -264,7 +264,7 @@ export function SponsorshipsReport() {
                             initial={{ opacity: 0, y: -6 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -6 }}
-                            className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+                            className="absolute z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-xl border border-border bg-card shadow-lg"
                         >
                             {caseMatches.map((item) => (
                                 <button
@@ -327,7 +327,7 @@ export function SponsorshipsReport() {
                 ) : null}
                 </div>
             </section>
-            <section className="overflow-hidden rounded-2xl border border-border bg-card/60">
+            <section className="relative z-0 overflow-hidden rounded-2xl border border-border bg-card/60">
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                     {summaryItems.map((item) => {
                         const Icon = item.icon;
