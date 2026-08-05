@@ -2097,8 +2097,15 @@ export async function getSponsorshipMetrics(filters: { start_date?: string; end_
   return api<SponsorshipMetrics>(`/sponsorships/metrics${query ? `?${query}` : ""}`);
 }
 
-export async function getSponsorContext(memberId: number): Promise<SponsorshipSponsorContext> {
-  return api<SponsorshipSponsorContext>(`/sponsorships/sponsors/${memberId}/context`);
+export async function getSponsorContext(
+  memberId: number,
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<SponsorshipSponsorContext> {
+  const search = new URLSearchParams();
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  const query = search.toString();
+  return api<SponsorshipSponsorContext>(`/sponsorships/sponsors/${memberId}/context${query ? `?${query}` : ""}`);
 }
 
 export async function listVolunteerGroups(): Promise<VolunteerGroup[]> {

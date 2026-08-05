@@ -351,6 +351,104 @@ def test_sponsor_context_uses_current_case_date_not_prior_history(
     assert context_resp.json()["membership_start_date"] == sample_member.join_date.isoformat()
 
 
+def test_sponsor_context_reads_membership_contributions_from_payment_ledger(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    contribution_type = (
+        db_session.query(PaymentServiceType)
+        .filter(PaymentServiceType.code == "CONTRIBUTION")
+        .first()
+    )
+    if contribution_type is None:
+        contribution_type = PaymentServiceType(
+            code="CONTRIBUTION",
+            label="Monthly Contribution",
+            active=True,
+        )
+        db_session.add(contribution_type)
+        db_session.flush()
+
+    recent_day = date.today() - timedelta(days=10)
+    historical_day = date.today() - timedelta(days=5 * 365)
+    recent_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("75.00"),
+        currency="CAD",
+        method="E-Transfer",
+        memo="Recent monthly contribution",
+        status="Completed",
+        posted_at=datetime.combine(recent_day, datetime.min.time()),
+    )
+    historical_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("80.00"),
+        currency="CAD",
+        method="Cash",
+        memo="Historical monthly contribution",
+        status="Completed",
+        posted_at=datetime.combine(historical_day, datetime.min.time()),
+    )
+    pending_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("90.00"),
+        currency="CAD",
+        status="Pending",
+        posted_at=datetime.combine(recent_day, datetime.min.time()),
+    )
+    corrected_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("100.00"),
+        currency="CAD",
+        status="Completed",
+        posted_at=datetime.combine(recent_day, datetime.min.time()),
+    )
+    db_session.add_all([recent_payment, historical_payment, pending_payment, corrected_payment])
+    db_session.flush()
+    db_session.add(
+        Payment(
+            member_id=sample_member.id,
+            service_type_id=contribution_type.id,
+            amount=Decimal("-100.00"),
+            currency="CAD",
+            status="Completed",
+            correction_of_id=corrected_payment.id,
+            correction_reason="Entered in error",
+            posted_at=datetime.combine(recent_day, datetime.min.time()),
+        )
+    )
+    db_session.commit()
+
+    authorize(sponsorship_user)
+    default_response = client.get(f"/sponsorships/sponsors/{sample_member.id}/context")
+
+    assert default_response.status_code == 200, default_response.text
+    assert [payment["id"] for payment in default_response.json()["payment_history"]] == [recent_payment.id]
+    assert default_response.json()["payment_history"][0]["paid_at"] == recent_day.isoformat()
+    assert default_response.json()["payment_history"][0]["note"] == "Recent monthly contribution"
+
+    historical_response = client.get(
+        f"/sponsorships/sponsors/{sample_member.id}/context",
+        params={"start_date": historical_day.isoformat(), "end_date": historical_day.isoformat()},
+    )
+
+    assert historical_response.status_code == 200, historical_response.text
+    assert [payment["id"] for payment in historical_response.json()["payment_history"]] == [historical_payment.id]
+
+    invalid_response = client.get(
+        f"/sponsorships/sponsors/{sample_member.id}/context",
+        params={"start_date": recent_day.isoformat(), "end_date": historical_day.isoformat()},
+    )
+    assert invalid_response.status_code == 400, invalid_response.text
+
+
 def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
     client,
     authorize,

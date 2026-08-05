@@ -139,7 +139,7 @@ export function SponsorshipsReport() {
             };
             const [detail, sponsorContext, timeline, notes] = await Promise.all([
                 getSponsorship(caseRecord.id, filters),
-                getSponsorContext(caseRecord.sponsor.id),
+                getSponsorContext(caseRecord.sponsor.id, filters),
                 getSponsorshipTimeline(caseRecord.id, filters),
                 listSponsorshipNotes(caseRecord.id, filters),
             ]);

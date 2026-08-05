@@ -603,10 +603,17 @@ def delete_budget_round(
 @router.get("/sponsors/{member_id:int}/context", response_model=SponsorshipSponsorContext, status_code=status.HTTP_200_OK)
 def get_sponsor_context(
     member_id: int,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*READ_ROLES)),
 ) -> SponsorshipSponsorContext:
-    return sponsorships_service.get_sponsor_context(db, member_id)
+    return sponsorships_service.get_sponsor_context(
+        db,
+        member_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.post("", response_model=SponsorshipOut, status_code=status.HTTP_201_CREATED)

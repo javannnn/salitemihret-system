@@ -10,7 +10,6 @@ from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.member import Member
-from app.models.member_contribution_payment import MemberContributionPayment
 from app.models.newcomer import Newcomer
 from app.models.newcomer_tracking import NewcomerStatusAudit
 from app.models.payment import Payment, PaymentServiceType
@@ -1771,7 +1770,19 @@ def delete_budget_round(db: Session, round_id: int) -> None:
     db.commit()
 
 
-def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContext:
+def get_sponsor_context(
+    db: Session,
+    member_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SponsorshipSponsorContext:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Start date must be on or before end date.",
+        )
+
     sponsor = (
         db.query(Member)
         .options(
@@ -1824,21 +1835,49 @@ def get_sponsor_context(db: Session, member_id: int) -> SponsorshipSponsorContex
         services.extend(_parse_volunteer_services(raw, fallback))
     services = sorted(set([item for item in services if item]))
 
-    start_month = today.month - 35
-    start_year = today.year
-    while start_month <= 0:
-        start_month += 12
-        start_year -= 1
-    payment_history_start = date(start_year, start_month, 1)
-    payment_history_end = today
-    payments = (
-        db.query(MemberContributionPayment)
-        .filter(MemberContributionPayment.member_id == member_id)
-        .filter(MemberContributionPayment.paid_at >= payment_history_start)
-        .order_by(MemberContributionPayment.paid_at.desc(), MemberContributionPayment.id.desc())
-        .all()
+    if start_date is None and end_date is None:
+        start_month = today.month - 35
+        start_year = today.year
+        while start_month <= 0:
+            start_month += 12
+            start_year -= 1
+        payment_history_start = date(start_year, start_month, 1)
+        payment_history_end = today
+    else:
+        payment_history_start = start_date
+        payment_history_end = end_date
+
+    payments_query = (
+        db.query(Payment)
+        .join(PaymentServiceType, Payment.service_type_id == PaymentServiceType.id)
+        .filter(Payment.member_id == member_id)
+        .filter(func.upper(PaymentServiceType.code) == "CONTRIBUTION")
+        .filter(Payment.status == "Completed")
+        .filter(Payment.amount > 0)
+        .filter(~Payment.corrections.any())
     )
-    payment_history = [ContributionPaymentOut.from_orm(payment) for payment in payments]
+    if payment_history_start:
+        payments_query = payments_query.filter(
+            Payment.posted_at >= datetime.combine(payment_history_start, datetime.min.time())
+        )
+    if payment_history_end:
+        payments_query = payments_query.filter(
+            Payment.posted_at <= datetime.combine(payment_history_end, datetime.max.time())
+        )
+    payments = payments_query.order_by(Payment.posted_at.desc(), Payment.id.desc()).all()
+    payment_history = [
+        ContributionPaymentOut(
+            id=payment.id,
+            amount=float(payment.amount),
+            currency=payment.currency,
+            paid_at=payment.posted_at.date(),
+            method=payment.method,
+            note=payment.memo,
+            recorded_by_id=payment.recorded_by_id,
+            created_at=payment.created_at,
+        )
+        for payment in payments
+    ]
 
     usage_row = (
         db.query(
