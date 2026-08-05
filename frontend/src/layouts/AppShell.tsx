@@ -451,7 +451,17 @@ export default function AppShell() {
         ? "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-200"
         : "border-emerald-300 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-200";
   const isLicenseActive = licenseStatus?.state === "active";
-  const licenseCustomerLabel = isLicenseActive ? "SaliteMihret EOTC" : licenseStatus?.customer;
+  const licenseCustomerLabel = licenseStatus?.customer || (isLicenseActive ? "SaliteMihret EOTC" : null);
+  const licenseExpiryLabel = licenseStatus?.expires_at
+    ? new Date(licenseStatus.expires_at).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
+  const showLicenseDaysRemaining =
+    (licenseStatus?.state === "active" || licenseStatus?.state === "trial") &&
+    (licenseStatus?.days_remaining ?? 0) > 0;
   const sessionExpiredMessage =
     sessionExpiredReason === "idle"
       ? "We locked this workspace after 30 minutes without activity. Enter your password to pick up where you left off."
@@ -809,38 +819,41 @@ export default function AppShell() {
             {licenseStatus ? (
               <div className={`p-4 border rounded-2xl ${licenseClasses}`}>
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ShieldAlert size={18} />
+                  {isLicenseActive ? <ShieldCheck size={18} /> : <ShieldAlert size={18} />}
                   <span>
                     {licenseStatus.state === "active"
-                      ? "Permanent license active"
+                      ? "License active"
                       : licenseStatus.state === "trial"
                         ? "Trial mode"
-                        : "License required"}
+                        : licenseStatus.state === "expired"
+                          ? "License expired"
+                          : "License needs attention"}
                   </span>
                 </div>
                 <p className="text-sm mt-2">
                   {isLicenseActive
-                    ? "Permanent license activated for SaliteMihret EOTC. Full access is enabled for this deployment."
-                    : licenseStatus.message}{" "}
-                  {licenseStatus.expires_at && (
-                    <span>
-                      Expires{" "}
-                      <strong>{new Date(licenseStatus.expires_at).toLocaleDateString()}</strong>.
-                    </span>
-                  )}
-                  {licenseStatus.days_remaining >= 0 && (
-                    <span className="ml-1">
-                      {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
-                    </span>
-                  )}
+                    ? "Full access is enabled for this deployment."
+                    : licenseStatus.message}
                 </p>
+                {licenseExpiryLabel && (
+                  <p className="mt-1 text-sm">
+                    {licenseStatus.state === "trial"
+                      ? "Trial ends"
+                      : licenseStatus.state === "expired"
+                        ? "Expired"
+                        : "Valid through"}{" "}
+                    <strong>{licenseExpiryLabel}</strong>.
+                    {showLicenseDaysRemaining && (
+                      <span className="ml-1">
+                        {licenseStatus.days_remaining} day{licenseStatus.days_remaining === 1 ? "" : "s"} remaining.
+                      </span>
+                    )}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className="text-xs uppercase tracking-wide">
                     Status: {licenseStatus.state.toUpperCase()}
                   </span>
-                  {isLicenseActive && (
-                    <span className="text-xs uppercase tracking-wide">Type: Permanent</span>
-                  )}
                   {licenseCustomerLabel && (
                     <span className="text-xs uppercase tracking-wide">
                       Licensed to: {licenseCustomerLabel}
