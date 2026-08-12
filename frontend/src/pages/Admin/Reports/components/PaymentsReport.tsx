@@ -103,6 +103,14 @@ export function PaymentsReport() {
 
     return (
         <div className="space-y-6">
+            <MembersReport
+                individualOnly
+                individualReportSource="payments"
+                individualTitle="Individual Payment Report"
+                individualDescription="Search by member first name, last name, phone, email, or username to open the finance-visible individual report."
+            />
+
+            <div className="border-t border-border pt-6">
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <h2 className="text-xl font-semibold text-ink">Financial Report</h2>
@@ -229,12 +237,7 @@ export function PaymentsReport() {
                 </div>
             </div>
 
-            <MembersReport
-                individualOnly
-                individualReportSource="payments"
-                individualTitle="Individual Payment Report"
-                individualDescription="Search by member first name, last name, phone, email, or username to open the finance-visible individual report."
-            />
+            </div>
         </div>
     );
 }

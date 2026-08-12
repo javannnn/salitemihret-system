@@ -7,7 +7,7 @@ from decimal import Decimal
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.deps import get_current_user
@@ -87,33 +87,6 @@ def _date_in_range(value: date | datetime | None, start_date: date | None, end_d
         return False
     value_date = value.date() if isinstance(value, datetime) else value
     return (start_date is None or value_date >= start_date) and (end_date is None or value_date <= end_date)
-
-
-def _sponsorship_payment_amount(
-    db: Session,
-    member_id: int | None,
-    *,
-    start_date: date | None = None,
-    end_date: date | None = None,
-) -> Decimal:
-    if member_id is None:
-        return Decimal("0.00")
-
-    query = (
-        db.query(func.coalesce(func.sum(Payment.amount), 0))
-        .join(PaymentServiceType, PaymentServiceType.id == Payment.service_type_id)
-        .filter(
-            Payment.member_id == member_id,
-            Payment.status == "Completed",
-            func.upper(PaymentServiceType.code) == "SPONSORSHIP",
-        )
-    )
-    if start_date:
-        query = query.filter(Payment.posted_at >= datetime.combine(start_date, datetime.min.time()))
-    if end_date:
-        query = query.filter(Payment.posted_at <= datetime.combine(end_date, datetime.max.time()))
-
-    return Decimal(query.scalar() or 0).quantize(Decimal("0.01"))
 
 
 def require_report_access(report_field: str, *, source_module: str | None = None) -> Callable[..., User]:
@@ -314,16 +287,6 @@ def _build_individual_member_report(
             role="Sponsor" if item.sponsor_member_id == member.id else "Beneficiary",
             beneficiary_name=item.beneficiary_name,
             status=item.status,
-            program=item.program,
-            frequency=item.frequency,
-            monthly_amount=None,
-            received_amount=None,
-            paid_amount=(
-                _sponsorship_payment_amount(db, item.sponsor_member_id, start_date=start_date, end_date=end_date)
-                if financial_access and item.sponsor_member_id == member.id
-                else None
-            ),
-            currency="CAD" if financial_access and item.sponsor_member_id == member.id else None,
             start_date=item.start_date,
             end_date=item.end_date,
             notes=item.notes,
@@ -331,13 +294,16 @@ def _build_individual_member_report(
         for item in sponsorships
     ]
     sponsored_cases = [item for item in sponsorships if item.sponsor_member_id == member.id]
+    completed_sponsored_cases = [
+        item for item in sponsored_cases if str(item.status) in {"Completed", "Closed"}
+    ]
     last_sponsored_case = next(
         (
             item
             for item in sorted(
-                sponsored_cases,
+                completed_sponsored_cases,
                 key=lambda sponsorship: (
-                    sponsorship.last_sponsored_date or sponsorship.start_date,
+                    sponsorship.start_date,
                     sponsorship.created_at,
                     sponsorship.id,
                 ),
@@ -390,12 +356,11 @@ def _build_individual_member_report(
             first_name=member.first_name,
             last_name=member.last_name,
             membership_date=member.join_date,
-            payment_information_by_year=payment_years if financial_access else [],
             volunteer_rows=volunteer_rows,
-            last_sponsored_date=last_sponsored_case.last_sponsored_date if last_sponsored_case else None,
+            last_sponsored_date=last_sponsored_case.start_date if last_sponsored_case else None,
             number_sponsored=len(sponsored_cases),
             last_sponsor_status=(
-                str(last_sponsored_case.last_status or last_sponsored_case.status)
+                str(last_sponsored_case.status)
                 if last_sponsored_case
                 else None
             ),

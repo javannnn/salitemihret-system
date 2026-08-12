@@ -261,7 +261,7 @@ def test_newcomer_update_rejects_inactive_sponsor_member(
     assert "active member" in update_resp.text
 
 
-def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
+def test_sponsorship_last_sponsored_date_is_hidden_until_case_completion(
     client,
     authorize,
     sponsorship_user,
@@ -293,7 +293,7 @@ def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
     create_resp = client.post("/sponsorships", json=payload)
     assert create_resp.status_code == 201, create_resp.text
     created = create_resp.json()
-    assert created["last_sponsored_date"] == "2024-06-01"
+    assert created["last_sponsored_date"] is None
 
     sponsorship_id = created["id"]
     moved_start = date(2025, 2, 1)
@@ -304,7 +304,7 @@ def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
     assert update_resp.status_code == 200, update_resp.text
     updated = update_resp.json()
     assert updated["start_date"] == moved_start.isoformat()
-    assert updated["last_sponsored_date"] == "2024-06-01"
+    assert updated["last_sponsored_date"] is None
 
     manual_last_date = date(2025, 1, 20)
     manual_resp = client.put(
@@ -312,7 +312,7 @@ def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
         json={"last_sponsored_date": manual_last_date.isoformat()},
     )
     assert manual_resp.status_code == 200, manual_resp.text
-    assert manual_resp.json()["last_sponsored_date"] == manual_last_date.isoformat()
+    assert manual_resp.json()["last_sponsored_date"] is None
 
     later_start = date(2025, 3, 1)
     preserve_resp = client.put(
@@ -322,10 +322,34 @@ def test_sponsorship_auto_captures_last_sponsored_date_from_previous_case(
     assert preserve_resp.status_code == 200, preserve_resp.text
     preserved = preserve_resp.json()
     assert preserved["start_date"] == later_start.isoformat()
-    assert preserved["last_sponsored_date"] == manual_last_date.isoformat()
+    assert preserved["last_sponsored_date"] is None
+    db_session.expire_all()
+    stored = db_session.query(Sponsorship).filter(Sponsorship.id == sponsorship_id).one()
+    assert stored.last_sponsored_date == later_start
 
 
-def test_sponsor_context_uses_current_case_date_not_prior_history(
+def test_sponsorship_defaults_start_date_to_today_without_pledge_fields(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+):
+    authorize(sponsorship_user)
+    response = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Default Date Immigrant",
+            "status": "Draft",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["start_date"] == date.today().isoformat()
+    assert response.json()["last_sponsored_date"] is None
+
+
+def test_sponsor_context_only_shows_last_sponsored_after_completion(
     client,
     authorize,
     sponsorship_user,
@@ -347,7 +371,8 @@ def test_sponsor_context_uses_current_case_date_not_prior_history(
 
     context_resp = client.get(f"/sponsorships/sponsors/{sample_member.id}/context")
     assert context_resp.status_code == 200, context_resp.text
-    assert context_resp.json()["last_sponsorship_date"] == "2025-01-15"
+    assert context_resp.json()["last_sponsorship_date"] is None
+    assert context_resp.json()["last_sponsorship_completed_at"] is None
     assert context_resp.json()["membership_start_date"] == sample_member.join_date.isoformat()
 
 
@@ -623,6 +648,37 @@ def test_sponsorship_committee_can_create_newcomer(client, authorize, sponsorshi
     }
     resp = client.post("/newcomers", json=payload)
     assert resp.status_code == 201, resp.text
+
+
+def test_newcomer_rejects_duplicate_name_and_email_combination(client, authorize, sponsorship_user):
+    authorize(sponsorship_user)
+    payload = {
+        "first_name": "Samrawit",
+        "last_name": "Tesfaye",
+        "arrival_date": date.today().isoformat(),
+        "contact_phone": "+16135550177",
+        "contact_email": "samrawit.tesfaye@example.com",
+        "service_type": "Welcome",
+    }
+    first = client.post("/newcomers", json=payload)
+    assert first.status_code == 201, first.text
+    lookup = client.get("/newcomers", params={"q": "SAMRAWIT.TESFAYE@EXAMPLE.COM"})
+    assert lookup.status_code == 200, lookup.text
+    assert [item["id"] for item in lookup.json()["items"]] == [first.json()["id"]]
+
+    duplicate = client.post(
+        "/newcomers",
+        json={
+            **payload,
+            "first_name": "  SAMRAWIT ",
+            "last_name": "tesfaye",
+            "contact_phone": "+16135550178",
+            "contact_email": "SAMRAWIT.TESFAYE@EXAMPLE.COM",
+        },
+    )
+
+    assert duplicate.status_code == 409, duplicate.text
+    assert "already exists" in duplicate.text
 
 
 def test_newcomer_requires_email_even_when_phone_is_present(client, authorize, public_relations_user):
@@ -1013,6 +1069,118 @@ def test_active_legacy_sponsorship_without_budget_can_complete(
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "Completed"
+    assert response.json()["completed_at"] is not None
+    assert response.json()["last_sponsored_date"] == sponsorship.start_date.isoformat()
+    context = client.get(f"/sponsorships/sponsors/{sample_member.id}/context")
+    assert context.status_code == 200, context.text
+    assert context.json()["last_sponsorship_date"] == sponsorship.start_date.isoformat()
+    assert context.json()["last_sponsorship_completed_at"] is not None
+
+
+def test_completed_sponsorship_can_be_reversed_without_audit_enum_failure(
+    client,
+    authorize,
+    sponsorship_user,
+    admin_user,
+    sample_member,
+    db_session,
+):
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=2)
+    authorize(sponsorship_user)
+    start_date = date.today()
+    created = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Reverse Lifecycle",
+            "start_date": start_date.isoformat(),
+            "status": "Submitted",
+            "budget_round_id": round_id,
+        },
+    )
+    assert created.status_code == 201, created.text
+    sponsorship_id = created.json()["id"]
+
+    authorize(admin_user)
+    approved = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Approved", "reason": "Approved"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    authorize(sponsorship_user)
+    activated = client.post(f"/sponsorships/{sponsorship_id}/status", json={"status": "Active"})
+    assert activated.status_code == 200, activated.text
+    completed = client.post(f"/sponsorships/{sponsorship_id}/status", json={"status": "Completed"})
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["completed_at"] is not None
+    assert completed.json()["last_sponsored_date"] == start_date.isoformat()
+
+    reversed_response = client.post(
+        f"/sponsorships/{sponsorship_id}/status",
+        json={"status": "Active", "reason": "Completion entered in error"},
+    )
+    assert reversed_response.status_code == 200, reversed_response.text
+    assert reversed_response.json()["completed_at"] is None
+    assert reversed_response.json()["last_sponsored_date"] is None
+    audit = (
+        db_session.query(SponsorshipStatusAudit)
+        .filter(SponsorshipStatusAudit.sponsorship_id == sponsorship_id)
+        .order_by(SponsorshipStatusAudit.id.desc())
+        .first()
+    )
+    assert audit is not None
+    assert str(audit.action) == "Reversal"
+
+
+def test_sponsor_cannot_submit_second_case_until_first_is_completed(
+    client,
+    authorize,
+    sponsorship_user,
+    admin_user,
+    sample_member,
+):
+    round_id = _create_budget_round(client, authorize, admin_user, slot_budget=3)
+    authorize(sponsorship_user)
+    first = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "First Incomplete",
+            "start_date": date.today().isoformat(),
+            "status": "Submitted",
+            "budget_round_id": round_id,
+        },
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/sponsorships",
+        json={
+            "sponsor_member_id": sample_member.id,
+            "beneficiary_name": "Second Waiting",
+            "start_date": date.today().isoformat(),
+            "status": "Draft",
+            "budget_round_id": round_id,
+        },
+    )
+    assert second.status_code == 201, second.text
+
+    blocked = client.post(f"/sponsorships/{second.json()['id']}/status", json={"status": "Submitted"})
+    assert blocked.status_code == 409, blocked.text
+    assert "SP-" in blocked.text
+
+    authorize(admin_user)
+    approved = client.post(
+        f"/sponsorships/{first.json()['id']}/status",
+        json={"status": "Approved", "reason": "Approved"},
+    )
+    assert approved.status_code == 200, approved.text
+    authorize(sponsorship_user)
+    assert client.post(f"/sponsorships/{first.json()['id']}/status", json={"status": "Active"}).status_code == 200
+    assert client.post(f"/sponsorships/{first.json()['id']}/status", json={"status": "Completed"}).status_code == 200
+
+    submitted = client.post(f"/sponsorships/{second.json()['id']}/status", json={"status": "Submitted"})
+    assert submitted.status_code == 200, submitted.text
 
 
 def test_sponsorship_list_can_filter_by_selected_ids(client, authorize, sponsorship_user, sample_member):
@@ -1348,22 +1516,29 @@ def test_sponsorship_prescreening_calculates_eligibility_and_evidence(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["total"] == 1
-    assert payload["summary"]["eligible"] == 1
+    assert payload["summary"]["not_eligible"] == 1
     item = payload["items"][0]
     assert item["member_id"] == sample_member.id
-    assert item["eligibility"] == "Eligible"
-    assert item["score"] == 100
+    assert item["eligibility"] == "NotEligible"
+    assert item["score"] == 80
     assert item["consecutive_payment_months"] >= item["required_consecutive_payment_months"]
     assert item["sponsorship_count"] == 1
     assert item["active_sponsorship_count"] == 1
-    assert item["last_beneficiary_name"] == "Previous Beneficiary"
+    assert item["incomplete_sponsorship_count"] == 1
+    assert any(
+        criterion["code"] == "case_availability" and criterion["status"] == "Fail"
+        for criterion in item["criteria"]
+    )
+    assert item["last_beneficiary_name"] is None
+    assert item["last_sponsorship_date"] is None
+    assert item["last_sponsorship_completed_at"] is None
     assert item["is_volunteer"] is True
     assert item["volunteer_match_method"] == "Phone"
     assert item["volunteer_groups"] == ["Community Support"]
 
     export_response = client.get(
         "/sponsorships/pre-screening/export.xlsx",
-        params={"eligibility": "Eligible", "ids": str(sample_member.id)},
+        params={"eligibility": "NotEligible", "ids": str(sample_member.id)},
     )
     assert export_response.status_code == 200, export_response.text
     assert export_response.content.startswith(b"PK")

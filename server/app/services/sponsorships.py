@@ -65,7 +65,7 @@ VALID_MOTIVATIONS = set(get_args(SponsorshipMotivation))
 VALID_NOTES_TEMPLATES = set(get_args(SponsorshipNotesTemplate))
 BUDGET_CONSUMING_STATUSES = {"Submitted", "Approved", "Active", "Suspended", "Completed", "Closed"}
 PRESCREENING_TENURE_MONTHS = 12
-PRESCREENING_ACTIVE_CASE_STATUSES = {"Submitted", "Approved", "Active", "Suspended"}
+INCOMPLETE_CASE_STATUSES = {"Submitted", "Approved", "Active", "Suspended"}
 
 
 def _coerce_literal(value: str | None) -> str | None:
@@ -134,8 +134,6 @@ def _dump_volunteer_services(services: list[str] | None) -> str | None:
 
 
 def _case_reference_date(sponsorship: Sponsorship) -> date | None:
-    if sponsorship.end_date:
-        return sponsorship.end_date
     if sponsorship.start_date:
         return sponsorship.start_date
     if sponsorship.created_at:
@@ -143,44 +141,45 @@ def _case_reference_date(sponsorship: Sponsorship) -> date | None:
     return None
 
 
-def _lookup_previous_sponsorship_date(
+def _validate_member(
     db: Session,
+    member_id: int,
     *,
-    beneficiary_member_id: int | None,
-    newcomer_id: int | None,
-    beneficiary_name: str | None,
-    exclude_id: int | None = None,
-    before_date: date | None = None,
-) -> date | None:
-    query = db.query(Sponsorship)
-    if exclude_id is not None:
-        query = query.filter(Sponsorship.id != exclude_id)
-    if beneficiary_member_id:
-        query = query.filter(Sponsorship.beneficiary_member_id == beneficiary_member_id)
-    elif newcomer_id:
-        query = query.filter(Sponsorship.newcomer_id == newcomer_id)
-    elif beneficiary_name and beneficiary_name.strip():
-        query = query.filter(func.lower(Sponsorship.beneficiary_name) == beneficiary_name.strip().lower())
-    else:
-        return None
-
-    latest_date = None
-    for previous_case in query.all():
-        case_date = _case_reference_date(previous_case)
-        if before_date and case_date and case_date > before_date:
-            continue
-        if case_date and (latest_date is None or case_date > latest_date):
-            latest_date = case_date
-    return latest_date
-
-
-def _validate_member(db: Session, member_id: int) -> Member:
-    member = db.query(Member).filter(Member.id == member_id).first()
+    for_update: bool = False,
+    require_active: bool = True,
+) -> Member:
+    query = db.query(Member).filter(Member.id == member_id)
+    if for_update:
+        query = query.with_for_update()
+    member = query.first()
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
-    if member.status not in ALLOWED_SPONSOR_STATUSES:
+    if require_active and member.status not in ALLOWED_SPONSOR_STATUSES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sponsor must be an active member")
     return member
+
+
+def _ensure_sponsor_available(
+    db: Session,
+    sponsor_member_id: int,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    query = db.query(Sponsorship).filter(
+        Sponsorship.sponsor_member_id == sponsor_member_id,
+        cast(Sponsorship.status, String).in_(INCOMPLETE_CASE_STATUSES),
+    )
+    if exclude_id is not None:
+        query = query.filter(Sponsorship.id != exclude_id)
+    existing = query.order_by(Sponsorship.start_date.desc(), Sponsorship.id.desc()).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This co-sponsor already has incomplete case SP-{existing.id:04d}. "
+                "Complete that case before starting another sponsorship."
+            ),
+        )
 
 
 def _load_member(db: Session, member_id: int) -> Member:
@@ -358,9 +357,14 @@ def _serialize(
         budget_utilization_percent = round(percent * 100, 2)
         budget_over_capacity = (sponsorship.used_slots or 0) > sponsorship.budget_slots
 
+    visible_last_sponsored_date = (
+        sponsorship.start_date
+        if status in {"Completed", "Closed"}
+        else None
+    )
     days_since_last = None
-    if sponsorship.last_sponsored_date:
-        days_since_last = (date.today() - sponsorship.last_sponsored_date).days
+    if visible_last_sponsored_date:
+        days_since_last = (date.today() - visible_last_sponsored_date).days
 
     father_name = None
     if sponsorship.father_of_repentance:
@@ -376,7 +380,7 @@ def _serialize(
         volunteer_services=volunteer_services,
         volunteer_service_other=sponsorship.volunteer_service_other,
         payment_information=sponsorship.payment_information,
-        last_sponsored_date=sponsorship.last_sponsored_date,
+        last_sponsored_date=visible_last_sponsored_date,
         days_since_last_sponsorship=days_since_last,
         sponsorship_case_count=sponsorship_case_count,
         frequency=sponsorship.frequency,  # type: ignore[arg-type]
@@ -414,6 +418,7 @@ def _serialize(
         rejected_at=sponsorship.rejected_at,
         rejected_by_id=sponsorship.rejected_by_id,
         rejection_reason=sponsorship.rejection_reason,
+        completed_at=sponsorship.completed_at,
         sponsor_status=sponsorship.sponsor.status if sponsorship.sponsor else None,
         father_of_repentance_name=father_name,
         created_at=sponsorship.created_at,
@@ -769,28 +774,55 @@ def list_sponsorship_prescreening(
             )
         )
 
-        required_criteria = criteria[:4]
+        member_sponsorships = sponsorships_by_member.get(member.id, [])
+        incomplete_cases = [
+            record
+            for record in member_sponsorships
+            if _coerce_literal(record.status) in INCOMPLETE_CASE_STATUSES
+        ]
+        latest_incomplete_case = max(
+            incomplete_cases,
+            key=lambda record: (_case_reference_date(record) or date.min, record.id),
+            default=None,
+        )
+        criteria.append(
+            _prescreening_criterion(
+                "case_availability",
+                "No incomplete sponsorship",
+                "Fail" if latest_incomplete_case else "Pass",
+                (
+                    f"SP-{latest_incomplete_case.id:04d} is "
+                    f"{_coerce_literal(latest_incomplete_case.status) or 'incomplete'}; complete it before another case."
+                    if latest_incomplete_case
+                    else "No submitted, approved, active, or suspended sponsorship is open."
+                ),
+            )
+        )
+
+        required_criteria = [criterion for criterion in criteria if criterion.code != "volunteer_service"]
         if any(criterion.status == "Fail" for criterion in required_criteria):
             eligibility_value = "NotEligible"
         elif any(criterion.status == "Review" for criterion in required_criteria):
             eligibility_value = "Review"
         else:
             eligibility_value = "Eligible"
-        weights = [25, 25, 25, 20, 5]
+        weights = [20, 20, 20, 15, 5, 20]
         score = sum(
             weight if criterion.status == "Pass" else round(weight / 2) if criterion.status == "Review" else 0
             for criterion, weight in zip(criteria, weights)
         )
 
-        member_sponsorships = sponsorships_by_member.get(member.id, [])
+        completed_sponsorships = [
+            record
+            for record in member_sponsorships
+            if _coerce_literal(record.status) in {"Completed", "Closed"}
+        ]
         last_sponsorship = max(
-            member_sponsorships,
+            completed_sponsorships,
             key=lambda record: (_case_reference_date(record) or date.min, record.id),
             default=None,
         )
-        active_count = sum(
-            1 for record in member_sponsorships if _coerce_literal(record.status) in PRESCREENING_ACTIVE_CASE_STATUSES
-        )
+        active_count = len(incomplete_cases)
         completed_count = sum(
             1 for record in member_sponsorships if _coerce_literal(record.status) in {"Completed", "Closed"}
         )
@@ -820,10 +852,12 @@ def list_sponsorship_prescreening(
                 required_consecutive_payment_months=health.required_consecutive_months,
                 sponsorship_count=len(member_sponsorships),
                 active_sponsorship_count=active_count,
+                incomplete_sponsorship_count=len(incomplete_cases),
                 completed_sponsorship_count=completed_count,
                 last_sponsorship_id=last_sponsorship.id if last_sponsorship else None,
                 last_sponsorship_date=_case_reference_date(last_sponsorship) if last_sponsorship else None,
                 last_sponsorship_status=_coerce_literal(last_sponsorship.status) if last_sponsorship else None,
+                last_sponsorship_completed_at=last_sponsorship.completed_at if last_sponsorship else None,
                 last_beneficiary_name=(
                     _normalize_beneficiary_name(
                         beneficiary_name=last_sponsorship.beneficiary_name,
@@ -947,7 +981,7 @@ def _ensure_no_conflict(
 
 
 def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | None) -> SponsorshipOut:
-    sponsor = _validate_member(db, payload.sponsor_member_id)
+    sponsor = _validate_member(db, payload.sponsor_member_id, for_update=True)
     beneficiary_member = None
     if payload.beneficiary_member_id:
         beneficiary_member = _load_member(db, payload.beneficiary_member_id)
@@ -981,14 +1015,6 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         newcomer_id=newcomer.id if newcomer else None,
         beneficiary_name=beneficiary_name,
     )
-    derived_last_sponsored_date = _lookup_previous_sponsorship_date(
-        db,
-        beneficiary_member_id=beneficiary_member.id if beneficiary_member else None,
-        newcomer_id=newcomer.id if newcomer else None,
-        beneficiary_name=beneficiary_name,
-        before_date=payload.start_date,
-    )
-
     father_id = payload.father_of_repentance_id
     if father_id is None and getattr(sponsor, "father_confessor_id", None):
         father_id = sponsor.father_confessor_id
@@ -1006,6 +1032,8 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
 
     if payload.status not in ("Draft", "Submitted"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New sponsorships must start as Draft or Submitted")
+    if payload.status == "Submitted":
+        _ensure_sponsor_available(db, sponsor.id)
 
     submitted_at = None
     submitted_by_id = None
@@ -1029,16 +1057,14 @@ def create_sponsorship(db: Session, payload: SponsorshipCreate, actor_id: int | 
         volunteer_services=volunteer_services_raw,
         volunteer_service_other=payload.volunteer_service_other,
         payment_information=payload.payment_information,
-        last_sponsored_date=payload.last_sponsored_date
-        if payload.last_sponsored_date is not None
-        else derived_last_sponsored_date,
+        last_sponsored_date=payload.start_date,
         frequency=payload.frequency.strip() if payload.frequency else "Monthly",
         last_status=payload.last_status,
         last_status_reason=payload.last_status_reason,
         start_date=payload.start_date,
         end_date=payload.end_date,
         status=payload.status,
-        monthly_amount=Decimal(payload.monthly_amount).quantize(Decimal("0.01")),
+        monthly_amount=Decimal(payload.monthly_amount or 0).quantize(Decimal("0.01")),
         received_amount=Decimal(payload.received_amount or 0).quantize(Decimal("0.01")),
         program=payload.program,
         pledge_channel=payload.pledge_channel,
@@ -1175,7 +1201,6 @@ def get_sponsorship(
 def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpdate, actor_id: int | None) -> SponsorshipOut:
     sponsorship = _load_sponsorship(db, sponsorship_id)
     fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
-    previous_start_date = sponsorship.start_date
     budget_round_changed = "budget_round_id" in fields_set
     budget_slots_changed = payload.budget_slots is not None
 
@@ -1194,15 +1219,6 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         beneficiary_member=old_beneficiary_member,
         newcomer=old_newcomer,
     )
-    previous_auto_last_sponsored_date = _lookup_previous_sponsorship_date(
-        db,
-        beneficiary_member_id=getattr(old_beneficiary_member, "id", None),
-        newcomer_id=getattr(old_newcomer, "id", None),
-        beneficiary_name=old_label,
-        exclude_id=sponsorship.id,
-        before_date=previous_start_date,
-    )
-
     beneficiary_member = None
     if payload.beneficiary_member_id is not None:
         beneficiary_member = _load_member(db, payload.beneficiary_member_id)
@@ -1241,9 +1257,10 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         sponsorship.last_status_reason = payload.last_status_reason
     if payload.start_date:
         sponsorship.start_date = payload.start_date
+        sponsorship.last_sponsored_date = payload.start_date
     if payload.end_date is not None:
         sponsorship.end_date = payload.end_date
-    if payload.monthly_amount:
+    if payload.monthly_amount is not None:
         sponsorship.monthly_amount = Decimal(payload.monthly_amount).quantize(Decimal("0.01"))
     if payload.received_amount is not None:
         sponsorship.received_amount = Decimal(payload.received_amount).quantize(Decimal("0.01"))
@@ -1310,29 +1327,7 @@ def update_sponsorship(db: Session, sponsorship_id: int, payload: SponsorshipUpd
         beneficiary_name=sponsorship.beneficiary_name,
         exclude_id=sponsorship.id,
     )
-    derived_last_sponsored_date = _lookup_previous_sponsorship_date(
-        db,
-        beneficiary_member_id=sponsorship.beneficiary_member_id,
-        newcomer_id=sponsorship.newcomer_id,
-        beneficiary_name=sponsorship.beneficiary_name,
-        exclude_id=sponsorship.id,
-        before_date=sponsorship.start_date,
-    )
-    beneficiary_identity_changed = (
-        sponsorship.beneficiary_member_id != getattr(old_beneficiary_member, "id", None)
-        or sponsorship.newcomer_id != getattr(old_newcomer, "id", None)
-        or sponsorship.beneficiary_name != old_label
-    )
-    if "last_sponsored_date" in fields_set:
-        sponsorship.last_sponsored_date = (
-            payload.last_sponsored_date
-            if payload.last_sponsored_date is not None
-            else derived_last_sponsored_date
-        )
-    elif beneficiary_identity_changed and (
-        sponsorship.last_sponsored_date is None or sponsorship.last_sponsored_date == previous_auto_last_sponsored_date
-    ):
-        sponsorship.last_sponsored_date = derived_last_sponsored_date
+    sponsorship.last_sponsored_date = sponsorship.start_date
 
     new_label = _normalize_beneficiary_name(
         beneficiary_name=sponsorship.beneficiary_name,
@@ -1437,6 +1432,14 @@ def transition_sponsorship_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rejection requires a reason")
     if target == "Suspended" and not (payload.reason and payload.reason.strip()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decline requires a reason")
+    if target in INCOMPLETE_CASE_STATUSES:
+        _validate_member(
+            db,
+            sponsorship.sponsor_member_id,
+            for_update=True,
+            require_active=target != "Suspended",
+        )
+        _ensure_sponsor_available(db, sponsorship.sponsor_member_id, exclude_id=sponsorship.id)
 
     now = datetime.utcnow()
     action = "StatusChange"
@@ -1485,9 +1488,12 @@ def transition_sponsorship_status(
     elif target == "Suspended":
         sponsorship.rejection_reason = payload.reason.strip()
         action = "Suspension"
+    elif target == "Completed":
+        sponsorship.completed_at = now
     elif target == "Active" and current == "Suspended":
         action = "Reactivation"
     elif target == "Active" and current == "Completed":
+        sponsorship.completed_at = None
         action = "Reversal"
 
     sponsorship.status = target
@@ -1797,8 +1803,11 @@ def get_sponsor_context(
 
     today = date.today()
     sponsor_cases = db.query(Sponsorship).filter(Sponsorship.sponsor_member_id == member_id).all()
+    completed_cases = [
+        case for case in sponsor_cases if _coerce_literal(case.status) in {"Completed", "Closed"}
+    ]
     last_case = max(
-        sponsor_cases,
+        completed_cases,
         key=lambda case: (
             _case_reference_date(case) or date.min,
             case.created_at or datetime.min,
@@ -1816,6 +1825,9 @@ def get_sponsor_context(
             beneficiary_member=last_case.beneficiary_member,
             newcomer=last_case.newcomer,
         )
+    incomplete_count = sum(
+        1 for sponsorship in sponsor_cases if _coerce_literal(sponsorship.status) in INCOMPLETE_CASE_STATUSES
+    )
 
     since = date.today() - timedelta(days=365)
     history_count = (
@@ -1923,6 +1935,11 @@ def get_sponsor_context(
         last_sponsorship_date=last_date,
         last_sponsorship_name=last_name,
         last_sponsorship_status=last_status,
+        last_sponsorship_completed_at=last_case.completed_at if last_case else None,
+        incomplete_sponsorship_count=incomplete_count,
+        eligible_for_new_sponsorship=(
+            _coerce_literal(sponsor.status) in ALLOWED_SPONSOR_STATUSES and incomplete_count == 0
+        ),
         history_count_last_12_months=history_count,
         volunteer_services=services,
         father_of_repentance_id=getattr(sponsor, "father_confessor_id", None),

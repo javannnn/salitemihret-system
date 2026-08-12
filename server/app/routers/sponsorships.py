@@ -3,7 +3,6 @@ import io
 import re
 import zipfile
 from datetime import date
-from decimal import Decimal
 from typing import Iterable
 from xml.sax.saxutils import escape as xml_escape
 
@@ -52,14 +51,11 @@ SPONSORSHIP_EXPORT_HEADERS = [
     "immigrant_member_id",
     "newcomer_id",
     "newcomer_county",
-    "program",
-    "frequency",
-    "monthly_amount",
-    "received_amount",
     "trust_fund_deposit",
     "last_sponsored_date",
     "start_date",
     "end_date",
+    "completed_at",
     "budget_month",
     "budget_year",
     "budget_round",
@@ -97,12 +93,15 @@ SPONSORSHIP_PRESCREENING_EXPORT_HEADERS = [
     "pays_contribution",
     "contribution_exception_reason",
     "sponsorship_count",
-    "active_sponsorship_count",
+    "incomplete_sponsorship_count",
     "completed_sponsorship_count",
     "last_sponsorship_id",
     "last_sponsorship_date",
     "last_sponsorship_status",
+    "last_sponsorship_completed_at",
     "last_beneficiary_name",
+    "case_availability_status",
+    "case_availability_detail",
     "is_volunteer",
     "volunteer_service_count",
     "last_volunteer_service_date",
@@ -148,12 +147,6 @@ def _beneficiary_type(record: Sponsorship) -> str:
     return "External"
 
 
-def _as_money(value) -> str:
-    if value is None:
-        return ""
-    return f"{Decimal(value):.2f}"
-
-
 def _format_sponsorship_row(record: Sponsorship) -> list[str]:
     sponsor = record.sponsor
     sponsor_name = ""
@@ -167,9 +160,11 @@ def _format_sponsorship_row(record: Sponsorship) -> list[str]:
     budget_round = ""
     if record.budget_round:
         budget_round = f"{record.budget_round.year}-R{record.budget_round.round_number}"
+    record_status = str(record.status or "")
+    last_sponsored_date = record.start_date if record_status in {"Completed", "Closed"} else None
     return [
         str(record.id),
-        str(record.status or ""),
+        record_status,
         str(record.sponsor_member_id or ""),
         sponsor_name,
         sponsor_status,
@@ -178,14 +173,11 @@ def _format_sponsorship_row(record: Sponsorship) -> list[str]:
         str(record.beneficiary_member_id or ""),
         str(record.newcomer_id or ""),
         county,
-        str(record.program or ""),
-        str(record.frequency or ""),
-        _as_money(record.monthly_amount),
-        _as_money(record.received_amount),
         str(record.payment_information or ""),
-        _format_date(record.last_sponsored_date),
+        _format_date(last_sponsored_date),
         _format_date(record.start_date),
         _format_date(record.end_date),
+        _format_datetime(record.completed_at),
         str(record.budget_month or ""),
         str(record.budget_year or ""),
         budget_round,
@@ -232,12 +224,15 @@ def _format_prescreening_row(item: SponsorshipPrescreeningItem) -> list[str]:
         "Yes" if item.pays_contribution else "No",
         item.contribution_exception_reason or "",
         str(item.sponsorship_count),
-        str(item.active_sponsorship_count),
+        str(item.incomplete_sponsorship_count),
         str(item.completed_sponsorship_count),
         str(item.last_sponsorship_id or ""),
         _format_date(item.last_sponsorship_date),
         item.last_sponsorship_status or "",
+        _format_datetime(item.last_sponsorship_completed_at),
         item.last_beneficiary_name or "",
+        criterion_value("case_availability", "status"),
+        criterion_value("case_availability", "detail"),
         "Yes" if item.is_volunteer else "No",
         str(item.volunteer_service_count),
         _format_date(item.last_volunteer_service_date),

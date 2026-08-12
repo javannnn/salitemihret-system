@@ -265,6 +265,8 @@ def list_newcomers(
         query = query.filter(
             func.lower(Newcomer.first_name).like(like)
             | func.lower(Newcomer.last_name).like(like)
+            | func.lower(func.coalesce(Newcomer.contact_email, "")).like(like)
+            | func.lower(func.coalesce(Newcomer.contact_phone, "")).like(like)
             | func.lower(func.coalesce(Newcomer.service_type, "")).like(like)
             | func.lower(func.coalesce(Newcomer.newcomer_code, "")).like(like)
         )
@@ -329,7 +331,42 @@ def get_newcomer_metrics(db: Session) -> NewcomerMetrics:
     )
 
 
+def _ensure_unique_newcomer_identity(
+    db: Session,
+    *,
+    first_name: str,
+    last_name: str,
+    email: str | None,
+    exclude_id: int | None = None,
+) -> None:
+    normalized_email = (email or "").strip().lower()
+    if not normalized_email:
+        return
+    query = db.query(Newcomer).filter(
+        func.lower(func.trim(Newcomer.first_name)) == first_name.strip().lower(),
+        func.lower(func.trim(Newcomer.last_name)) == last_name.strip().lower(),
+        func.lower(func.trim(Newcomer.contact_email)) == normalized_email,
+    )
+    if exclude_id is not None:
+        query = query.filter(Newcomer.id != exclude_id)
+    duplicate = query.first()
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"An immigrant with this name and email already exists "
+                f"({duplicate.newcomer_code}). Open the existing record instead."
+            ),
+        )
+
+
 def create_newcomer(db: Session, payload: NewcomerCreate) -> NewcomerOut:
+    _ensure_unique_newcomer_identity(
+        db,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        email=str(payload.contact_email) if payload.contact_email else None,
+    )
     if payload.sponsored_by_member_id is not None:
         _get_active_sponsor_member(db, payload.sponsored_by_member_id)
 
@@ -382,6 +419,17 @@ def update_newcomer(db: Session, newcomer_id: int, payload: NewcomerUpdate, acto
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Newcomer not found")
     fields_set = payload.model_fields_set if hasattr(payload, "model_fields_set") else payload.__fields_set__
+    _ensure_unique_newcomer_identity(
+        db,
+        first_name=payload.first_name if payload.first_name is not None else record.first_name,
+        last_name=payload.last_name if payload.last_name is not None else record.last_name,
+        email=(
+            str(payload.contact_email)
+            if payload.contact_email is not None
+            else record.contact_email
+        ),
+        exclude_id=record.id,
+    )
 
     if payload.status is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Update settlement status via the status endpoint")

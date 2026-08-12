@@ -13,6 +13,7 @@ SponsorshipAuditAction = Enum(
     "Rejection",
     "Suspension",
     "Reactivation",
+    "Reversal",
     "BeneficiaryChange",
     name="sponsorship_audit_action",
 )

@@ -87,22 +87,11 @@ function beneficiaryLabel(record: Sponsorship) {
   };
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
 function buildWhatsAppMessage(record: Sponsorship, sponsorName: string) {
   const beneficiary = beneficiaryLabel(record).label;
-  const pledge = formatCurrency(record.monthly_amount);
-  const frequency = record.frequency || "Monthly";
   return [
     `Hello ${sponsorName},`,
-    `This is a reminder about your co-sponsorship pledge for ${beneficiary}.`,
-    `Pledge: ${pledge} (${frequency}).`,
+    `This is a reminder about your sponsorship case for ${beneficiary}.`,
     `Case: SP-${String(record.id).padStart(4, "0")}`,
     "Thank you for your support.",
   ].join("\n");
@@ -453,7 +442,9 @@ export default function SponsorshipCaseProfile() {
                 </Badge>
               </div>
               <div className="text-sm text-mute space-y-1">
-                <div>Last sponsored co-sponsor: {sponsorContext?.last_sponsorship_name || "-"}</div>
+                <div>Incomplete cases: {sponsorContext?.incomplete_sponsorship_count ?? 0}</div>
+                <div>Last sponsored: {formatDate(sponsorContext?.last_sponsorship_date)}</div>
+                <div>Last completion: {formatDate(sponsorContext?.last_sponsorship_completed_at)}</div>
                 <div>Last status: {statusLabel(sponsorContext?.last_sponsorship_status)}</div>
                 <div>Co-sponsor contact: {[sponsorContext?.member_phone, sponsorContext?.member_email].filter(Boolean).join(" • ") || "-"}</div>
                 <div>12-mo history: {sponsorContext?.history_count_last_12_months ?? 0}</div>
@@ -492,18 +483,14 @@ export default function SponsorshipCaseProfile() {
             <Card className="p-4 space-y-3">
               <h2 className="text-sm uppercase text-mute">Case info</h2>
               <div className="text-sm space-y-1">
-                <div>Frequency: {sponsorship.frequency}</div>
                 <div>Reminder channel: {sponsorship.reminder_channel || "-"}</div>
                 <div>Last reminder: {formatDateTime(sponsorship.reminder_last_sent)}</div>
                 <div>Next reminder: {formatDateTime(sponsorship.reminder_next_due)}</div>
-                <div>Last sponsored date: {formatDate(sponsorship.last_sponsored_date)}</div>
+                {(sponsorship.status === "Completed" || sponsorship.status === "Closed") && (
+                  <div>Last sponsored: {formatDate(sponsorship.last_sponsored_date)}</div>
+                )}
+                <div>Completed: {formatDateTime(sponsorship.completed_at)}</div>
                 <div>Trust fund deposit: {sponsorship.payment_information || "-"}</div>
-                <div>
-                  Last sponsored status: {sponsorship.last_status || "-"}
-                  {sponsorship.last_status === "Rejected" && sponsorship.last_status_reason
-                    ? ` (${sponsorship.last_status_reason})`
-                    : ""}
-                </div>
                 <div>Start date: {formatDate(sponsorship.start_date)}</div>
                 <div>Expected end: {formatDate(sponsorship.end_date)}</div>
                 <div>
@@ -646,7 +633,11 @@ export default function SponsorshipCaseProfile() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <Card className="w-full max-w-md p-5 space-y-3">
               <h3 className="text-lg font-semibold">{statusModal.title}</h3>
-              <p className="text-sm text-mute">Update case status to {statusModal.nextStatus}.</p>
+              <p className="text-sm text-mute">
+                {statusModal.nextStatus === "Completed"
+                  ? "Complete this case and capture today as the completion date."
+                  : `Update case status to ${statusModal.nextStatus}.`}
+              </p>
               <Textarea
                 placeholder={statusModal.reasonRequired ? "Reason (required)" : "Add a reason (optional)"}
                 value={statusReason}

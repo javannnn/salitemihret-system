@@ -138,12 +138,6 @@ class IndividualSponsorshipReportItem(BaseModel):
     role: Literal["Sponsor", "Beneficiary"]
     beneficiary_name: str
     status: str
-    program: str | None = None
-    frequency: str
-    monthly_amount: Decimal | None = None
-    received_amount: Decimal | None = None
-    paid_amount: Decimal | None = None
-    currency: str | None = None
     start_date: date
     end_date: date | None = None
     notes: str | None = None
@@ -187,7 +181,6 @@ class ClientSponsorshipReportFields(BaseModel):
     first_name: str
     last_name: str
     membership_date: date | None = None
-    payment_information_by_year: list[ClientPaymentYearSummary]
     volunteer_rows: list[ClientSponsorshipVolunteerRow]
     last_sponsored_date: date | None = None
     number_sponsored: int

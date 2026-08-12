@@ -30,7 +30,6 @@ import {
   ApiError,
   ContributionPayment,
   Member,
-  NewcomerListResponse,
   Sponsorship,
   SponsorshipBudgetRound,
   SponsorshipListResponse,
@@ -66,14 +65,7 @@ import {
 import { parseApiFieldErrors } from "@/lib/formErrors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
-  COUNTRY_OPTIONS,
   COUNTY_OPTIONS,
-  LANGUAGE_OPTIONS,
-  PROVINCE_OPTIONS,
-  SPONSORSHIP_FREQUENCY_OPTIONS,
-  SPONSORSHIP_MOTIVATION_OPTIONS,
-  SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS,
-  SPONSORSHIP_PROGRAM_OPTIONS,
   SPONSORSHIP_REMINDER_CHANNEL_OPTIONS,
   VOLUNTEER_SERVICE_OPTIONS,
 } from "@/lib/options";
@@ -99,20 +91,12 @@ type SponsorshipWizardForm = {
   beneficiary_name: string;
   beneficiary_first_name: string;
   beneficiary_last_name: string;
-  program: Sponsorship["program"] | "";
-  frequency: string;
-  pledge_channel: Sponsorship["pledge_channel"] | "";
   reminder_channel: Sponsorship["reminder_channel"] | "";
-  motivation: Sponsorship["motivation"] | "";
   volunteer_services: string[];
   volunteer_service_other: string;
   start_date: string;
   end_date: string;
-  monthly_amount: string;
-  last_sponsored_date: string;
   payment_information: string;
-  last_status: Sponsorship["last_status"] | "";
-  last_status_reason: string;
   budget_month: string;
   budget_year: string;
   budget_round_id: string;
@@ -145,7 +129,6 @@ type StatusModalState = {
   reasonRequired: boolean;
 };
 
-type NewcomerListItem = NewcomerListResponse["items"][number];
 type SelectOption = { value: string; label: string };
 type BudgetDraft = { budget_slots: string; budget_round_id: string };
 type BudgetRoundDraft = {
@@ -207,6 +190,14 @@ const YEAR_OPTIONS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - 1 + 
 const ROUND_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1));
 const SLOT_OPTIONS = Array.from({ length: 100 }, (_, index) => index + 1);
 
+const localToday = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const emptyWizardForm = (): SponsorshipWizardForm => ({
   sponsor_member_id: null,
   sponsor_name: "",
@@ -216,20 +207,12 @@ const emptyWizardForm = (): SponsorshipWizardForm => ({
   beneficiary_name: "",
   beneficiary_first_name: "",
   beneficiary_last_name: "",
-  program: "",
-  frequency: "Monthly",
-  pledge_channel: "",
   reminder_channel: "Email",
-  motivation: "",
   volunteer_services: [],
   volunteer_service_other: "",
-  start_date: new Date().toISOString().slice(0, 10),
+  start_date: localToday(),
   end_date: "",
-  monthly_amount: "150",
-  last_sponsored_date: "",
   payment_information: "",
-  last_status: "",
-  last_status_reason: "",
   budget_month: "",
   budget_year: "",
   budget_round_id: "",
@@ -268,6 +251,9 @@ const buildSponsorContextFallback = (member: Member): SponsorshipSponsorContext 
   last_sponsorship_date: null,
   last_sponsorship_name: null,
   last_sponsorship_status: null,
+  last_sponsorship_completed_at: null,
+  incomplete_sponsorship_count: 0,
+  eligible_for_new_sponsorship: member.status === "Active",
   history_count_last_12_months: 0,
   volunteer_services: [],
   father_of_repentance_id: null,
@@ -430,7 +416,8 @@ function beneficiaryLabel(item: Sponsorship) {
   return item.beneficiary_name;
 }
 
-function statusLabel(status: Sponsorship["status"]) {
+function statusLabel(status?: string | null) {
+  if (!status) return "—";
   return status === "Suspended" ? "Declined" : status;
 }
 
@@ -487,24 +474,16 @@ function mapSponsorshipToWizardForm(record: Sponsorship): SponsorshipWizardForm 
     sponsor_name: `${record.sponsor?.first_name ?? ""} ${record.sponsor?.last_name ?? ""}`.trim(),
     beneficiary_mode: mode,
     beneficiary_member_id: null,
-    newcomer_id: null,
+    newcomer_id: record.newcomer?.id ?? null,
     beneficiary_name: record.beneficiary_name || "",
     beneficiary_first_name: manualName.firstName,
     beneficiary_last_name: manualName.lastName,
-    program: record.program ?? "",
-    frequency: record.frequency || "Monthly",
-    pledge_channel: record.pledge_channel ?? "",
     reminder_channel: record.reminder_channel ?? "",
-    motivation: record.motivation ?? "",
     volunteer_services: record.volunteer_services ?? [],
     volunteer_service_other: record.volunteer_service_other ?? "",
-    start_date: record.start_date || new Date().toISOString().slice(0, 10),
+    start_date: record.start_date || localToday(),
     end_date: record.end_date || "",
-    monthly_amount: record.monthly_amount ? String(record.monthly_amount) : "",
-    last_sponsored_date: record.last_sponsored_date || "",
     payment_information: record.payment_information || "",
-    last_status: record.last_status ?? "",
-    last_status_reason: record.last_status_reason || "",
     budget_month: record.budget_month ? String(record.budget_month) : "",
     budget_year: record.budget_year ? String(record.budget_year) : "",
     budget_round_id: record.budget_round_id ? String(record.budget_round_id) : "",
@@ -525,16 +504,8 @@ function resolveDraftStep(record: Sponsorship): WizardStep {
     return 1;
   }
   const hasDetails = Boolean(
-    record.program ||
-      record.frequency ||
-      record.pledge_channel ||
-      record.reminder_channel ||
-      record.motivation ||
-      record.monthly_amount ||
-      record.last_sponsored_date ||
+    record.reminder_channel ||
       record.payment_information ||
-      record.last_status ||
-      record.last_status_reason ||
       record.notes ||
       record.budget_month ||
       record.budget_year ||
@@ -579,14 +550,11 @@ export default function SponsorshipWorkspace() {
     [formatPermissionRequest]
   );
   const membersReadPermission = permissionLabel("Members", "Read");
-  const newcomersReadPermission = permissionLabel("Newcomers", "Read");
   const newcomersWritePermission = permissionLabel("Newcomers", "Write");
   const newcomerFirstNameWritePermission = permissionLabel("Newcomers", "Write", "First Name");
   const newcomerLastNameWritePermission = permissionLabel("Newcomers", "Write", "Last Name");
   const newcomerPhoneWritePermission = permissionLabel("Newcomers", "Write", "Phone");
   const newcomerEmailWritePermission = permissionLabel("Newcomers", "Write", "Email");
-  const newcomerFamilySizeWritePermission = permissionLabel("Newcomers", "Write", "Family Size");
-  const newcomerLanguagesWritePermission = permissionLabel("Newcomers", "Write", "Languages");
   const canSearchSponsors = Boolean(permissions.modules.members?.read);
   const canSearchNewcomers = Boolean(permissions.modules.newcomers?.read);
   const newcomerFieldAccess = useMemo(
@@ -605,7 +573,8 @@ export default function SponsorshipWorkspace() {
     Boolean(permissions.modules.newcomers?.write) &&
     newcomerFieldAccess.first_name &&
     newcomerFieldAccess.last_name &&
-    (newcomerFieldAccess.contact_phone || newcomerFieldAccess.contact_email);
+    newcomerFieldAccess.contact_phone &&
+    newcomerFieldAccess.contact_email;
   const newcomerQuickCreatePermissionNeeds = useMemo(() => {
     const missingPermissions: string[] = [];
     if (!permissions.modules.newcomers?.write) {
@@ -617,9 +586,8 @@ export default function SponsorshipWorkspace() {
     if (!newcomerFieldAccess.last_name) {
       missingPermissions.push(newcomerLastNameWritePermission);
     }
-    if (!newcomerFieldAccess.contact_phone && !newcomerFieldAccess.contact_email) {
-      missingPermissions.push(`${newcomerPhoneWritePermission} or ${newcomerEmailWritePermission}`);
-    }
+    if (!newcomerFieldAccess.contact_phone) missingPermissions.push(newcomerPhoneWritePermission);
+    if (!newcomerFieldAccess.contact_email) missingPermissions.push(newcomerEmailWritePermission);
     return missingPermissions;
   }, [
     newcomerEmailWritePermission,
@@ -636,32 +604,7 @@ export default function SponsorshipWorkspace() {
     }
     return permissionMessage("create a newcomer from this sponsorship", newcomerQuickCreatePermissionNeeds);
   }, [newcomerQuickCreatePermissionNeeds, permissionMessage]);
-  const beneficiaryPermissionNeeds = useMemo(() => {
-    const missingPermissions = new Set<string>();
-    if (!canSearchNewcomers) {
-      missingPermissions.add(newcomersReadPermission);
-    }
-    if (!canQuickCreateNewcomer) {
-      newcomerQuickCreatePermissionNeeds.forEach((permissionName) => missingPermissions.add(permissionName));
-    }
-    return [...missingPermissions];
-  }, [
-    canQuickCreateNewcomer,
-    canSearchNewcomers,
-    newcomerQuickCreatePermissionNeeds,
-    newcomersReadPermission,
-  ]);
   const sponsorSearchPermissionHint = permissionMessage("search co-sponsors", [membersReadPermission]);
-  const beneficiaryOptionsPermissionHint = permissionMessage(
-    "use some immigrant options in this step",
-    beneficiaryPermissionNeeds
-  );
-  const existingNewcomerPermissionHint = permissionMessage("link an existing newcomer", [newcomersReadPermission]);
-  const familySizePermissionHint = permissionMessage("edit family size", [newcomerFamilySizeWritePermission]);
-  const preferredLanguagePermissionHint = permissionMessage(
-    "edit preferred language",
-    [newcomerLanguagesWritePermission]
-  );
 
   const viewParam = searchParams.get("view");
   const [activeView, setActiveView] = useState<"cases" | "prescreen" | "budget">(
@@ -1343,6 +1286,7 @@ export default function SponsorshipWorkspace() {
 
   const handleStartFromPrescreen = async (item: SponsorshipPrescreeningItem) => {
     handleWizardOpen();
+    setWizardStep(1);
     setWizardForm((prev) => ({
       ...prev,
       sponsor_member_id: item.member_id,
@@ -1368,6 +1312,9 @@ export default function SponsorshipWorkspace() {
         last_sponsorship_date: item.last_sponsorship_date,
         last_sponsorship_name: item.last_beneficiary_name,
         last_sponsorship_status: item.last_sponsorship_status,
+        last_sponsorship_completed_at: item.last_sponsorship_completed_at,
+        incomplete_sponsorship_count: item.incomplete_sponsorship_count,
+        eligible_for_new_sponsorship: item.incomplete_sponsorship_count === 0 && item.member_status === "Active",
         history_count_last_12_months: 0,
         volunteer_services: item.volunteer_service_types,
         father_of_repentance_id: null,
@@ -1788,8 +1735,8 @@ export default function SponsorshipWorkspace() {
     if (!sponsorContextAvailable || (caps && !caps.supportsSponsorContext)) {
       const fallback = buildSponsorContextFallback(member);
       setSponsorContext(fallback);
-      if (fallback.member_status !== "Active") {
-        setWizardError("Co-sponsor must be Active before creating a case.");
+      if (!fallback.eligible_for_new_sponsorship) {
+        setWizardError("This member is not eligible to start a sponsorship.");
       } else {
         setWizardError(null);
       }
@@ -1798,8 +1745,12 @@ export default function SponsorshipWorkspace() {
     try {
       const context = await getSponsorContext(member.id);
       setSponsorContext(context);
-      if (context.member_status && context.member_status !== "Active") {
-        setWizardError("Co-sponsor must be Active before creating a case.");
+      if (!context.eligible_for_new_sponsorship) {
+        setWizardError(
+          context.incomplete_sponsorship_count > 0
+            ? "This co-sponsor already has an incomplete case. Complete it before starting another."
+            : "Co-sponsor must be Active before creating a case.",
+        );
       } else {
         setWizardError(null);
       }
@@ -1808,8 +1759,8 @@ export default function SponsorshipWorkspace() {
         setSponsorContextAvailable(false);
         const fallback = buildSponsorContextFallback(member);
         setSponsorContext(fallback);
-        if (fallback.member_status !== "Active") {
-          setWizardError("Co-sponsor must be Active before creating a case.");
+        if (!fallback.eligible_for_new_sponsorship) {
+          setWizardError("This member is not eligible to start a sponsorship.");
         } else {
           setWizardError(null);
         }
@@ -1820,7 +1771,13 @@ export default function SponsorshipWorkspace() {
     }
   };
 
-  const sponsorBlocked = !sponsorContext || sponsorContext.member_status !== "Active";
+  const currentDraftIsOnlyIncomplete = Boolean(
+    draftEditingId
+      && sponsorContext?.incomplete_sponsorship_count === 1,
+  );
+  const sponsorBlocked = !sponsorContext
+    || sponsorContext.member_status !== "Active"
+    || (!sponsorContext.eligible_for_new_sponsorship && !currentDraftIsOnlyIncomplete);
   const paymentHistory = useMemo(() => {
     if (!sponsorContext?.payment_history) return [];
     return [...sponsorContext.payment_history].sort(
@@ -1906,7 +1863,7 @@ export default function SponsorshipWorkspace() {
     }
 
     const missingContact = newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email
-      ? !phoneInput && !emailInput
+      ? !phoneInput || !emailInput
       : newcomerFieldAccess.contact_phone
         ? !phoneInput
         : newcomerFieldAccess.contact_email
@@ -1918,7 +1875,7 @@ export default function SponsorshipWorkspace() {
       if (missingContact) {
         setWizardError(
           newcomerFieldAccess.contact_phone && newcomerFieldAccess.contact_email
-            ? "Provide a phone or email for the newcomer."
+            ? "Provide both phone and email so duplicates can be checked reliably."
             : newcomerFieldAccess.contact_phone
               ? "Provide a phone number for the newcomer."
               : "Provide an email address for the newcomer."
@@ -1933,6 +1890,30 @@ export default function SponsorshipWorkspace() {
     setWizardError(null);
     setNewcomerFieldErrors({});
     try {
+      if (canSearchNewcomers) {
+        const existingRecords = await listNewcomers({ q: normalizedEmail, page: 1, page_size: 25 });
+        const existing = existingRecords.items.find((item) =>
+          item.first_name.trim().toLowerCase() === firstName.toLowerCase()
+          && item.last_name.trim().toLowerCase() === lastName.toLowerCase()
+          && (item.contact_email || "").trim().toLowerCase() === normalizedEmail.toLowerCase()
+        );
+        if (existing) {
+          const beneficiaryName = `${existing.first_name} ${existing.last_name}`.trim();
+          const manualName = splitManualBeneficiaryName(beneficiaryName);
+          setWizardForm((prev) => ({
+            ...prev,
+            newcomer_id: existing.id,
+            beneficiary_member_id: null,
+            beneficiary_name: beneficiaryName,
+            beneficiary_first_name: manualName.firstName,
+            beneficiary_last_name: manualName.lastName,
+            beneficiary_mode: "external",
+          }));
+          setWizardStep(2);
+          toast.push(`Existing immigrant ${existing.newcomer_code} linked to this case.`);
+          return;
+        }
+      }
       const newcomer = await createNewcomer({
         first_name: firstName,
         last_name: lastName,
@@ -1957,13 +1938,13 @@ export default function SponsorshipWorkspace() {
         ...(newcomerForm.temporary_address_city ? { temporary_address_city: newcomerForm.temporary_address_city } : {}),
         ...(newcomerForm.temporary_address_province ? { temporary_address_province: newcomerForm.temporary_address_province } : {}),
         ...(formattedPostalCode ? { temporary_address_postal_code: formattedPostalCode } : {}),
-        arrival_date: new Date().toISOString().slice(0, 10),
+        arrival_date: localToday(),
       });
       const beneficiaryName = `${newcomer.first_name} ${newcomer.last_name}`.trim();
       const manualName = splitManualBeneficiaryName(beneficiaryName);
       setWizardForm((prev) => ({
         ...prev,
-        newcomer_id: null,
+        newcomer_id: newcomer.id,
         beneficiary_member_id: null,
         beneficiary_name: beneficiaryName,
         beneficiary_first_name: manualName.firstName,
@@ -1979,11 +1960,7 @@ export default function SponsorshipWorkspace() {
         setWizardError(parsed.formError || "Fix the highlighted fields.");
         return;
       }
-      if (error instanceof ApiError) {
-        setWizardError(error.body || "Unable to create newcomer.");
-      } else {
-        setWizardError("Unable to create newcomer.");
-      }
+      setWizardError(parseApiErrorMessage(error, "Unable to create newcomer."));
     } finally {
       setWizardLoading(false);
     }
@@ -2018,14 +1995,6 @@ export default function SponsorshipWorkspace() {
       setWizardError("Provide the sponsorship start date.");
       return;
     }
-    if (!wizardForm.monthly_amount.trim()) {
-      setWizardError("Provide a pledge amount.");
-      return;
-    }
-    if (wizardForm.last_status === "Rejected" && !wizardForm.last_status_reason.trim()) {
-      setWizardError("Provide a reason when the last sponsorship was rejected.");
-      return;
-    }
     const resolvedBudgetSlots = wizardForm.budget_round_id ? Number(wizardForm.budget_slots || "1") : undefined;
     if (status !== "Draft") {
       if (!wizardForm.budget_round_id) {
@@ -2057,19 +2026,12 @@ export default function SponsorshipWorkspace() {
     const sponsorMemberId = wizardForm.sponsor_member_id;
     const submitPayload = (statusToSend: Sponsorship["status"]): SponsorshipPayload => ({
         sponsor_member_id: sponsorMemberId,
+        newcomer_id: wizardForm.newcomer_id || undefined,
         beneficiary_name: beneficiaryName,
-        monthly_amount: Number(wizardForm.monthly_amount),
         start_date: wizardForm.start_date,
         end_date: wizardForm.end_date || undefined,
-        last_sponsored_date: wizardForm.last_sponsored_date || undefined,
         payment_information: wizardForm.payment_information || undefined,
-        last_status: wizardForm.last_status || undefined,
-        last_status_reason: wizardForm.last_status === "Rejected" ? wizardForm.last_status_reason || undefined : undefined,
-        frequency: wizardForm.frequency,
-        program: wizardForm.program || undefined,
-        pledge_channel: wizardForm.pledge_channel || undefined,
         reminder_channel: wizardForm.reminder_channel || undefined,
-        motivation: wizardForm.motivation || undefined,
         volunteer_services: wizardForm.volunteer_services.length ? wizardForm.volunteer_services : undefined,
         volunteer_service_other: wizardForm.volunteer_service_other || undefined,
         budget_month: wizardForm.budget_month ? Number(wizardForm.budget_month) : undefined,
@@ -2284,8 +2246,14 @@ export default function SponsorshipWorkspace() {
             <RefreshCcw className="h-4 w-4 mr-2" /> Refresh
           </Button>
           {canManage && (
-            <Button data-tour="sponsorship-wizard" onClick={handleWizardOpen}>
-              <PlusCircle className="h-4 w-4 mr-2" /> New Sponsorship
+            <Button
+              data-tour="sponsorship-wizard"
+              onClick={() => {
+                handleViewChange("prescreen");
+                setPrescreenFilters((prev) => ({ ...prev, eligibility: "Eligible", page: 1 }));
+              }}
+            >
+              <PlusCircle className="h-4 w-4 mr-2" /> Find eligible sponsor
             </Button>
           )}
         </div>
@@ -2484,7 +2452,7 @@ export default function SponsorshipWorkspace() {
                 <th className="px-4 py-2 text-left">Last sponsored date</th>
                 <th className="px-4 py-2 text-left">Next action</th>
                 <th className="px-4 py-2 text-left">Actions</th>
-                <th className="px-4 py-2 text-left">Last update</th>
+                <th className="px-4 py-2 text-left">Completed</th>
               </tr>
             </thead>
             <tbody>
@@ -2523,7 +2491,9 @@ export default function SponsorshipWorkspace() {
                       </Badge>
                     </td>
                     <td className="px-4 py-2">{formatDate(item.created_at)}</td>
-                    <td className="px-4 py-2">{formatDate(item.last_sponsored_date)}</td>
+                    <td className="px-4 py-2">
+                      {item.status === "Completed" || item.status === "Closed" ? formatDate(item.last_sponsored_date) : "—"}
+                    </td>
                     <td className="px-4 py-2 text-mute">{nextActionLabel(item.status)}</td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-2">
@@ -2596,7 +2566,7 @@ export default function SponsorshipWorkspace() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-2">{formatDate(item.updated_at)}</td>
+                    <td className="px-4 py-2">{formatDate(item.completed_at)}</td>
                   </tr>
                 ))
               ) : (
@@ -2637,21 +2607,21 @@ export default function SponsorshipWorkspace() {
       {activeView === "prescreen" && (
         <div className="space-y-4">
           <Card className="overflow-hidden border-slate-200">
-            <div className="border-b border-border bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-5 text-white">
+            <div className="border-b border-border px-5 py-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="max-w-2xl">
-                  <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-emerald-300">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-emerald-700">
                     <ShieldCheck className="h-4 w-4" />
                     Sponsor readiness
                   </div>
-                  <h2 className="text-xl font-semibold">Member sponsorship pre-screening</h2>
-                  <p className="mt-1 text-sm text-slate-300">
-                    A live qualification view using membership tenure, payment health, sponsorship history, and volunteer evidence.
+                  <h2 className="text-xl font-semibold text-ink">Choose an eligible co-sponsor</h2>
+                  <p className="mt-1 text-sm text-mute">
+                    Eligibility is calculated before case creation, so an unavailable member cannot enter the workflow.
                   </p>
                 </div>
-                <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-xs text-slate-300">
-                  Required: active member, {prescreening?.tenure_requirement_months ?? 12}+ months, current payment,
-                  and configured consecutive-payment streak.
+                <div className="max-w-md border-l-2 border-emerald-500 pl-4 text-xs leading-5 text-mute">
+                  Required: active member, {prescreening?.tenure_requirement_months ?? 12}+ months, current payments,
+                  configured payment streak, and no incomplete sponsorship.
                 </div>
               </div>
             </div>
@@ -2858,11 +2828,16 @@ export default function SponsorshipWorkspace() {
                             <td className="px-4 py-4">
                               <p className="font-medium">{item.sponsorship_count} total cases</p>
                               <p className="mt-1 text-xs text-mute">
-                                {item.active_sponsorship_count} active · {item.completed_sponsorship_count} completed
+                                {item.incomplete_sponsorship_count} incomplete · {item.completed_sponsorship_count} completed
                               </p>
                               <p className="mt-2 max-w-[190px] text-xs text-mute">
-                                Last: {item.last_beneficiary_name || "No sponsorship history"} {item.last_sponsorship_date ? `· ${formatDate(item.last_sponsorship_date)}` : ""}
+                                Last sponsored: {item.last_sponsorship_date ? formatDate(item.last_sponsorship_date) : "No completed case"}
                               </p>
+                              {item.last_sponsorship_completed_at && (
+                                <p className="mt-1 max-w-[190px] text-xs font-medium text-emerald-700">
+                                  Completed: {formatDate(item.last_sponsorship_completed_at)}
+                                </p>
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-2">
@@ -3457,141 +3432,34 @@ export default function SponsorshipWorkspace() {
                     </div>
 
                     {sponsorContext && (
-                      <Card className="p-4 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="font-semibold">{sponsorContext.member_name}</p>
+                      <Card className="overflow-hidden">
+                        <div className={`flex items-center justify-between gap-4 border-b px-4 py-3 ${sponsorBlocked ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
+                          <div className="flex items-center gap-2">
+                            {sponsorBlocked ? <XCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                            <p className={`text-sm font-semibold ${sponsorBlocked ? "text-rose-800" : "text-emerald-800"}`}>
+                              {sponsorBlocked ? "Not available for a new case" : "Eligible to continue"}
+                            </p>
+                          </div>
                           <Badge variant="outline">{sponsorContext.member_status || "Unknown"}</Badge>
                         </div>
-                        <div className="text-sm text-mute">
-                          Last sponsored co-sponsor: {sponsorContext.last_sponsorship_name || "None"}
-                          {sponsorContext.last_sponsorship_status ? ` • ${statusLabel(sponsorContext.last_sponsorship_status as Sponsorship["status"])}` : ""}
-                        </div>
-                        <div className="text-sm text-mute">
-                          Co-sponsor contact: {[sponsorContext.member_phone, sponsorContext.member_email].filter(Boolean).join(" • ") || "Not set"}
-                        </div>
-                        <div className="text-sm text-mute">
-                          Co-sponsorships (last 12 months): {sponsorContext.history_count_last_12_months}
-                        </div>
-                        <div className="text-sm text-mute">
-                          Volunteer services: {sponsorContext.volunteer_services.length ? sponsorContext.volunteer_services.join(", ") : "None"}
-                        </div>
-                        <div className="text-sm text-mute">
-                          Father of Confession: {sponsorContext.father_of_repentance_name || "Not set"}
-                        </div>
-                        {sponsorContext.marital_status === "Married" && (
-                          <div className="text-sm text-mute">
-                            Spouse: {sponsorContext.spouse_name || "Not set in family profile"}
-                            {sponsorContext.spouse_phone ? ` • ${sponsorContext.spouse_phone}` : ""}
-                            {sponsorContext.spouse_email ? ` • ${sponsorContext.spouse_email}` : ""}
+                        <div className="space-y-3 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <p className="font-semibold">{sponsorContext.member_name}</p>
+                            <Button variant="ghost" size="sm" onClick={() => navigate(`/members/${sponsorContext.member_id}/edit`)}>View member</Button>
                           </div>
-                        )}
-                        {sponsorContext.budget_usage && (
-                          <div className="text-sm text-mute">
-                            Allocated sponsor usage: {sponsorContext.budget_usage.used_slots}/{sponsorContext.budget_usage.total_slots}
+                          <div className="grid gap-3 text-sm sm:grid-cols-2">
+                            <div><p className="text-xs uppercase tracking-wide text-mute">Incomplete cases</p><p className="mt-1 font-semibold">{sponsorContext.incomplete_sponsorship_count}</p></div>
+                            <div><p className="text-xs uppercase tracking-wide text-mute">Last sponsored</p><p className="mt-1 font-semibold">{formatDate(sponsorContext.last_sponsorship_date)}</p></div>
+                            <div><p className="text-xs uppercase tracking-wide text-mute">Last case status</p><p className="mt-1 font-semibold">{statusLabel(sponsorContext.last_sponsorship_status)}</p></div>
+                            <div><p className="text-xs uppercase tracking-wide text-mute">Completed</p><p className="mt-1 font-semibold">{formatDate(sponsorContext.last_sponsorship_completed_at)}</p></div>
                           </div>
-                        )}
-                        {paymentHistoryAvailable ? (
-                          <div className="pt-2 border-t border-border/60 space-y-3">
-                            <div className="text-xs uppercase text-mute">
-                              Payment continuity ({paymentHistoryRangeLabel ?? "Last 36 months"})
+                          {paymentHistoryAvailable && (
+                            <div className="border-t border-border pt-3 text-sm text-mute">
+                              Payment continuity ({paymentHistoryRangeLabel ?? "Last 36 months"}):{" "}
+                              <span className="font-semibold text-ink">{paymentContinuity?.paidMonths ?? 0}/{paymentContinuity?.totalMonths ?? 0} months</span>
                             </div>
-                            {paymentHistory.length ? (
-                              <>
-                                <div className="flex flex-wrap gap-4 text-sm text-mute">
-                                  <div>
-                                    <span className="font-medium text-ink">
-                                      {paymentContinuity?.paidMonths ?? 0}/{paymentContinuity?.totalMonths ?? 0}
-                                    </span>{" "}
-                                    months paid
-                                  </div>
-                                  <div>Continuity: {paymentContinuity?.continuityPercent ?? 0}%</div>
-                                  <div>Missed: {paymentContinuity?.missedMonths ?? 0}</div>
-                                  <div>Last payment: {formatDate(paymentContinuity?.lastPaymentAt)}</div>
-                                </div>
-                                <div className="space-y-2">
-                                  {paymentContinuity?.segments.map((segment) => (
-                                    <div key={segment.label} className="flex items-center gap-2">
-                                      <div className="w-36 text-[11px] text-mute">{segment.label}</div>
-                                      <div className="grid grid-cols-12 gap-1 flex-1 min-w-[160px]">
-                                        {segment.months.map((month) => (
-                                          <div
-                                            key={month.key}
-                                            className={`h-2.5 rounded-sm ${
-                                              month.paid ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-800"
-                                            }`}
-                                            title={`${month.label} ${month.year}: ${
-                                              month.paid
-                                                ? `${month.paymentCount} payment${month.paymentCount > 1 ? "s" : ""}`
-                                                : "No payment"
-                                            }`}
-                                          />
-                                        ))}
-                                      </div>
-                                      <div className="text-[11px] text-mute w-12 text-right">
-                                        {segment.paidMonths}/12
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="text-xs text-mute">
-                                  Darker squares indicate months with at least one membership contribution.
-                                </div>
-                                <div className="pt-2">
-                                  <div className="text-xs uppercase text-mute">
-                                    Payment history ({paymentHistoryRangeLabel ?? "Last 36 months"})
-                                  </div>
-                                  <div className="mt-2 border border-border rounded-lg max-h-48 overflow-y-auto">
-                                    <table className="w-full text-sm">
-                                      <thead className="text-xs uppercase text-mute bg-muted/40">
-                                        <tr>
-                                          <th className="px-3 py-2 text-left">Date</th>
-                                          <th className="px-3 py-2 text-left">Amount</th>
-                                          <th className="px-3 py-2 text-left">Method</th>
-                                          <th className="px-3 py-2 text-left">Note</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {paymentHistory.map((payment) => (
-                                          <tr key={payment.id} className="border-t border-border/60">
-                                            <td className="px-3 py-2">{formatDate(payment.paid_at)}</td>
-                                            <td className="px-3 py-2">
-                                              {payment.currency}{" "}
-                                              {payment.amount.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
-                                              })}
-                                            </td>
-                                            <td className="px-3 py-2">{payment.method || "—"}</td>
-                                            <td className="px-3 py-2">{payment.note || "—"}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                  {permissions.viewPayments && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="mt-2"
-                                      onClick={() => navigate(`/payments/members/${sponsorContext.member_id}`)}
-                                    >
-                                      View full payment timeline
-                                    </Button>
-                                  )}
-                                </div>
-                              </>
-                            ) : (
-                              <p className="text-sm text-mute">
-                                No membership contribution payments recorded in the last 36 months.
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-mute">Payment continuity unavailable.</div>
-                        )}
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/members/${sponsorContext.member_id}/edit`)}>
-                          View member profile
-                        </Button>
+                          )}
+                        </div>
                       </Card>
                     )}
 
@@ -3616,211 +3484,180 @@ export default function SponsorshipWorkspace() {
                 )}
 
                 {wizardStep === 1 && (
-                  <div className="space-y-4">
-                    <div className="space-y-3">
-                      <label className="text-xs uppercase text-mute block">External immigrant name</label>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Input
-                          placeholder="First name"
-                          value={wizardForm.beneficiary_first_name}
-                          onChange={(event) =>
-                            setWizardForm((prev) => ({
-                              ...prev,
-                              beneficiary_mode: "external",
-                              beneficiary_member_id: null,
-                              newcomer_id: null,
-                              beneficiary_first_name: event.target.value,
-                              beneficiary_name: `${event.target.value.trim()} ${prev.beneficiary_last_name.trim()}`.trim(),
-                            }))
-                          }
-                        />
-                        <Input
-                          placeholder="Last name"
-                          value={wizardForm.beneficiary_last_name}
-                          onChange={(event) =>
-                            setWizardForm((prev) => ({
-                              ...prev,
-                              beneficiary_mode: "external",
-                              beneficiary_member_id: null,
-                              newcomer_id: null,
-                              beneficiary_last_name: event.target.value,
-                              beneficiary_name: `${prev.beneficiary_first_name.trim()} ${event.target.value.trim()}`.trim(),
-                            }))
-                          }
-                        />
-                      </div>
+                  <div className="space-y-5">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">Immigrant identity</p>
+                      <p className="mt-1 text-sm text-mute">
+                        Name and email are checked together before a record is created.
+                      </p>
                     </div>
+                    {wizardForm.newcomer_id ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2 text-emerald-800">
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span className="text-sm font-semibold">Immigrant record linked</span>
+                            </div>
+                            <p className="mt-2 font-medium text-ink">{wizardForm.beneficiary_name}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setWizardForm((prev) => ({ ...prev, newcomer_id: null, beneficiary_name: "", beneficiary_first_name: "", beneficiary_last_name: "" }));
+                              setNewcomerForm(emptyNewcomerForm());
+                            }}
+                          >
+                            Change
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">First name</label>
+                            <Input
+                              className={newcomerFieldClass("first_name")}
+                              value={newcomerForm.first_name}
+                              onChange={(event) => {
+                                clearNewcomerFieldError("first_name");
+                                setNewcomerForm((prev) => ({ ...prev, first_name: event.target.value }));
+                              }}
+                            />
+                            {newcomerFieldErrors.first_name && <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.first_name}</p>}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Last name</label>
+                            <Input
+                              className={newcomerFieldClass("last_name")}
+                              value={newcomerForm.last_name}
+                              onChange={(event) => {
+                                clearNewcomerFieldError("last_name");
+                                setNewcomerForm((prev) => ({ ...prev, last_name: event.target.value }));
+                              }}
+                            />
+                            {newcomerFieldErrors.last_name && <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.last_name}</p>}
+                          </div>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Email</label>
+                            <Input
+                              type="email"
+                              className={newcomerFieldClass("contact_email")}
+                              value={newcomerForm.contact_email}
+                              onChange={(event) => {
+                                clearNewcomerFieldError("contact_email");
+                                setNewcomerForm((prev) => ({ ...prev, contact_email: event.target.value }));
+                              }}
+                            />
+                            {newcomerFieldErrors.contact_email && <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_email}</p>}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Phone</label>
+                            <PhoneInput
+                              className={newcomerFieldClass("contact_phone")}
+                              value={newcomerForm.contact_phone}
+                              onChange={(value) => {
+                                clearNewcomerFieldError("contact_phone");
+                                setNewcomerForm((prev) => ({ ...prev, contact_phone: value }));
+                              }}
+                            />
+                            {newcomerFieldErrors.contact_phone && <p className="mt-1 text-xs text-rose-600">{newcomerFieldErrors.contact_phone}</p>}
+                            {newcomerPhoneSnapSuggestion && (
+                              <button
+                                type="button"
+                                className="mt-1 text-xs font-medium text-accent hover:underline"
+                                onClick={() => setNewcomerForm((prev) => ({ ...prev, contact_phone: newcomerPhoneSnapSuggestion }))}
+                              >
+                                Use {newcomerPhoneSnapSuggestion}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {!canQuickCreateNewcomer && (
+                          <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                            {newcomerQuickCreateHint}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
-                    <div className="flex justify-between">
+                    {wizardError && <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{wizardError}</p>}
+
+                    <div className="flex justify-between border-t border-border pt-4">
                       <Button variant="ghost" onClick={() => setWizardStep(0)}>
                         Back
                       </Button>
-                      <Button
-                        onClick={() => setWizardStep(2)}
-                        disabled={!wizardForm.beneficiary_first_name.trim() || !wizardForm.beneficiary_last_name.trim()}
-                      >
-                        Continue <ChevronRight className="h-4 w-4 ml-2" />
-                      </Button>
+                      {wizardForm.newcomer_id ? (
+                        <Button onClick={() => setWizardStep(2)}>
+                          Continue <ChevronRight className="ml-2 h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button disabled={wizardLoading || !canQuickCreateNewcomer} onClick={handleCreateNewcomer}>
+                          {wizardLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Check and continue
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
 
                 {wizardStep === 2 && (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">Case setup</p>
+                      <p className="mt-1 text-sm text-mute">Only dates, allocation, and operational notes are needed.</p>
+                    </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       <div>
-                        <label className="text-xs uppercase text-mute block mb-1">Last sponsored date</label>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Start date</label>
                         <Input
                           type="date"
-                          value={wizardForm.last_sponsored_date}
-                          onChange={(event) => setWizardForm((prev) => ({ ...prev, last_sponsored_date: event.target.value }))}
+                          value={wizardForm.start_date}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, start_date: event.target.value }))}
                         />
+                        <p className="mt-1 text-xs text-mute">This becomes the Last sponsored date after completion.</p>
                       </div>
                       <div>
-                        <label className="text-xs uppercase text-mute block mb-1">Trust fund deposit</label>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Expected end</label>
                         <Input
-                          placeholder="Enter deposit amount or reference"
+                          type="date"
+                          value={wizardForm.end_date}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, end_date: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Trust fund deposit</label>
+                        <Input
+                          placeholder="Deposit reference (optional)"
                           value={wizardForm.payment_information}
                           onChange={(event) => setWizardForm((prev) => ({ ...prev, payment_information: event.target.value }))}
                         />
                       </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Reminder channel</label>
+                        <Select
+                          value={wizardForm.reminder_channel ?? ""}
+                          onChange={(event) => setWizardForm((prev) => ({ ...prev, reminder_channel: event.target.value as Sponsorship["reminder_channel"] | "" }))}
+                        >
+                          <option value="">No reminder channel</option>
+                          {SPONSORSHIP_REMINDER_CHANNEL_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                      </div>
                     </div>
                     <div>
-                      <label className="text-xs uppercase text-mute block mb-1">Last sponsored status</label>
-                      <div className="flex flex-wrap gap-4 text-sm text-mute">
-                        {["Approved", "Rejected"].map((status) => (
-                          <label key={status} className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="last-sponsored-status"
-                              checked={wizardForm.last_status === status}
-                              onChange={() =>
-                                setWizardForm((prev) => ({
-                                  ...prev,
-                                  last_status: status as Sponsorship["last_status"],
-                                  last_status_reason: status === "Rejected" ? prev.last_status_reason : "",
-                                }))
-                              }
-                            />
-                            {status}
-                          </label>
-                        ))}
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            name="last-sponsored-status"
-                            checked={!wizardForm.last_status}
-                            onChange={() => setWizardForm((prev) => ({ ...prev, last_status: "", last_status_reason: "" }))}
-                          />
-                          Not set
-                        </label>
-                      </div>
-                      {wizardForm.last_status === "Rejected" && (
-                        <div className="mt-2 space-y-3">
-                          <Textarea
-                            placeholder="Rejection reason (required)"
-                            value={wizardForm.last_status_reason}
-                            onChange={(event) => setWizardForm((prev) => ({ ...prev, last_status_reason: event.target.value }))}
-                          />
-                          <div>
-                            <label className="text-xs uppercase text-mute block mb-1">Case summary / notes</label>
-                            <Textarea
-                              rows={4}
-                              value={wizardForm.notes}
-                              onChange={(event) => setWizardForm((prev) => ({ ...prev, notes: event.target.value }))}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {wizardForm.last_status !== "Rejected" && (
-                      <div>
-                        <label className="text-xs uppercase text-mute block mb-1">Case summary / notes</label>
-                        <Textarea
-                          rows={4}
-                          value={wizardForm.notes}
-                          onChange={(event) => setWizardForm((prev) => ({ ...prev, notes: event.target.value }))}
-                        />
-                      </div>
-                    )}
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Select
-                        value={wizardForm.program ?? ""}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, program: event.target.value as Sponsorship["program"] | "" }))}
-                      >
-                        <option value="">Program (optional)</option>
-                        {SPONSORSHIP_PROGRAM_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <Select
-                        value={wizardForm.frequency}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, frequency: event.target.value }))}
-                      >
-                        <option value="">Select frequency</option>
-                        {SPONSORSHIP_FREQUENCY_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Select
-                        value={wizardForm.pledge_channel ?? ""}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, pledge_channel: event.target.value as Sponsorship["pledge_channel"] | "" }))}
-                      >
-                        <option value="">Pledge channel (optional)</option>
-                        {SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <Select
-                        value={wizardForm.reminder_channel ?? ""}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, reminder_channel: event.target.value as Sponsorship["reminder_channel"] | "" }))}
-                      >
-                        <option value="">Reminder channel</option>
-                        {SPONSORSHIP_REMINDER_CHANNEL_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Select
-                        value={wizardForm.motivation ?? ""}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, motivation: event.target.value as Sponsorship["motivation"] | "" }))}
-                      >
-                        <option value="">Motivation (optional)</option>
-                        {SPONSORSHIP_MOTIVATION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <Input
-                        type="number"
-                        min={1}
-                        placeholder="Pledge amount"
-                        value={wizardForm.monthly_amount}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, monthly_amount: event.target.value }))}
-                      />
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Input
-                        type="date"
-                        value={wizardForm.start_date}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, start_date: event.target.value }))}
-                      />
-                      <Input
-                        type="date"
-                        value={wizardForm.end_date}
-                        onChange={(event) => setWizardForm((prev) => ({ ...prev, end_date: event.target.value }))}
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-mute">Case summary / notes</label>
+                      <Textarea
+                        rows={4}
+                        value={wizardForm.notes}
+                        onChange={(event) => setWizardForm((prev) => ({ ...prev, notes: event.target.value }))}
                       />
                     </div>
                     <div>
@@ -3961,77 +3798,38 @@ export default function SponsorshipWorkspace() {
                 )}
 
                 {wizardStep === 3 && (
-                  <div className="space-y-4">
-                    <Card className="p-4 space-y-2">
-                      <p className="text-xs uppercase text-mute">Co-sponsor</p>
-                      <p className="font-medium">{wizardForm.sponsor_name || "—"}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Immigrant</p>
-                      <p className="font-medium">{wizardForm.beneficiary_name || "—"}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Last sponsored date</p>
-                      <p className="font-medium">{formatDate(wizardForm.last_sponsored_date)}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Trust fund deposit</p>
-                      <p className="font-medium">{wizardForm.payment_information || "—"}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Last sponsored status</p>
-                      <p className="font-medium">{wizardForm.last_status || "—"}</p>
-                      {wizardForm.last_status === "Rejected" && (
-                        <>
-                          <p className="text-xs uppercase text-mute mt-3">Rejection reason</p>
-                          <p className="font-medium">{wizardForm.last_status_reason || "—"}</p>
-                        </>
-                      )}
-                      <p className="text-xs uppercase text-mute mt-3">Program</p>
-                      <p className="font-medium">
-                        {resolveOptionLabel(SPONSORSHIP_PROGRAM_OPTIONS, wizardForm.program)}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Frequency</p>
-                      <p className="font-medium">
-                        {resolveOptionLabel(SPONSORSHIP_FREQUENCY_OPTIONS, wizardForm.frequency)}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Pledge channel</p>
-                      <p className="font-medium">
-                        {resolveOptionLabel(SPONSORSHIP_PLEDGE_CHANNEL_OPTIONS, wizardForm.pledge_channel)}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Reminder channel</p>
-                      <p className="font-medium">
-                        {resolveOptionLabel(SPONSORSHIP_REMINDER_CHANNEL_OPTIONS, wizardForm.reminder_channel)}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Motivation</p>
-                      <p className="font-medium">
-                        {resolveOptionLabel(SPONSORSHIP_MOTIVATION_OPTIONS, wizardForm.motivation)}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Volunteer services</p>
-                      <p className="font-medium">
-                        {[
-                          ...wizardForm.volunteer_services.map((service) =>
-                            resolveOptionLabel(VOLUNTEER_SERVICE_OPTIONS, service),
-                          ),
-                          wizardForm.volunteer_service_other,
-                        ]
-                          .map((value) => value?.trim())
-                          .filter(Boolean)
-                          .join(", ") || "—"}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Start date</p>
-                      <p className="font-medium">{formatDate(wizardForm.start_date)}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Expected end</p>
-                      <p className="font-medium">{formatDate(wizardForm.end_date)}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Allocated sponsor round</p>
-                      <p className="font-medium">
-                        {selectedWizardRound
-                          ? `Round ${selectedWizardRound.round_number} (${selectedWizardRound.year})`
-                          : "—"}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Allocated sponsor period</p>
-                      <p className="font-medium">
-                        {wizardForm.budget_month && wizardForm.budget_year
-                          ? `${wizardForm.budget_month}/${wizardForm.budget_year}`
-                          : "—"}
-                      </p>
-                      <p className="text-xs uppercase text-mute mt-3">Allocated sponsor slots</p>
-                      <p className="font-medium">{wizardForm.budget_round_id ? wizardForm.budget_slots || "1" : "—"}</p>
-                      <p className="text-xs uppercase text-mute mt-3">Notes</p>
-                      <p className="text-sm text-mute whitespace-pre-line">{wizardForm.notes || "—"}</p>
-                    </Card>
+                  <div className="space-y-5">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">Review and submit</p>
+                      <p className="mt-1 text-sm text-mute">Confirm the people, dates, and allocation.</p>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-border">
+                      <div className="grid gap-4 border-b border-border p-4 sm:grid-cols-2">
+                        <div><p className="text-xs uppercase tracking-wide text-mute">Co-sponsor</p><p className="mt-1 font-semibold">{wizardForm.sponsor_name || "—"}</p></div>
+                        <div><p className="text-xs uppercase tracking-wide text-mute">Immigrant</p><p className="mt-1 font-semibold">{wizardForm.beneficiary_name || "—"}</p></div>
+                      </div>
+                      <div className="grid gap-4 border-b border-border p-4 sm:grid-cols-3">
+                        <div><p className="text-xs uppercase tracking-wide text-mute">Start</p><p className="mt-1 font-medium">{formatDate(wizardForm.start_date)}</p></div>
+                        <div><p className="text-xs uppercase tracking-wide text-mute">Expected end</p><p className="mt-1 font-medium">{formatDate(wizardForm.end_date)}</p></div>
+                        <div><p className="text-xs uppercase tracking-wide text-mute">Reminder</p><p className="mt-1 font-medium">{resolveOptionLabel(SPONSORSHIP_REMINDER_CHANNEL_OPTIONS, wizardForm.reminder_channel)}</p></div>
+                      </div>
+                      <div className="grid gap-4 p-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-mute">Allocation</p>
+                          <p className="mt-1 font-medium">{selectedWizardRound ? `Round ${selectedWizardRound.round_number} (${selectedWizardRound.year}) · ${wizardForm.budget_slots || "1"} slot` : "Draft only — no round selected"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-mute">Volunteer services</p>
+                          <p className="mt-1 font-medium">{[...wizardForm.volunteer_services.map((service) => resolveOptionLabel(VOLUNTEER_SERVICE_OPTIONS, service)), wizardForm.volunteer_service_other].map((value) => value?.trim()).filter(Boolean).join(", ") || "—"}</p>
+                        </div>
+                      </div>
+                    </div>
+                    {(wizardForm.payment_information || wizardForm.notes) && (
+                      <div className="space-y-3 border-l-2 border-accent pl-4 text-sm">
+                        {wizardForm.payment_information && <p><span className="text-mute">Trust fund deposit:</span> {wizardForm.payment_information}</p>}
+                        {wizardForm.notes && <p className="whitespace-pre-line"><span className="text-mute">Notes:</span> {wizardForm.notes}</p>}
+                      </div>
+                    )}
 
                     {wizardError && (
                       <div className="rounded-xl border border-rose-200 bg-rose-50/80 text-xs text-rose-800 p-3">
@@ -4086,7 +3884,9 @@ export default function SponsorshipWorkspace() {
                 </Button>
               </div>
               <p className="text-sm text-mute">
-                Update SP-{String(statusModal.sponsorship.id).padStart(4, "0")} to {statusModal.nextStatus}.
+                {statusModal.nextStatus === "Completed"
+                  ? `Complete SP-${String(statusModal.sponsorship.id).padStart(4, "0")} and capture today as the completion date.`
+                  : `Update SP-${String(statusModal.sponsorship.id).padStart(4, "0")} to ${statusModal.nextStatus}.`}
               </p>
               {statusModal.reasonRequired && (
                 <div>

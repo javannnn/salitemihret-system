@@ -24,14 +24,6 @@ function formatDate(value?: string | null) {
     return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleDateString();
 }
 
-function formatCadValue(value?: number | string | null) {
-    if (value === undefined || value === null || value === "") return "-";
-    const normalized = typeof value === "string" ? value.replace(/[$,]/g, "").trim() : value;
-    const numeric = Number(normalized);
-    if (!Number.isFinite(numeric)) return String(value);
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD" }).format(numeric);
-}
-
 function immigrantName(record: Sponsorship) {
     if (record.newcomer) return `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim();
     if (record.beneficiary_member) return `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim();
@@ -70,15 +62,6 @@ export function SponsorshipsReport() {
         return individualDateRange;
     }, [individualDateRange]);
     const hasIndividualRange = Boolean(normalizedIndividualRange.start || normalizedIndividualRange.end);
-    const visibleContributionPayments = useMemo(() => {
-        const payments = individualReport?.sponsorContext.payment_history ?? [];
-        return payments.filter((payment) => {
-            const paidDate = payment.paid_at.slice(0, 10);
-            return (!normalizedIndividualRange.start || paidDate >= normalizedIndividualRange.start)
-                && (!normalizedIndividualRange.end || paidDate <= normalizedIndividualRange.end);
-        });
-    }, [individualReport, normalizedIndividualRange.end, normalizedIndividualRange.start]);
-
     useEffect(() => {
         const fetchMetrics = async () => {
             setLoading(true);
@@ -173,7 +156,31 @@ export function SponsorshipsReport() {
 
     const downloadIndividualReport = () => {
         if (!individualReport) return;
-        const blob = new Blob([JSON.stringify(individualReport, null, 2)], { type: "application/json" });
+        const report = {
+            case: {
+                id: individualReport.detail.id,
+                status: individualReport.detail.status,
+                immigrant_name: immigrantName(individualReport.detail),
+                start_date: individualReport.detail.start_date,
+                expected_end_date: individualReport.detail.end_date,
+                completed_at: individualReport.detail.completed_at,
+                last_sponsored_date: ["Completed", "Closed"].includes(individualReport.detail.status)
+                    ? individualReport.detail.last_sponsored_date
+                    : null,
+                trust_fund_deposit: individualReport.detail.payment_information,
+                notes: individualReport.detail.notes,
+            },
+            co_sponsor: {
+                id: individualReport.detail.sponsor.id,
+                name: `${individualReport.detail.sponsor.first_name} ${individualReport.detail.sponsor.last_name}`,
+                status: individualReport.detail.sponsor_status,
+                membership_start_date: individualReport.sponsorContext.membership_start_date,
+                cases_sponsored: individualReport.detail.sponsorship_case_count,
+            },
+            timeline: individualReport.timeline,
+            notes: individualReport.notes,
+        };
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
         const anchor = document.createElement("a");
         anchor.href = URL.createObjectURL(blob);
         anchor.download = `individual-sponsorship-report-SP-${String(individualReport.detail.id).padStart(4, "0")}.json`;
@@ -216,7 +223,7 @@ export function SponsorshipsReport() {
                 <div>
                     <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted">Reports</p>
                     <h2 className="text-2xl font-semibold tracking-tight text-ink">Sponsorships</h2>
-                    <p className="mt-1 text-sm text-muted">Review immigrant support, sponsor eligibility, contributions, and capacity.</p>
+                    <p className="mt-1 text-sm text-muted">Review immigrant support, sponsor eligibility, completion dates, and capacity.</p>
                 </div>
                 <DateRangeControls value={dateRange} onChange={setDateRange} />
             </div>
@@ -224,7 +231,7 @@ export function SponsorshipsReport() {
                 <div className="flex flex-wrap items-start justify-between gap-4 rounded-t-2xl border-b border-border bg-muted/20 px-5 py-4 sm:px-6">
                     <div>
                         <h3 className="text-base font-semibold text-ink">Individual case report</h3>
-                        <p className="mt-1 text-sm text-muted">Find a case to see the immigrant, membership start, and dated contributions.</p>
+                        <p className="mt-1 text-sm text-muted">Find a case to see the immigrant, co-sponsor, and lifecycle dates.</p>
                     </div>
                     <div className="flex flex-wrap items-end justify-end gap-3">
                         <DateRangeControls
@@ -294,35 +301,16 @@ export function SponsorshipsReport() {
                             ["Status", individualReport.detail.status === "Suspended" ? "Declined" : individualReport.detail.status],
                             ["Immigrant name", immigrantName(individualReport.detail)],
                             ["Sponsorship start date", formatDate(individualReport.detail.start_date)],
-                            ["Monthly pledge", formatCadValue(individualReport.detail.monthly_amount)],
-                            [hasIndividualRange ? "Contributions in range" : "Contributions received", formatCadValue(individualReport.detail.received_amount_in_range ?? individualReport.detail.received_amount)],
+                            ["Completed", formatDate(individualReport.detail.completed_at)],
                         ]} />
                         <ReportPanel title="Co-sponsor membership" rows={[
                             ["Name", `${individualReport.detail.sponsor.first_name} ${individualReport.detail.sponsor.last_name}`],
                             ["Status", individualReport.detail.sponsor_status || "-"],
                             ["Membership start date", formatDate(individualReport.sponsorContext.membership_start_date)],
                             ["Trust fund deposit", individualReport.detail.payment_information || "-"],
-                            ["Last sponsored", formatDate(individualReport.detail.last_sponsored_date)],
+                            ["Last sponsored", ["Completed", "Closed"].includes(individualReport.detail.status) ? formatDate(individualReport.detail.last_sponsored_date) : "-"],
                             [hasIndividualRange ? "Cases in range" : "Cases sponsored", String(individualReport.detail.sponsorship_case_count ?? 0)],
                         ]} />
-                        <div className="border-t border-border p-4 md:col-span-2 sm:p-5">
-                            <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                <h4 className="text-sm font-semibold text-ink">Monthly membership contributions</h4>
-                                <span className="text-xs text-muted">{hasIndividualRange ? "Selected date range" : "Most recent 36 months"}</span>
-                            </div>
-                            {visibleContributionPayments.length ? (
-                                <div className="mt-3 divide-y divide-border/70">
-                                    {visibleContributionPayments.slice(0, 12).map((payment) => (
-                                        <div key={payment.id} className="flex items-center justify-between gap-4 py-2.5 text-sm first:pt-0 last:pb-0">
-                                            <span className="text-muted">Given on {formatDate(payment.paid_at)}</span>
-                                            <span className="font-semibold tabular-nums text-ink">{formatCadValue(payment.amount)}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="mt-3 text-sm text-muted">No monthly membership contributions found for this period.</p>
-                            )}
-                        </div>
                     </motion.div>
                 ) : null}
                 </div>

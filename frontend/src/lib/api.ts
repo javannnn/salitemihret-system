@@ -221,12 +221,6 @@ export type IndividualMemberReport = {
     role: "Sponsor" | "Beneficiary";
     beneficiary_name: string;
     status: string;
-    program?: string | null;
-    frequency: string;
-    monthly_amount?: number | null;
-    received_amount?: number | null;
-    paid_amount?: number | null;
-    currency?: string | null;
     start_date: string;
     end_date?: string | null;
     notes?: string | null;
@@ -262,12 +256,6 @@ export type IndividualMemberReport = {
       first_name: string;
       last_name: string;
       membership_date?: string | null;
-      payment_information_by_year: Array<{
-        year: number;
-        total_amount: number;
-        currency: string;
-        payment_count: number;
-      }>;
       volunteer_rows: Array<{
         volunteer_date?: string | null;
         service_type: string;
@@ -880,6 +868,7 @@ export type Sponsorship = {
   rejected_at?: string | null;
   rejected_by_id?: number | null;
   rejection_reason?: string | null;
+  completed_at?: string | null;
   sponsor_status?: string | null;
   created_at: string;
   updated_at: string;
@@ -918,11 +907,11 @@ export type SponsorshipPayload = {
   volunteer_service_other?: string;
   payment_information?: string;
   last_sponsored_date?: string;
-  monthly_amount: number;
+  monthly_amount?: number;
   received_amount?: number;
-  start_date: string;
+  start_date?: string;
   end_date?: string;
-  frequency: Sponsorship["frequency"];
+  frequency?: Sponsorship["frequency"];
   status: Sponsorship["status"];
   program?: SponsorshipProgram;
   pledge_channel?: SponsorshipPledgeChannel;
@@ -1002,6 +991,9 @@ export type SponsorshipSponsorContext = {
   last_sponsorship_date?: string | null;
   last_sponsorship_name?: string | null;
   last_sponsorship_status?: string | null;
+  last_sponsorship_completed_at?: string | null;
+  incomplete_sponsorship_count: number;
+  eligible_for_new_sponsorship: boolean;
   history_count_last_12_months: number;
   volunteer_services: string[];
   father_of_repentance_id?: number | null;
@@ -1041,10 +1033,12 @@ export type SponsorshipPrescreeningItem = {
   required_consecutive_payment_months: number;
   sponsorship_count: number;
   active_sponsorship_count: number;
+  incomplete_sponsorship_count: number;
   completed_sponsorship_count: number;
   last_sponsorship_id?: number | null;
   last_sponsorship_date?: string | null;
   last_sponsorship_status?: string | null;
+  last_sponsorship_completed_at?: string | null;
   last_beneficiary_name?: string | null;
   is_volunteer: boolean;
   volunteer_service_count: number;

@@ -198,7 +198,7 @@ def test_individual_member_report_includes_requested_client_report_fields(
         frequency="Monthly",
         last_status="Approved",
         start_date=date(current_year - 1, 4, 1),
-        status="Active",
+        status="Completed",
         monthly_amount=Decimal("150.00"),
         received_amount=Decimal("150.00"),
     )
@@ -220,10 +220,10 @@ def test_individual_member_report_includes_requested_client_report_fields(
     assert client_fields["payments"][0]["payment_date"].startswith(f"{current_year - 1}-05-10")
     assert len(client_fields["payment_years"]) >= 3
     assert any(item["year"] == current_year - 1 and item["total_amount"] == 325.0 for item in client_fields["payment_years"])
-    assert client_fields["sponsorship"]["payment_information_by_year"] == client_fields["payment_years"]
-    assert client_fields["sponsorship"]["last_sponsored_date"] == f"{current_year - 1}-05-01"
+    assert "payment_information_by_year" not in client_fields["sponsorship"]
+    assert client_fields["sponsorship"]["last_sponsored_date"] == f"{current_year - 1}-04-01"
     assert client_fields["sponsorship"]["number_sponsored"] == 1
-    assert client_fields["sponsorship"]["last_sponsor_status"] == "Approved"
+    assert client_fields["sponsorship"]["last_sponsor_status"] == "Completed"
     assert client_fields["sponsorship"]["volunteer_rows"] == [
         {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Settlement support"},
         {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Translation"},
@@ -243,10 +243,10 @@ def test_individual_member_report_includes_requested_client_report_fields(
     assert sponsorship_payment.id in {item["id"] for item in filtered["payments"]}
     assert filtered["client_report_fields"]["payments"][0]["amount"] == 125.0
     assert [item["id"] for item in filtered["sponsorships"]] == [sponsorship.id]
-    assert filtered["sponsorships"][0]["monthly_amount"] is None
-    assert filtered["sponsorships"][0]["received_amount"] is None
-    assert filtered["sponsorships"][0]["paid_amount"] == "150.00"
-    assert filtered["sponsorships"][0]["currency"] == "CAD"
+    assert "monthly_amount" not in filtered["sponsorships"][0]
+    assert "received_amount" not in filtered["sponsorships"][0]
+    assert "paid_amount" not in filtered["sponsorships"][0]
+    assert "currency" not in filtered["sponsorships"][0]
     assert filtered["client_report_fields"]["sponsorship"]["number_sponsored"] == 1
     assert filtered["client_report_fields"]["sponsorship"]["volunteer_rows"] == [
         {"volunteer_date": f"{current_year - 1}-04-01", "service_type": "Settlement support"},
@@ -312,7 +312,7 @@ def test_individual_member_report_without_finance_access_hides_financial_section
     assert payload["contribution_history"] == []
     assert payload["client_report_fields"]["payments"] == []
     assert payload["client_report_fields"]["payment_years"] == []
-    assert payload["client_report_fields"]["sponsorship"]["payment_information_by_year"] == []
-    assert payload["sponsorships"][0]["monthly_amount"] is None
-    assert payload["sponsorships"][0]["received_amount"] is None
-    assert payload["sponsorships"][0]["paid_amount"] is None
+    assert "payment_information_by_year" not in payload["client_report_fields"]["sponsorship"]
+    assert "monthly_amount" not in payload["sponsorships"][0]
+    assert "received_amount" not in payload["sponsorships"][0]
+    assert "paid_amount" not in payload["sponsorships"][0]

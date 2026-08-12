@@ -59,10 +59,10 @@ class SponsorshipBase(BaseModel):
     frequency: str = Field(default="Monthly", max_length=50)
     last_status: Optional[SponsorshipDecision] = None
     last_status_reason: Optional[str] = Field(None, max_length=255)
-    start_date: date
+    start_date: date = Field(default_factory=date.today)
     end_date: Optional[date] = None
     status: SponsorshipStatus = "Draft"
-    monthly_amount: Decimal = Field(..., gt=0)
+    monthly_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
     received_amount: Optional[Decimal] = Field(None, ge=0)
     program: Optional[SponsorshipProgram] = None
     pledge_channel: Optional[SponsorshipPledgeChannel] = None
@@ -110,7 +110,7 @@ class SponsorshipUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: Optional[SponsorshipStatus] = None
-    monthly_amount: Optional[Decimal] = Field(None, gt=0)
+    monthly_amount: Optional[Decimal] = Field(None, ge=0)
     received_amount: Optional[Decimal] = Field(None, ge=0)
     program: Optional[SponsorshipProgram] = None
     pledge_channel: Optional[SponsorshipPledgeChannel] = None
@@ -187,6 +187,7 @@ class SponsorshipOut(BaseModel):
     rejected_at: Optional[datetime]
     rejected_by_id: Optional[int]
     rejection_reason: Optional[str]
+    completed_at: Optional[datetime]
     sponsor_status: Optional[str]
     father_of_repentance_name: Optional[str]
     created_at: datetime
@@ -297,6 +298,9 @@ class SponsorshipSponsorContext(BaseModel):
     last_sponsorship_date: Optional[date]
     last_sponsorship_name: Optional[str]
     last_sponsorship_status: Optional[str]
+    last_sponsorship_completed_at: Optional[datetime]
+    incomplete_sponsorship_count: int
+    eligible_for_new_sponsorship: bool
     history_count_last_12_months: int
     volunteer_services: list[str]
     father_of_repentance_id: Optional[int]
@@ -336,10 +340,12 @@ class SponsorshipPrescreeningItem(BaseModel):
     required_consecutive_payment_months: int
     sponsorship_count: int
     active_sponsorship_count: int
+    incomplete_sponsorship_count: int
     completed_sponsorship_count: int
     last_sponsorship_id: Optional[int]
     last_sponsorship_date: Optional[date]
     last_sponsorship_status: Optional[str]
+    last_sponsorship_completed_at: Optional[datetime]
     last_beneficiary_name: Optional[str]
     is_volunteer: bool
     volunteer_service_count: int
