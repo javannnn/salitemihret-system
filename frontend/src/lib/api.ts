@@ -1349,6 +1349,18 @@ export type SponsorshipNotesListResponse = {
   total: number;
 };
 
+export type SponsorshipIndividualCaseReport = {
+  detail: Sponsorship;
+  timeline: SponsorshipTimelineResponse;
+  notes: SponsorshipNotesListResponse;
+};
+
+export type SponsorshipIndividualReportResponse = {
+  cases: SponsorshipIndividualCaseReport[];
+  sponsor_contexts: SponsorshipSponsorContext[];
+  selected_case_count: number;
+};
+
 export type SponsorshipNotePayload = {
   note: string;
 };
@@ -2100,6 +2112,16 @@ export async function getSponsorContext(
   if (filters.end_date) search.set("end_date", filters.end_date);
   const query = search.toString();
   return api<SponsorshipSponsorContext>(`/sponsorships/sponsors/${memberId}/context${query ? `?${query}` : ""}`);
+}
+
+export async function getIndividualSponsorshipReport(
+  ids: number[],
+  filters: { start_date?: string; end_date?: string } = {},
+): Promise<SponsorshipIndividualReportResponse> {
+  const search = new URLSearchParams({ ids: ids.join(",") });
+  if (filters.start_date) search.set("start_date", filters.start_date);
+  if (filters.end_date) search.set("end_date", filters.end_date);
+  return api<SponsorshipIndividualReportResponse>(`/sponsorships/individual-report?${search.toString()}`);
 }
 
 export async function listVolunteerGroups(): Promise<VolunteerGroup[]> {

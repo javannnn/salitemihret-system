@@ -376,6 +376,73 @@ def test_sponsor_context_only_shows_last_sponsored_after_completion(
     assert context_resp.json()["membership_start_date"] == sample_member.join_date.isoformat()
 
 
+def test_individual_sponsorship_report_returns_all_selected_cases_and_latest_success(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    active_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Current Case",
+        monthly_amount=Decimal("125.00"),
+        frequency="Monthly",
+        status="Active",
+        start_date=date(2026, 7, 1),
+    )
+    later_started_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Earlier Completion",
+        monthly_amount=Decimal("100.00"),
+        frequency="Monthly",
+        status="Closed",
+        start_date=date(2025, 8, 1),
+        completed_at=datetime(2026, 1, 15, 10, 0),
+    )
+    latest_successful_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Latest Successful Beneficiary",
+        monthly_amount=Decimal("100.00"),
+        frequency="Monthly",
+        status="Completed",
+        start_date=date(2024, 1, 1),
+        completed_at=datetime(2026, 7, 20, 14, 30),
+    )
+    db_session.add_all([active_case, later_started_case, latest_successful_case])
+    db_session.flush()
+    db_session.add(
+        SponsorshipNote(
+            sponsorship_id=active_case.id,
+            note="Selected case note",
+            created_by_id=sponsorship_user.id,
+        )
+    )
+    db_session.commit()
+
+    authorize(sponsorship_user)
+    response = client.get(
+        "/sponsorships/individual-report",
+        params={"ids": f"{active_case.id},{later_started_case.id}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["selected_case_count"] == 2
+    assert {item["detail"]["id"] for item in payload["cases"]} == {active_case.id, later_started_case.id}
+    assert len(payload["sponsor_contexts"]) == 1
+
+    context = payload["sponsor_contexts"][0]
+    assert context["last_sponsorship_id"] == latest_successful_case.id
+    assert context["last_sponsorship_name"] == "Latest Successful Beneficiary"
+    assert context["last_sponsorship_completed_at"].startswith("2026-07-20T14:30:00")
+
+    active_report = next(item for item in payload["cases"] if item["detail"]["id"] == active_case.id)
+    assert active_report["detail"]["last_sponsored_date"] is None
+    assert active_report["notes"]["total"] == 1
+    assert active_report["notes"]["items"][0]["note"] == "Selected case note"
+
+
 def test_sponsor_context_reads_membership_contributions_from_payment_ledger(
     client,
     authorize,

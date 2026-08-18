@@ -19,6 +19,7 @@ from app.schemas.sponsorship import (
     SponsorshipBudgetRoundCreate,
     SponsorshipBudgetRoundOut,
     SponsorshipBudgetRoundUpdate,
+    SponsorshipIndividualReportResponse,
     SponsorshipListResponse,
     SponsorshipMetrics,
     SponsorshipNoteCreate,
@@ -606,6 +607,28 @@ def get_sponsor_context(
     return sponsorships_service.get_sponsor_context(
         db,
         member_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get("/individual-report", response_model=SponsorshipIndividualReportResponse, status_code=status.HTTP_200_OK)
+def get_individual_sponsorship_report(
+    ids: str = Query(..., min_length=1),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*READ_ROLES)),
+) -> SponsorshipIndividualReportResponse:
+    selected_ids = _parse_selected_ids(ids)
+    if not selected_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one sponsorship case")
+    if len(selected_ids) > 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select no more than 100 sponsorship cases")
+    return sponsorships_service.get_individual_sponsorship_report(
+        db,
+        selected_ids,
+        current_user,
         start_date=start_date,
         end_date=end_date,
     )

@@ -408,6 +408,18 @@ class SponsorshipNotesListResponse(BaseModel):
     total: int
 
 
+class SponsorshipIndividualCaseReport(BaseModel):
+    detail: SponsorshipOut
+    timeline: SponsorshipTimelineResponse
+    notes: SponsorshipNotesListResponse
+
+
+class SponsorshipIndividualReportResponse(BaseModel):
+    cases: list[SponsorshipIndividualCaseReport]
+    sponsor_contexts: list[SponsorshipSponsorContext]
+    selected_case_count: int
+
+
 class SponsorshipStatusTransitionRequest(BaseModel):
     status: SponsorshipStatus
     reason: Optional[str] = Field(None, max_length=500)

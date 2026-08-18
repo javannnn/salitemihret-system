@@ -29,6 +29,8 @@ from app.schemas.sponsorship import (
     SponsorshipBudgetRoundUpdate,
     SponsorshipBudgetRoundSummary,
     SponsorshipDecision,
+    SponsorshipIndividualCaseReport,
+    SponsorshipIndividualReportResponse,
     SponsorshipMetrics,
     SponsorshipMotivation,
     SponsorshipNoteCreate,
@@ -139,6 +141,15 @@ def _case_reference_date(sponsorship: Sponsorship) -> date | None:
     if sponsorship.created_at:
         return sponsorship.created_at.date()
     return None
+
+
+def _successful_case_reference_datetime(sponsorship: Sponsorship) -> datetime:
+    if sponsorship.completed_at:
+        return sponsorship.completed_at
+    reference_date = sponsorship.end_date or _case_reference_date(sponsorship)
+    if reference_date:
+        return datetime.combine(reference_date, datetime.max.time())
+    return sponsorship.created_at or datetime.min
 
 
 def _validate_member(
@@ -508,33 +519,39 @@ def _build_sponsorship_query(
         like = f"%{county.strip().lower()}%"
         query = query.filter(Sponsorship.newcomer.has(func.lower(func.coalesce(Newcomer.county, "")).like(like)))
     if search:
-        like = f"%{search.lower()}%"
-        query = query.filter(
-            or_(
-                Sponsorship.sponsor.has(
-                    or_(
-                        func.lower(Member.first_name).like(like),
-                        func.lower(Member.last_name).like(like),
-                        func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
-                    )
-                ),
-                Sponsorship.beneficiary_member.has(
-                    or_(
-                        func.lower(Member.first_name).like(like),
-                        func.lower(Member.last_name).like(like),
-                        func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
-                    )
-                ),
-                func.lower(func.coalesce(Sponsorship.beneficiary_name, "")).like(like),
-                Sponsorship.newcomer.has(
-                    or_(
-                        func.lower(Newcomer.first_name).like(like),
-                        func.lower(Newcomer.last_name).like(like),
-                        func.lower(func.coalesce(Newcomer.first_name, "") + " " + func.coalesce(Newcomer.last_name, "")).like(like),
-                    )
-                ),
-            )
-        )
+        normalized_search = search.strip().lower()
+        like = f"%{normalized_search}%"
+        search_conditions = [
+            Sponsorship.sponsor.has(
+                or_(
+                    func.lower(Member.first_name).like(like),
+                    func.lower(Member.last_name).like(like),
+                    func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
+                    func.lower(Member.username).like(like),
+                    func.lower(Member.email).like(like),
+                    func.lower(func.coalesce(Member.phone, "")).like(like),
+                )
+            ),
+            Sponsorship.beneficiary_member.has(
+                or_(
+                    func.lower(Member.first_name).like(like),
+                    func.lower(Member.last_name).like(like),
+                    func.lower(func.coalesce(Member.first_name, "") + " " + func.coalesce(Member.last_name, "")).like(like),
+                )
+            ),
+            func.lower(func.coalesce(Sponsorship.beneficiary_name, "")).like(like),
+            Sponsorship.newcomer.has(
+                or_(
+                    func.lower(Newcomer.first_name).like(like),
+                    func.lower(Newcomer.last_name).like(like),
+                    func.lower(func.coalesce(Newcomer.first_name, "") + " " + func.coalesce(Newcomer.last_name, "")).like(like),
+                )
+            ),
+        ]
+        case_token = normalized_search[3:] if normalized_search.startswith("sp-") else normalized_search
+        if case_token.isdigit():
+            search_conditions.append(Sponsorship.id == int(case_token))
+        query = query.filter(or_(*search_conditions))
     return query
 
 
@@ -819,7 +836,7 @@ def list_sponsorship_prescreening(
         ]
         last_sponsorship = max(
             completed_sponsorships,
-            key=lambda record: (_case_reference_date(record) or date.min, record.id),
+            key=lambda record: (_successful_case_reference_datetime(record), record.id),
             default=None,
         )
         active_count = len(incomplete_cases)
@@ -1809,8 +1826,7 @@ def get_sponsor_context(
     last_case = max(
         completed_cases,
         key=lambda case: (
-            _case_reference_date(case) or date.min,
-            case.created_at or datetime.min,
+            _successful_case_reference_datetime(case),
             case.id,
         ),
         default=None,
@@ -2042,6 +2058,74 @@ def list_sponsorship_notes(
         )
 
     return SponsorshipNotesListResponse(items=items, total=len(items))
+
+
+def get_individual_sponsorship_report(
+    db: Session,
+    sponsorship_ids: list[int],
+    actor: User,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> SponsorshipIndividualReportResponse:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Start date must be on or before end date.",
+        )
+
+    ordered_ids = list(dict.fromkeys(sponsorship_ids))
+    if not ordered_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one sponsorship case")
+
+    existing_ids = {
+        row_id
+        for (row_id,) in db.query(Sponsorship.id).filter(Sponsorship.id.in_(ordered_ids)).all()
+    }
+    missing_ids = [case_id for case_id in ordered_ids if case_id not in existing_ids]
+    if missing_ids:
+        missing_labels = ", ".join(f"SP-{case_id:04d}" for case_id in missing_ids)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sponsorship case(s) not found: {missing_labels}",
+        )
+
+    case_reports: list[SponsorshipIndividualCaseReport] = []
+    sponsor_contexts: dict[int, SponsorshipSponsorContext] = {}
+    for case_id in ordered_ids:
+        detail = get_sponsorship(db, case_id, start_date=start_date, end_date=end_date)
+        sponsor_id = detail.sponsor.id
+        if sponsor_id not in sponsor_contexts:
+            sponsor_contexts[sponsor_id] = get_sponsor_context(
+                db,
+                sponsor_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        case_reports.append(
+            SponsorshipIndividualCaseReport(
+                detail=detail,
+                timeline=list_sponsorship_timeline(
+                    db,
+                    case_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+                notes=list_sponsorship_notes(
+                    db,
+                    case_id,
+                    actor,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            )
+        )
+
+    return SponsorshipIndividualReportResponse(
+        cases=case_reports,
+        sponsor_contexts=list(sponsor_contexts.values()),
+        selected_case_count=len(case_reports),
+    )
 
 
 def create_sponsorship_note(
