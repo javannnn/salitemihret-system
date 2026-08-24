@@ -541,6 +541,97 @@ def test_sponsor_context_reads_membership_contributions_from_payment_ledger(
     assert invalid_response.status_code == 400, invalid_response.text
 
 
+def test_individual_sponsorship_report_returns_last_six_months_of_contributions(
+    client,
+    authorize,
+    sponsorship_user,
+    sample_member,
+    db_session,
+):
+    today = date.today()
+    start_month = today.month - 5
+    start_year = today.year
+    while start_month <= 0:
+        start_month += 12
+        start_year -= 1
+    six_month_start = date(start_year, start_month, 1)
+
+    previous_month = six_month_start.month - 1
+    previous_year = six_month_start.year
+    if previous_month == 0:
+        previous_month = 12
+        previous_year -= 1
+    outside_history = date(previous_year, previous_month, 1)
+
+    selected_case = Sponsorship(
+        sponsor_member_id=sample_member.id,
+        beneficiary_name="Six-month contribution report",
+        monthly_amount=Decimal("100.00"),
+        frequency="Monthly",
+        status="Active",
+        start_date=today,
+    )
+    contribution_type = (
+        db_session.query(PaymentServiceType)
+        .filter(PaymentServiceType.code == "CONTRIBUTION")
+        .first()
+    )
+    if contribution_type is None:
+        contribution_type = PaymentServiceType(
+            code="CONTRIBUTION",
+            label="Monthly Contribution",
+            active=True,
+        )
+    db_session.add_all([selected_case, contribution_type])
+    db_session.flush()
+
+    current_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("75.00"),
+        currency="CAD",
+        status="Completed",
+        posted_at=datetime.combine(today, datetime.min.time()),
+    )
+    boundary_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("80.00"),
+        currency="CAD",
+        status="Completed",
+        posted_at=datetime.combine(six_month_start, datetime.min.time()),
+    )
+    older_payment = Payment(
+        member_id=sample_member.id,
+        service_type_id=contribution_type.id,
+        amount=Decimal("85.00"),
+        currency="CAD",
+        status="Completed",
+        posted_at=datetime.combine(outside_history, datetime.min.time()),
+    )
+    db_session.add_all([current_payment, boundary_payment, older_payment])
+    db_session.commit()
+
+    authorize(sponsorship_user)
+    response = client.get(
+        "/sponsorships/individual-report",
+        params={
+            "ids": str(selected_case.id),
+            "start_date": outside_history.isoformat(),
+            "end_date": outside_history.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    context = response.json()["sponsor_contexts"][0]
+    assert context["payment_history_start"] == six_month_start.isoformat()
+    assert context["payment_history_end"] == today.isoformat()
+    assert [payment["id"] for payment in context["payment_history"]] == [
+        current_payment.id,
+        boundary_payment.id,
+    ]
+
+
 def test_sponsorship_detail_counts_sponsor_cases_in_selected_range(
     client,
     authorize,

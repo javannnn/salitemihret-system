@@ -1799,6 +1799,7 @@ def get_sponsor_context(
     *,
     start_date: date | None = None,
     end_date: date | None = None,
+    payment_history_months: int = 36,
 ) -> SponsorshipSponsorContext:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(
@@ -1864,7 +1865,7 @@ def get_sponsor_context(
     services = sorted(set([item for item in services if item]))
 
     if start_date is None and end_date is None:
-        start_month = today.month - 35
+        start_month = today.month - (max(1, payment_history_months) - 1)
         start_year = today.year
         while start_month <= 0:
             start_month += 12
@@ -2099,8 +2100,7 @@ def get_individual_sponsorship_report(
             sponsor_contexts[sponsor_id] = get_sponsor_context(
                 db,
                 sponsor_id,
-                start_date=start_date,
-                end_date=end_date,
+                payment_history_months=6,
             )
         case_reports.append(
             SponsorshipIndividualCaseReport(

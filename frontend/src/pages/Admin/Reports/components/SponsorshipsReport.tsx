@@ -4,6 +4,7 @@ import {
     getIndividualSponsorshipReport,
     getSponsorshipMetrics,
     listSponsorships,
+    ContributionPayment,
     Sponsorship,
     SponsorshipIndividualCaseReport,
     SponsorshipIndividualReportResponse,
@@ -27,11 +28,15 @@ function formatDateTime(value?: string | null) {
     return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString();
 }
 
-function formatMoney(value?: number | string | null) {
+function formatMoney(value?: number | string | null, currency = "CAD") {
     if (value === undefined || value === null || value === "") return "-";
     const amount = Number(value);
     if (Number.isNaN(amount)) return String(value);
-    return amount.toLocaleString(undefined, { style: "currency", currency: "CAD" });
+    try {
+        return amount.toLocaleString(undefined, { style: "currency", currency });
+    } catch {
+        return `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
 }
 
 function humanize(value?: string | null) {
@@ -47,6 +52,66 @@ function immigrantName(record: Sponsorship) {
     if (record.newcomer) return `${record.newcomer.first_name} ${record.newcomer.last_name}`.trim();
     if (record.beneficiary_member) return `${record.beneficiary_member.first_name} ${record.beneficiary_member.last_name}`.trim();
     return record.beneficiary_name || "-";
+}
+
+type MonthlyContributionHistoryItem = {
+    key: string;
+    label: string;
+    paymentCount: number;
+    methods: string[];
+    amounts: Array<{ currency: string; total: number }>;
+};
+
+function parseCalendarDate(value?: string | null) {
+    if (!value) return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (!match) return null;
+    const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildSixMonthContributionHistory(
+    payments: ContributionPayment[],
+    historyEnd?: string | null,
+): MonthlyContributionHistoryItem[] {
+    const endDate = parseCalendarDate(historyEnd) ?? new Date();
+    const buckets = Array.from({ length: 6 }, (_, index) => {
+        const month = new Date(endDate.getFullYear(), endDate.getMonth() - index, 1);
+        const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+        return {
+            key,
+            label: month.toLocaleDateString(undefined, { month: "short", year: "numeric" }),
+            paymentCount: 0,
+            methods: new Set<string>(),
+            amounts: new Map<string, number>(),
+        };
+    });
+    const bucketsByKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+    payments.forEach((payment) => {
+        const paidAt = parseCalendarDate(payment.paid_at);
+        if (!paidAt) return;
+        const key = `${paidAt.getFullYear()}-${String(paidAt.getMonth() + 1).padStart(2, "0")}`;
+        const bucket = bucketsByKey.get(key);
+        if (!bucket) return;
+
+        const amount = Number(payment.amount);
+        const currency = payment.currency || "CAD";
+        if (!Number.isNaN(amount)) {
+            bucket.amounts.set(currency, (bucket.amounts.get(currency) ?? 0) + amount);
+        }
+        if (payment.method) bucket.methods.add(payment.method);
+        bucket.paymentCount += 1;
+    });
+
+    return buckets.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        paymentCount: bucket.paymentCount,
+        methods: Array.from(bucket.methods),
+        amounts: Array.from(bucket.amounts, ([currency, total]) => ({ currency, total }))
+            .sort((left, right) => left.currency.localeCompare(right.currency)),
+    }));
 }
 
 export function SponsorshipsReport() {
@@ -610,6 +675,10 @@ function SponsorMembershipPanel({
         : context.last_sponsorship_date
             ? `Started ${formatDate(context.last_sponsorship_date)}`
             : null;
+    const contributionHistory = buildSixMonthContributionHistory(
+        context.payment_history ?? [],
+        context.payment_history_end,
+    );
 
     return (
         <aside className="overflow-hidden rounded-xl border border-border bg-muted/10 lg:sticky lg:top-4">
@@ -628,7 +697,43 @@ function SponsorMembershipPanel({
                 <DetailRow label="Email" value={context.member_email || "-"} />
                 <DetailRow label={hasRange ? "Cases in range" : "Cases sponsored"} value={String(caseCount)} />
                 <DetailRow label="Incomplete cases" value={String(context.incomplete_sponsorship_count)} />
-                <DetailRow label="Contribution payments" value={String(context.payment_history.length)} />
+            </div>
+            <div className="border-t border-border px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Monthly contributions</div>
+                        <p className="mt-1 text-xs text-muted">Last six months from the payment ledger.</p>
+                    </div>
+                    <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+                </div>
+                <div className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card/50">
+                    {contributionHistory.map((month) => {
+                        const hasPayment = month.paymentCount > 0;
+                        const paymentDetail = month.paymentCount > 1
+                            ? `${month.paymentCount} ledger entries`
+                            : month.methods[0] || "Payment recorded";
+                        return (
+                            <div key={month.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${hasPayment ? "bg-emerald-500" : "bg-muted/50"}`} aria-hidden="true" />
+                                        <span className="text-xs font-semibold text-ink">{month.label}</span>
+                                    </div>
+                                    <div className="mt-0.5 truncate pl-3.5 text-[11px] text-muted">
+                                        {hasPayment ? paymentDetail : "No contribution recorded"}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    {month.amounts.length > 0 ? month.amounts.map((amount) => (
+                                        <div key={amount.currency} className="text-xs font-semibold tabular-nums text-ink">
+                                            {formatMoney(amount.total, amount.currency)}
+                                        </div>
+                                    )) : <span className="text-xs text-muted">—</span>}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
             <div className="border-t border-border px-4 py-4">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Last successful case</div>
@@ -661,13 +766,6 @@ function CaseReportPanel({
     hasRange: boolean;
 }) {
     const detail = report.detail;
-    const budgetRound = detail.budget_round
-        ? `${detail.budget_round.year} · Round ${detail.budget_round.round_number}`
-        : "-";
-    const volunteerServices = [
-        ...(detail.volunteer_services || []),
-        detail.volunteer_service_other,
-    ].filter(Boolean).join(", ") || "-";
     const statusTone = ["Completed", "Closed"].includes(detail.status)
         ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
         : detail.status === "Active"
@@ -689,33 +787,23 @@ function CaseReportPanel({
                 {total > 1 && <span className="text-xs tabular-nums text-muted">Case {index} of {total}</span>}
             </div>
 
-            <div className="grid divide-y divide-border xl:grid-cols-3 xl:divide-x xl:divide-y-0">
+            <div className="grid divide-y divide-border xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)] xl:divide-x xl:divide-y-0">
                 <CaseInfoSection title="Case" rows={[
                     ["Immigrant", immigrantName(detail)],
                     ["Sponsorship start", formatDate(detail.start_date)],
                     ["Expected end", formatDate(detail.end_date)],
                     ["Completed", formatDateTime(detail.completed_at)],
-                    ["Frequency", humanize(detail.frequency)],
                     ["Program", humanize(detail.program)],
                 ]} />
-                <CaseInfoSection title="Funding" rows={[
-                    ["Monthly commitment", formatMoney(detail.monthly_amount)],
-                    [hasRange ? "Received in range" : "Received", formatMoney(hasRange ? detail.received_amount_in_range : detail.received_amount)],
-                    ...(hasRange ? [["Total received", formatMoney(detail.received_amount)] as [string, string]] : []),
-                    ["Trust fund deposit", detail.payment_information || "-"],
-                    ["Budget round", budgetRound],
-                    ["Slots used / allocated", `${detail.used_slots ?? 0} / ${detail.budget_slots ?? "-"}`],
-                ]} />
-                <CaseInfoSection title="Assignment & record" rows={[
-                    ["Pledge channel", humanize(detail.pledge_channel)],
-                    ["Reminder channel", humanize(detail.reminder_channel)],
-                    ["Motivation", humanize(detail.motivation)],
-                    ["Volunteer services", volunteerServices],
-                    ["Father of repentance", detail.father_of_repentance_name || "-"],
-                    ["Assigned staff ID", detail.assigned_staff_id ? String(detail.assigned_staff_id) : "-"],
-                    ["Created", formatDateTime(detail.created_at)],
-                    ["Last updated", formatDateTime(detail.updated_at)],
-                ]} />
+                <div className="divide-y divide-border">
+                    <CaseInfoSection title="Funding" rows={[
+                        ["Trust fund deposit", detail.payment_information || "-"],
+                    ]} />
+                    <CaseInfoSection title="Assignment & record" rows={[
+                        ["Created", formatDateTime(detail.created_at)],
+                        ["Last updated", formatDateTime(detail.updated_at)],
+                    ]} />
+                </div>
             </div>
 
             <div className="border-t border-border px-4 py-4 sm:px-5">
