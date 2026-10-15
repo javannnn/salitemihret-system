@@ -34,8 +34,10 @@ exec 9>"$RELEASE_ROOT/.deploy.lock"
 flock -w 300 9
 previous=$(readlink -f "$CURRENT_LINK")
 release=$(mktemp -d "$RELEASE_ROOT/$sha.XXXXXXXX")
-chmod 751 "$release"
 tar -xzf "$archive" -C "$release" --no-same-owner
+# tar restores the archive's '.' directory mode, so apply traversal permissions
+# after extraction as well as public permissions on the frontend subtree.
+chmod 751 "$release"
 test "$(cat "$release/REVISION")" = "$sha"
 test -f "$release/frontend/dist/index.html"
 # Nginx needs public frontend assets; backend code and server.env stay private.
