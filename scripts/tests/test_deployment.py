@@ -88,6 +88,10 @@ def run_release(host, failure="", corrupt=False):
     archive = Path("/tmp") / f"salitemihret-release.{uuid4().hex}.tar.gz"
     try:
         with tarfile.open(archive, "w:gz") as tar:
+            root = tarfile.TarInfo(".")
+            root.type = tarfile.DIRTYPE
+            root.mode = 0o750
+            tar.addfile(root)
             for name, data in {
                 "REVISION": SHA.encode(), "frontend/dist/index.html": b"built",
                 "server/requirements.txt": b"", "scripts/backup-database.py": b"",
