@@ -49,8 +49,9 @@ cd "$release/server"
 ".venv/bin/python" -m alembic upgrade head
 
 switch_link() {
-  ln -s "$1" "$CURRENT_LINK.next"
-  mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
+  local next_link="$CURRENT_LINK.next.$$.$RANDOM"
+  ln -s "$1" "$next_link"
+  mv -Tf "$next_link" "$CURRENT_LINK"
 }
 healthy() {
   for attempt in {1..30}; do
