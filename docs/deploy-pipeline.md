@@ -66,4 +66,3 @@ The initial full recovery snapshot is `/var/backups/salitemihret/pipeline-202610
 A failed install, backup, or migration leaves the active application link unchanged. After activation, restart or health-check failure restores the previous application release and restarts it. Database changes are never automatically reversed or restored; future migrations must remain compatible with the previous release. Failed/previous releases and dumps are retained for inspection; configure retention separately.
 
 To investigate, use `readlink -f /opt/salitemihret/current`, `cat /opt/salitemihret/shared/deployed-revision`, service status/journal, and Actions logs. Do not restore a database or delete live state as a routine application rollback.
-
