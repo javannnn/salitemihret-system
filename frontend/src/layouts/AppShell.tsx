@@ -38,6 +38,7 @@ import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, getToken, LicenseStatusResponse } from "@/lib/api";
 import {
   getSessionIdleRemainingMs,
+  formatSessionDuration,
   isSessionIdleExpired,
   notifySessionExpired,
   recordSessionActivity,
@@ -463,9 +464,9 @@ export default function AppShell() {
     (licenseStatus?.days_remaining ?? 0) > 0;
   const sessionExpiredMessage =
     sessionExpiredReason === "idle"
-      ? "We locked this workspace after 30 minutes without activity. Enter your password to pick up where you left off."
+      ? `We locked this workspace after ${formatSessionDuration(user.session_idle_timeout_minutes ?? 30)} without activity. Enter your password to pick up where you left off.`
       : sessionExpiredReason === "expired"
-        ? "This sign-in reached its 5-hour limit. Enter your password to continue without losing your place."
+        ? `This sign-in reached its ${formatSessionDuration(user.access_token_expire_minutes ?? 300)} limit. Enter your password to continue without losing your place.`
         : "We could not verify this sign-in. Enter your password to reconnect securely.";
 
   const handleSessionResume = async (event: FormEvent<HTMLFormElement>) => {

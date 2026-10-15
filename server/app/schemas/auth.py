@@ -29,6 +29,8 @@ class WhoAmIResponse(BaseModel):
     must_change_password: bool = False
     terms_accepted_at: str | None = None
     terms_version: str | None = None
+    session_idle_timeout_minutes: int = 30
+    access_token_expire_minutes: int = 300
     permissions: EffectivePermissionSnapshot
 
 

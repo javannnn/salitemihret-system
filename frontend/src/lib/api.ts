@@ -1,4 +1,5 @@
 import { clearSessionActivity, notifySessionExpired, waitForSessionRestored } from "@/lib/session";
+import { validateSessionResponse, type SessionValidationResult } from "@/lib/session-validation";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -1649,7 +1650,7 @@ const SESSION_PRESERVED = Symbol("session-preserved");
 let sessionValidation:
   | {
       token: string;
-      promise: Promise<boolean>;
+      promise: Promise<SessionValidationResult>;
     }
   | null = null;
 
@@ -1715,19 +1716,17 @@ function shouldHandleUnauthorized(response: Response): boolean {
   return !(response as Response & { [SESSION_PRESERVED]?: true })[SESSION_PRESERVED];
 }
 
-async function validateCurrentSession(token: string): Promise<boolean> {
+async function validateCurrentSession(token: string): Promise<SessionValidationResult> {
   if (sessionValidation && sessionValidation.token === token) {
     return sessionValidation.promise;
   }
 
-  const promise = fetch(`${API_BASE}/auth/whoami`, {
+  const promise = validateSessionResponse(() => fetch(`${API_BASE}/auth/whoami`, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
     },
-  })
-    .then((response) => response.ok)
-    .catch(() => false)
+  }))
     .finally(() => {
       if (sessionValidation?.token === token) {
         sessionValidation = null;
@@ -1751,7 +1750,7 @@ async function authFetch(input: RequestInfo | URL, init: ApiRequestInit = {}, al
   const tokenForValidation = tokenAtRequestStart || getToken();
   if (tokenForValidation) {
     const sessionStillValid = await validateCurrentSession(tokenForValidation);
-    if (sessionStillValid) {
+    if (sessionStillValid !== "expired") {
       return markSessionPreserved(res);
     }
   }
