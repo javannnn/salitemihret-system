@@ -34,9 +34,12 @@ exec 9>"$RELEASE_ROOT/.deploy.lock"
 flock -w 300 9
 previous=$(readlink -f "$CURRENT_LINK")
 release=$(mktemp -d "$RELEASE_ROOT/$sha.XXXXXXXX")
+chmod 751 "$release"
 tar -xzf "$archive" -C "$release" --no-same-owner
 test "$(cat "$release/REVISION")" = "$sha"
 test -f "$release/frontend/dist/index.html"
+# Nginx needs public frontend assets; backend code and server.env stay private.
+chmod -R a+rX "$release/frontend"
 ln -s "$SHARED_ROOT/server.env" "$release/server/.env"
 for path in uploads runtime static; do ln -s "$SHARED_ROOT/$path" "$release/server/$path"; done
 python3 -m venv "$release/server/.venv"

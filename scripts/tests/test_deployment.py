@@ -114,6 +114,8 @@ def test_success_switches_after_backup_and_migration(host):
     events = Path(env["TEST_LOG"]).read_text()
     assert events.index("backup") < events.index("migrate") < events.index("systemctl restart")
     assert (current / "server/uploads").is_symlink()
+    assert current.resolve().stat().st_mode & 0o001
+    assert (current / "frontend/dist/index.html").stat().st_mode & 0o004
 
 
 @pytest.mark.parametrize("failure", ["install", "backup", "migrate"])
