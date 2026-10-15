@@ -1,0 +1,9 @@
+# Install as /etc/salitemihret/deploy.conf, owned by root and not writable by
+# the deployment account. Set PROVISIONED=yes only after inspecting live config.
+PROVISIONED=no
+RELEASE_ROOT=/opt/salitemihret/releases
+SHARED_ROOT=/opt/salitemihret/shared
+CURRENT_LINK=/opt/salitemihret/current
+BACKEND_SERVICE=salitemihret-backend
+HEALTH_URL=http://127.0.0.1:8000/health
+PUBLIC_URL=https://REPLACE_WITH_VERIFIED_LIVE_DOMAIN

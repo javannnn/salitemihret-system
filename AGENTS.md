@@ -37,4 +37,29 @@ scripts/, deployment assets  # Ops helpers, CI glue
 
 
 <!-- MANUAL ADDITIONS START -->
+## Current Windows development workflow
+
+- This folder is the usable Windows checkout of `javannnn/salitemihret-system`.
+  Base new work on `origin/main` (also the GitHub default branch);
+  `deploy/stmary-staging` and `001-auth-rbac-baseline` are historical.
+  Use `codex/` feature branches.
+- Read `docs/deploy-pipeline.md` before deployment work. It records verified
+  status and the remaining activation steps; do not claim automation is live
+  until an end-to-end deployment passes on the droplet.
+- `scripts/dev.ps1 setup` installs dependencies, `frontend` starts Vite,
+  `backend` starts FastAPI (requires local PostgreSQL/server/.env), and `check`
+  builds the frontend and runs the full isolated backend test suite.
+- Use Python 3.11/3.12 and pnpm 10.15.1. The system pnpm/Corepack combination
+  currently fails; the helper invokes the pinned pnpm through npx.
+- Production host supplied by the user: `deploy@178.128.225.48`
+  (`Sealitemariyam`). Verify live paths/config before modifying it. Never
+  overwrite production uploads, licenses, environment files, or uncommitted work.
+- CI is `.github/workflows/ci.yml`; automatic release deployment is
+  `.github/workflows/deploy.yml` and `scripts/deploy-release.sh`. Successful main
+  pushes deploy when repository variable AUTO_DEPLOY_ENABLED is true. Production
+  environment secrets and the release layout are configured; verify the latest
+  Actions result and deployed revision before reporting a deployment complete.
+- Admin SSH works from Windows as `deploy`; GitHub uses a separate restricted key
+  as `salitemihret`. Service and Nginx point at `/opt/salitemihret/current`.
+  Persistent uploads/license state is linked through `/opt/salitemihret/shared`.
 <!-- MANUAL ADDITIONS END -->

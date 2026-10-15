@@ -20,6 +20,11 @@ member_status_enum = sa.Enum("Active", "Inactive", "Pending", "Archived", name="
 
 
 def upgrade() -> None:
+    # The initial schema predates Pending. PostgreSQL must commit an added enum
+    # value before a later statement can use it as a column default.
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'Pending'")
+
     op.add_column(
         "members",
         sa.Column("contribution_last_paid_at", sa.DateTime(timezone=True), nullable=True),
