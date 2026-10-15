@@ -1,65 +1,69 @@
 # Development and automatic deployment
 
-## Current status (2026-10-15)
+## Verified setup (2026-10-15)
 
-The Windows project folder is now a real checkout of `javannnn/salitemihret-system`, based on `main` (August 2026), on feature branch `codex/automatic-deployment`. The older `deploy/stmary-staging` branch ends in December 2025. GitHub's default branch is still the much older `001-auth-rbac-baseline`; change it to `main` during activation so `workflow_run` can trigger production deployment.
+Repository: `javannnn/salitemihret-system`. Default and deployment branch: `main`. Work in this Windows checkout on `codex/` feature branches. The older `deploy/stmary-staging` and `001-auth-rbac-baseline` branches are historical.
 
-The workflows and release tooling are prepared. **Production automation is not activated or verified yet.** SSH to `deploy@178.128.225.48` currently rejects this Windows key. Computer Use reports that product policy blocks Termius. No production files, services, database, or GitHub secrets have been changed.
+The production release layout and GitHub production environment are configured. See [GitHub Actions](https://github.com/javannnn/salitemihret-system/actions) and [production deployments](https://github.com/javannnn/salitemihret-system/deployments/activity_log?environments_filter=production) for the latest deployment result. A successful build alone does not establish a successful production deployment.
 
 ## Work from this chat or PowerShell
 
-Open this project folder in Codex and work on a `codex/` feature branch. No terminal Codex session or functioning WSL installation is required for editing, frontend builds, or backend tests.
+This folder is a real checkout with a working `.venv`; editing, frontend builds, and backend tests work without terminal Codex or WSL.
 
 ```powershell
 # First setup: use Python 3.11 or 3.12. Existing .venv is reused.
 ./scripts/dev.ps1 setup -Python 'C:/path/to/python.exe'
 ./scripts/dev.ps1 check
 ./scripts/dev.ps1 frontend
-# In a separate session, after configuring a local PostgreSQL database:
+# Separate session, after configuring local PostgreSQL:
 ./scripts/dev.ps1 backend
 ```
 
-The helper uses the project's pinned pnpm 10.15.1 through npx. The frontend runs on localhost:5173 and targets the backend on localhost:8001. Backend tests use an isolated SQLite database and a new local temporary directory for each run. `server/.env` is ignored by Git; set local `DATABASE_URL` and a unique `JWT_SECRET` there before running the backend. Apply migrations to that local database with `.venv/Scripts/python.exe -m alembic upgrade head` from `server/`. Do not use the production database for local work. Docker and WSL are currently unavailable and local PostgreSQL has not been provisioned.
+The helper uses pinned pnpm 10.15.1 through npx. Vite runs on localhost:5173 and targets FastAPI on localhost:8001. Tests use an isolated SQLite database and a fresh temporary directory per run. Configure local DATABASE_URL and a unique JWT_SECRET in ignored `server/.env` before starting the backend; apply migrations from `server/` with `../.venv/Scripts/python.exe -m alembic upgrade head`. Local PostgreSQL is not provisioned; production must never be used for local development.
 
-## Intended daily pipeline
+## Daily pipeline
 
-1. Edit in this checkout, run `./scripts/dev.ps1 check`, commit and push a feature branch.
-2. Open a PR into `main`. GitHub Actions builds the frontend, runs backend tests, and tests the release switch and rollback logic on Linux.
-3. Merge into `main`. The same checks run on the resulting commit.
-4. After all checks pass, Deploy production builds and transfers that exact commit, backs up PostgreSQL, applies migrations, switches the current release, restarts the backend, and verifies internal/public health endpoints.
-5. See the production environment and Actions logs for the result and deployed commit. No operator needs to run the old deployment script for each release.
+1. Edit here, run `./scripts/dev.ps1 check`, commit, and push a `codex/` branch.
+2. Open a PR into `main`. CI builds the frontend, runs 176 backend tests and seven Linux release/recovery tests, and validates the entire migration chain against PostgreSQL 15.
+3. Merge after checks pass. The resulting `main` commit runs the same checks.
+4. After success, Deploy production packages that exact commit, transfers it over verified SSH, installs a separate backend virtual environment, backs up PostgreSQL, applies migrations, atomically switches the release, restarts the service, and checks internal/public health.
+5. Read Actions and the production environment for the result and deployed SHA. No manual per-release script is needed.
 
-Production jobs are serialized and running deployments are not cancelled. Pull requests and feature branches cannot deploy. An older queued commit is refused if `main` has advanced. GitHub's default branch must contain both workflow files for the workflow_run trigger to operate.
+Deployments are serialized, running deployments are not cancelled, PRs cannot deploy, and obsolete queued commits are refused. Repository variable `AUTO_DEPLOY_ENABLED=false` disables future deployments (it does not interrupt an active deployment). Set it to true to enable them.
 
-## One-time activation: inspect first
+## Production facts
 
-After SSH access is available, inspect the existing deployment script, repository/commit (including uncommitted changes), service unit, Nginx site, domain, environment locations, uploads, license files, Python version, database, backups, and sudo permissions. Reconcile the recent uncommitted UAT removal from the original Linux checkout before treating this Windows checkout as authoritative. Preserve the original app and take backups. The paths below are proposed from the repository documentation, not verified droplet facts.
+- Host: `178.128.225.48`, hostname `Sealitemariyam`; public site: `http://178.128.225.48`.
+- Administrator access from this workstation: `ssh deploy@178.128.225.48` using the existing Windows key.
+- GitHub deploys as `salitemihret` using a separate restricted SSH key. Its sudo access is limited to Nginx validation, backend restart, and Nginx reload. Never put private keys or application secrets in the repository.
+- Backend: `salitemihret-backend.service`, Python 3.12, four uvicorn workers bound to `127.0.0.1:8000`.
+- Database: PostgreSQL 16. CI additionally checks PostgreSQL 15 compatibility.
+- `/opt/salitemihret/current`: active release symlink.
+- `/opt/salitemihret/releases`: separate code, virtual environment, and frontend builds per deployment; `baseline-20261015` preserves the original app/web layout for recovery.
+- `/opt/salitemihret/shared/server.env`: private production environment.
+- `shared/uploads` and `shared/runtime`: symlinks to the original uploads and license/runtime directories under `/opt/salitemihret/app/server`, preserving live state and ownership.
+- `shared/static`: persistent static directory; `shared/backups`: private pre-migration database dumps.
+- `/etc/salitemihret/deploy.conf`: root-owned deployment configuration; `/etc/sudoers.d/salitemihret-releases`: limited service permissions.
+- `/etc/systemd/system/salitemihret-backend.service.d/automatic-releases.conf`: service override pointing to current/server.
+- `/etc/nginx/sites-available/salitemihret`: frontend root current/frontend/dist, existing API proxy and upload alias preserved.
 
-Prepare `/opt/salitemihret/releases`, `/opt/salitemihret/shared`, and `/opt/salitemihret/current` (a symlink to an initial release). Preserve production state in shared locations:
+The original app is a copied deployment, not a Git checkout. Its backend matched GitHub main before pipeline changes; its frontend source was older. Preserve it as a recovery source. The recent UAT removal has been reapplied and committed in the Windows checkout.
 
-- `shared/server.env`: the existing backend environment file, readable only by the deployment/service accounts.
-- `shared/uploads`, `shared/runtime`, `shared/static`: existing uploads, license/runtime state, and static assets. Copy without losing ownership or permissions; check record counts and license state.
-- `shared/backups`: private PostgreSQL custom-format dumps. Configure retention and test restore separately; deployment never deletes them.
+## GitHub configuration
 
-Configure the existing service to use WorkingDirectory `/opt/salitemihret/current/server` and ExecStart `/opt/salitemihret/current/server/.venv/bin/uvicorn ...` with the existing bind address, arguments, user, environment, and hardening preserved. Configure Nginx root `/opt/salitemihret/current/frontend/dist`, preserving the existing API proxy, upload locations, TLS, and domain. The service user must be able to traverse/read the release directories and write shared state.
+The production environment permits only branch main. Environment variables: DEPLOY_HOST=178.128.225.48, DEPLOY_USER=salitemihret, DEPLOY_PORT=22. Environment secrets: DEPLOY_SSH_KEY (dedicated CI key) and DEPLOY_KNOWN_HOSTS (verified droplet host key). AUTO_DEPLOY_ENABLED is a repository variable. Application/database/mail/license secrets stay on the server.
 
-Install a root-owned `/etc/salitemihret/deploy.conf` using `scripts/deploy.conf.example`; verify all paths and URLs, then set `PROVISIONED=yes`. The deployment account needs write access to release/current/shared paths, Python with venv, matching PostgreSQL client tools (`pg_dump`), curl, tar, flock, and limited noninteractive sudo for `nginx -t`, backend restart, and Nginx reload. Do not grant blanket passwordless sudo.
+`.github/workflows/ci.yml` runs checks. `.github/workflows/deploy.yml` reacts only to successful push checks on main. `scripts/deploy-release.sh` performs the release switch and recovery; `scripts/backup-database.py` backs up without printing credentials. This is automatic script execution by CI, replacing the former operator-led deployment commands.
 
-Use a separate SSH key for GitHub Actions; do not reuse the Windows user's private key. Add its public key to the deployment account, without agent/port/X11 forwarding or a PTY. Configure the GitHub `production` environment, restrict it to `main`, and add:
+## Validation and recovery
 
-| Setting | Type | Value |
-|---|---|---|
-| DEPLOY_HOST | environment variable | 178.128.225.48 (verify) |
-| DEPLOY_USER | environment variable | deploy (verify) |
-| DEPLOY_PORT | environment variable | 22 (verify) |
-| DEPLOY_SSH_KEY | environment secret | dedicated CI private key |
-| DEPLOY_KNOWN_HOSTS | environment secret | verified droplet host key entry |
-| AUTO_DEPLOY_ENABLED | repository variable | true, only after provisioning/testing |
+Windows frontend build and 176 backend tests pass. Linux CI tests backup/migration/install failures, corrupted uploads, unprovisioned hosts, successful switching, and failed-health recovery. The full PostgreSQL migration chain passes after repairing missing enum labels, duplicate audit-table creation, and legacy enrollment assumptions. Existing databases past those historical revisions do not rerun them.
 
-Change GitHub's default branch to `main`, merge the workflow changes, then enable AUTO_DEPLOY_ENABLED and push the first reviewed production commit. Keep branch protection and passing Build and test jobs required before merging. A required environment reviewer would pause each deployment; omit that gate if fully automatic deployment is desired.
+Before activation, the production database was dumped, restored into `salitemihret_pipeline_validation_20261015`, upgraded, and used for application-startup/health/auth checks with scheduled jobs and external integrations disabled. Member count was preserved. The temporary validation database and release are removed after deployment verification; the private recovery backup is retained.
 
-## Failure and recovery
+The initial full recovery snapshot is `/var/backups/salitemihret/pipeline-20261015T101234Z` (app, web assets, original service/Nginx config, verified PostgreSQL dump). The original source, uploads, license files, and web assets remain at their previous locations.
 
-A failed install, backup, or migration leaves the current application symlink in place. After activation, restart or health-check failures restore the preceding application release and restart it. Database migrations are not automatically reversed or restored: changes must remain compatible with the previous release. Failed/previous releases and database dumps are retained for inspection. The existing application remains the recovery source during the first migration to this release layout.
+A failed install, backup, or migration leaves the active application link unchanged. After activation, restart or health-check failure restores the previous application release and restarts it. Database changes are never automatically reversed or restored; future migrations must remain compatible with the previous release. Failed/previous releases and dumps are retained for inspection; configure retention separately.
 
-Before switching production to the new layout, test it against a restored/scrubbed database, verify a new release, deliberately test a failed health check, and verify recovery. A successful local build does not establish production deployment success.
+To investigate, use `readlink -f /opt/salitemihret/current`, `cat /opt/salitemihret/shared/deployed-revision`, service status/journal, and Actions logs. Do not restore a database or delete live state as a routine application rollback.
+
