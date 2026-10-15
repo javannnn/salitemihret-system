@@ -43,10 +43,17 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile && pnpm build
+      - name: Build production frontend with security configuration
+        run: |
+          set -euo pipefail
+          : "${VITE_RECAPTCHA_SITE_KEY:?Set the production reCAPTCHA site key}"
+          pnpm install --frozen-lockfile
+          pnpm build
+          node -e 'const fs = require("node:fs"); const files = fs.readdirSync("dist/assets").filter(f => f.endsWith(".js")); if (!files.some(f => fs.readFileSync("dist/assets/" + f, "utf8").includes(process.env.VITE_RECAPTCHA_SITE_KEY))) throw new Error("reCAPTCHA site key missing from production bundle");'
         working-directory: frontend
         env:
           VITE_API_BASE: /api
+          VITE_RECAPTCHA_SITE_KEY: ${{ vars.VITE_RECAPTCHA_SITE_KEY }}
       - name: Package the tested commit
         run: |
           set -euo pipefail
