@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.auth.deps import get_current_user
+from app.core.config import settings
 from app.models.user import User
 from app.schemas.auth import WhoAmIResponse
 from app.services.permissions import compute_effective_permissions
@@ -25,6 +26,8 @@ def whoami(user: User = Depends(get_current_user)) -> WhoAmIResponse:
         must_change_password=user.must_change_password,
         terms_accepted_at=user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
         terms_version=user.terms_version,
+        session_idle_timeout_minutes=settings.SESSION_IDLE_TIMEOUT_MINUTES,
+        access_token_expire_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
         roles=[role.name for role in user.roles],
         permissions=permissions,
     )

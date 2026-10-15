@@ -30,6 +30,8 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_BASE: /api
+      - run: node --test scripts/test-session.mjs
+        working-directory: frontend
 
   backend:
     runs-on: ubuntu-latest

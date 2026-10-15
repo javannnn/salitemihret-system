@@ -134,7 +134,7 @@ export default function Dashboard() {
           fetchMemberCount("Archived"),
         ]);
         if (!cancelled) {
-          setSummary({ total, active, archived });
+          setSummary({ total: total + archived, active, archived });
         }
       } catch (error) {
         console.error(error);

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { WhoAmI, whoami } from "@/lib/auth";
 import { getToken, setToken } from "@/lib/api";
-import { clearSessionActivity, recordSessionActivity, resetSessionExpiryNotice } from "@/lib/session";
+import { clearSessionActivity, configureSessionPolicy, recordSessionActivity, resetSessionExpiryNotice } from "@/lib/session";
 
 interface AuthContextValue {
   user: WhoAmI | null;
@@ -31,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const data = await whoami();
+      configureSessionPolicy(data.session_idle_timeout_minutes);
       setUser(data);
       setTokenState(getToken());
       recordSessionActivity(Date.now(), true);

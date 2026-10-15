@@ -31,3 +31,14 @@ def test_promote_child_assigns_mock_email_and_default_contribution(db_session, s
     assert promoted.contribution_amount == Decimal("75.00")
     assert promoted.contribution_currency == "CAD"
     assert child.promoted_at is not None
+
+def test_deleted_parent_children_are_not_promoted(db_session, sample_member):
+    from datetime import datetime
+    import pytest
+    sample_member.deleted_at = datetime.utcnow()
+    child = Child(member_id=sample_member.id, first_name="Example", last_name="Child", full_name="Example Child", birth_date=date(2000, 1, 1))
+    db_session.add(child)
+    db_session.commit()
+    assert child_promotion_service.get_children_ready_for_promotion(db_session) == []
+    with pytest.raises(ValueError, match="deleted member"):
+        child_promotion_service.promote_child(db_session, child=child)

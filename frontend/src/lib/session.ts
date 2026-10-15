@@ -6,6 +6,21 @@ const SESSION_ACTIVITY_WRITE_INTERVAL_MS = 15_000;
 export type SessionExpiryReason = "expired" | "idle" | "unauthorized";
 
 export const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+let sessionIdleTimeoutMs = SESSION_IDLE_TIMEOUT_MS;
+
+export function configureSessionPolicy(idleMinutes?: number) {
+  sessionIdleTimeoutMs = typeof idleMinutes === "number" && Number.isFinite(idleMinutes) && idleMinutes > 0
+    ? idleMinutes * 60 * 1000
+    : SESSION_IDLE_TIMEOUT_MS;
+}
+
+export function formatSessionDuration(minutes: number): string {
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
 
 let sessionNoticeRaised = false;
 let sessionRestorePromise: Promise<void> | null = null;
@@ -41,7 +56,7 @@ export function clearSessionActivity() {
 
 export function getSessionIdleRemainingMs(now = Date.now()): number {
   const lastActivityAt = getLastSessionActivityAt() ?? now;
-  return Math.max(0, SESSION_IDLE_TIMEOUT_MS - (now - lastActivityAt));
+  return Math.max(0, sessionIdleTimeoutMs - (now - lastActivityAt));
 }
 
 export function isSessionIdleExpired(now = Date.now()): boolean {

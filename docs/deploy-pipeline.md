@@ -66,3 +66,28 @@ The initial full recovery snapshot is `/var/backups/salitemihret/pipeline-202610
 A failed install, backup, or migration leaves the active application link unchanged. After activation, restart or health-check failure restores the previous application release and restarts it. Database changes are never automatically reversed or restored; future migrations must remain compatible with the previous release. Failed/previous releases and dumps are retained for inspection; configure retention separately.
 
 To investigate, use `readlink -f /opt/salitemihret/current`, `cat /opt/salitemihret/shared/deployed-revision`, service status/journal, and Actions logs. Do not restore a database or delete live state as a routine application rollback.
+
+## Example-data cleanup (2026-10-15)
+
+`scripts/clear-business-data.py` is an operator-only, dry-run-by-default helper.
+Run it from `server/` with the backend virtual environment. Applying requires
+`--apply --verified-backup /private/path/database.dump`, a separately checked
+backup, no visible members, and an active super administrator. It refuses an
+unexpected schema and rolls back if protected account/configuration rows change.
+It preserves staff accounts, password hashes, lifecycle flags, roles, invitations,
+account audit history, and reference categories. It clears business records,
+including deleted members, payments, schools, sponsorships, chat and their audits.
+Member links in retained invitations become null. IDs are not reused/reset.
+
+Before live cleanup, stop the backend, take and verify a fresh PostgreSQL backup
+and uploads archive in a root-only directory, and restore/test the cleanup on a
+separate database. Quarantine business uploads inside that protected backup and
+recreate the original uploads directory with the same ownership. Keep runtime,
+licenses, environment files and reference settings. Restart and verify login,
+empty business screens and retained staff. Do not run demo seeds in production.
+
+Session policy now comes from authenticated `/auth/whoami`: production retains
+its configured 30-minute idle lock and 60-minute token lifetime. Temporary network
+or server errors during session validation preserve the sign-in; confirmed 401
+responses still require password restoration. CI covers these browser session
+rules and backend expiry, wrong-password, relogin and admin password-reset behavior.

@@ -33,8 +33,9 @@ def get_children_ready_for_promotion(db: Session, within_days: int = 0) -> List[
     limit = today + timedelta(days=within_days)
     query = (
         db.query(Child)
+        .join(Child.parent)
         .options(selectinload(Child.parent).selectinload(Member.household))
-        .filter(Child.promoted_at.is_(None), Child.birth_date.isnot(None))
+        .filter(Child.promoted_at.is_(None), Child.birth_date.isnot(None), Member.deleted_at.is_(None))
     )
 
     results: List[tuple[Child, date]] = []
@@ -66,6 +67,8 @@ def promote_child(
         raise ValueError("Child already promoted")
 
     parent = child.parent
+    if parent and parent.deleted_at is not None:
+        raise ValueError("Cannot promote a child of a deleted member")
     first_name = child.first_name or _split_name(child.full_name)[0]
     last_name = child.last_name or _split_name(child.full_name)[1]
     username = generate_username(db, first_name, last_name)

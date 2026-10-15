@@ -266,3 +266,21 @@ def test_cannot_delete_own_super_admin_account(client, authorize, db_session):
 
     assert response.status_code == 400, response.text
     assert "own admin access" in response.json()["detail"].lower()
+
+def test_password_reset_requires_change_and_handles_email_failure(client, authorize, db_session, monkeypatch):
+    from app.auth.security import verify_password
+    import app.routers.users as users_router
+    monkeypatch.setattr(users_router, "send_admin_password_reset_email", lambda **kwargs: False)
+    admin = User(email="reset-admin@example.com", username="reset.admin", hashed_password="hash", is_active=True, is_super_admin=True)
+    target = User(email="reset-target@example.com", username="reset.target", hashed_password=hash_password("OriginalPass123!"), is_active=True)
+    db_session.add_all([admin, target])
+    db_session.commit()
+    authorize(admin)
+    response = client.post(f"/users/{target.id}/reset-password")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["email_sent"] is False
+    assert payload["user"]["must_change_password"] is True
+    db_session.expire_all()
+    assert verify_password(payload["temporary_password"], db_session.get(User, target.id).hashed_password)
+    assert not verify_password("OriginalPass123!", db_session.get(User, target.id).hashed_password)

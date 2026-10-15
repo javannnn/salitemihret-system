@@ -12,6 +12,8 @@ export type WhoAmI = {
   must_change_password: boolean;
   terms_accepted_at?: string | null;
   terms_version?: string | null;
+  session_idle_timeout_minutes?: number;
+  access_token_expire_minutes?: number;
   permissions: {
     modules: Record<string, { read: boolean; write: boolean; visible: boolean }>;
     fields: Record<string, Record<string, { read: boolean; write: boolean }>>;

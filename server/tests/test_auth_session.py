@@ -197,3 +197,35 @@ def test_chat_heartbeat_writes_timezone_aware_last_seen():
         assert user.last_seen is not None
         assert user.last_seen.tzinfo is not None
         assert user.last_seen.utcoffset() == timedelta(0)
+
+def test_whoami_exposes_configured_session_policy(db_session, monkeypatch):
+    from app.routers.whoami import whoami
+    monkeypatch.setattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+    monkeypatch.setattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 12)
+    user_id = _create_user(email="policy@example.com", username="policy")
+    user = db_session.get(User, user_id)
+    response = whoami(user=user)
+    assert response.access_token_expire_minutes == 60
+    assert response.session_idle_timeout_minutes == 12
+
+
+def test_expired_jwt_is_rejected_even_with_recent_activity():
+    user_id = _create_user(email="expired-jwt@example.com", username="expired.jwt", last_seen=datetime.now(timezone.utc))
+    token = jwt.encode({"sub": str(user_id), "exp": datetime.now(timezone.utc) - timedelta(seconds=5)}, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
+    with TestingSessionLocal() as db_session:
+        with pytest.raises(HTTPException) as exc_info:
+            get_current_user(request=_make_request(), credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token), db=db_session)
+        assert exc_info.value.status_code == 401
+
+
+def test_wrong_password_does_not_restore_expired_session(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "RECAPTCHA_SECRET", None)
+    previous = datetime.now(timezone.utc) - timedelta(minutes=31)
+    user = User(email="wrong-resume@example.com", username="wrong.resume", full_name="Resume Test", hashed_password=hash_password("CorrectPass123!"), is_active=True, last_seen=previous)
+    db_session.add(user)
+    db_session.commit()
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(login(request=_make_request("/auth/login"), payload=LoginRequest(email=user.email, password="WrongPass123!"), db=db_session))
+    assert exc_info.value.status_code == 401
+    db_session.refresh(user)
+    assert user.last_seen.replace(tzinfo=timezone.utc) == previous
