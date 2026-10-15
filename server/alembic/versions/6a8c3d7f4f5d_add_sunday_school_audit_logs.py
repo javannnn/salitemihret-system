@@ -15,6 +15,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 9c2a1a0f7abc already creates this table on a fresh database.
+    if sa.inspect(op.get_bind()).has_table("sunday_school_audit_logs"):
+        return
     op.create_table(
         "sunday_school_audit_logs",
         sa.Column("id", sa.Integer, primary_key=True),
@@ -29,4 +32,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("sunday_school_audit_logs")
+    # The predecessor schema also owns this table; retain its audit data.
+    pass
