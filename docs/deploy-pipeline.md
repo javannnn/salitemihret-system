@@ -51,7 +51,7 @@ The original app is a copied deployment, not a Git checkout. Its backend matched
 
 ## GitHub configuration
 
-The production environment permits only branch main. Environment variables: DEPLOY_HOST=178.128.225.48, DEPLOY_USER=salitemihret, DEPLOY_PORT=22. Environment secrets: DEPLOY_SSH_KEY (dedicated CI key) and DEPLOY_KNOWN_HOSTS (verified droplet host key). AUTO_DEPLOY_ENABLED is a repository variable. Application/database/mail/license secrets stay on the server.
+The production environment permits only branch main. Environment variables: DEPLOY_HOST=178.128.225.48, DEPLOY_USER=salitemihret, DEPLOY_PORT=22, and VITE_RECAPTCHA_SITE_KEY (the existing public browser site key). Deployment requires the site key and checks that it is present in the generated JavaScript; otherwise it fails before uploading. Environment secrets: DEPLOY_SSH_KEY (dedicated CI key) and DEPLOY_KNOWN_HOSTS (verified droplet host key). AUTO_DEPLOY_ENABLED is a repository variable. Application/database/mail/license secrets, including RECAPTCHA_SECRET, stay on the server.
 
 `.github/workflows/ci.yml` runs checks. `.github/workflows/deploy.yml` reacts only to successful push checks on main. `scripts/deploy-release.sh` performs the release switch and recovery; `scripts/backup-database.py` backs up without printing credentials. This is automatic script execution by CI, replacing the former operator-led deployment commands.
 
