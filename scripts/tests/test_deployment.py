@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
-import tempfile
+from uuid import uuid4
 
 import pytest
 
@@ -85,8 +85,7 @@ chmod +x "$3/bin/python"
 def run_release(host, failure="", corrupt=False):
     env, current, old, config = host
     env = env | {"TEST_FAIL": failure}
-    with tempfile.NamedTemporaryFile(prefix="salitemihret-release.", suffix=".tar.gz", dir="/tmp", delete=False) as file:
-        archive = Path(file.name)
+    archive = Path("/tmp") / f"salitemihret-release.{uuid4().hex}.tar.gz"
     try:
         with tarfile.open(archive, "w:gz") as tar:
             for name, data in {
