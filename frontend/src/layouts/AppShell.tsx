@@ -34,7 +34,6 @@ import { Card, Button, Badge, Textarea, Input } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { usePermissions } from "@/hooks/usePermissions";
-import { BetaBadge } from "@/components/BetaTag";
 import { useToast } from "@/components/Toast";
 import { activateLicense, ApiError, getLicenseStatus, getToken, LicenseStatusResponse } from "@/lib/api";
 import {
@@ -629,13 +628,7 @@ export default function AppShell() {
               <span className="text-[11px] uppercase tracking-wide text-mute lg:hidden">Workspace</span>
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-base font-semibold truncate lg:hidden">{activeNavItem?.label ?? "Dashboard"}</span>
-                <div className="hidden lg:block">
-                  <BetaBadge />
-                </div>
               </div>
-            </div>
-            <div className="lg:hidden">
-              <BetaBadge subtle />
             </div>
           </div>
           <div data-tour="topbar-controls" className="flex items-center gap-3">

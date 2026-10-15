@@ -290,6 +290,7 @@ def test_create_abenet_enrollment_and_record_payment(client, authorize, admin_us
     )
     assert pay_resp.status_code == 201, pay_resp.text
     payment_row = db_session.get(Payment, pending_link.payment_id)
+    db_session.refresh(payment_row)
     assert payment_row.status == "Completed"
     assert payment_row.method == "Cash"
 

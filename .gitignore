@@ -8,6 +8,8 @@ __pycache__/
 dist/
 build/
 coverage/
+.cache/
+.pytest_cache/
 *.log
 
 # Agent caches

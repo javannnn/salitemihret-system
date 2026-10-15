@@ -955,7 +955,7 @@ def test_submitted_sponsorship_requires_budget_round(client, authorize, sponsors
     assert "budget round" in create_resp.text
 
 
-def test_submitted_sponsorship_is_blocked_when_budget_round_is_full(client, authorize, sponsorship_user, admin_user, sample_member):
+def test_submitted_sponsorship_is_blocked_when_budget_round_is_full(client, authorize, sponsorship_user, admin_user, sample_member, db_session):
     authorize(sponsorship_user)
     today = date.today()
     round_id = _create_budget_round(client, authorize, admin_user, slot_budget=1)
@@ -975,10 +975,20 @@ def test_submitted_sponsorship_is_blocked_when_budget_round_is_full(client, auth
     )
     assert first_resp.status_code == 201, first_resp.text
 
+    # A separate sponsor avoids the one-incomplete-case-per-sponsor guard,
+    # so this request specifically exercises the round capacity check.
+    second_sponsor = Member(
+        first_name="Second", last_name="Sponsor", username="second-budget-sponsor",
+        email="second-budget-sponsor@example.com", phone="+16135550123",
+        status="Active", gender="Female", district="Arada", join_date=today,
+    )
+    db_session.add(second_sponsor)
+    db_session.commit()
+
     second_resp = client.post(
         "/sponsorships",
         json={
-            "sponsor_member_id": sample_member.id,
+            "sponsor_member_id": second_sponsor.id,
             "beneficiary_name": "Round Capacity B",
             "monthly_amount": "80.00",
             "start_date": today.isoformat(),
@@ -1707,7 +1717,9 @@ def test_sponsorship_prescreening_calculates_eligibility_and_evidence(
     assert "Sponsor Pre-screening" in workbook_xml
     assert "continuous_payment_detail" in sheet_xml
     assert sample_member.username in sheet_xml
-    assert "Previous Beneficiary" in sheet_xml
+    assert "last_beneficiary_name" in sheet_xml
+    # Incomplete cases do not count as completed sponsorship history.
+    assert "Previous Beneficiary" not in sheet_xml
 
 
 def test_sponsorship_prescreening_filters_failed_members(

@@ -1,0 +1,89 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: ['Build and test']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: salitemihret-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      vars.AUTO_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Refuse an obsolete release
+        run: |
+          set -euo pipefail
+          latest=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$latest" = "$RELEASE_SHA" || { echo 'main has advanced; a newer run will deploy.'; exit 1; }
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: frontend
+        env:
+          VITE_API_BASE: /api
+      - name: Package the tested commit
+        run: |
+          set -euo pipefail
+          mkdir package
+          git archive "$RELEASE_SHA" server scripts | tar -x -C package
+          mkdir -p package/frontend
+          cp -a frontend/dist package/frontend/
+          printf '%s\n' "$RELEASE_SHA" > package/REVISION
+          tar -czf release.tar.gz -C package .
+      - name: Upload and deploy
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set DEPLOY_HOST}"
+          : "${DEPLOY_USER:?Set DEPLOY_USER}"
+          : "${DEPLOY_KEY:?Set DEPLOY_SSH_KEY}"
+          : "${KNOWN_HOSTS:?Set DEPLOY_KNOWN_HOSTS}"
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          opts=(-i ~/.ssh/deploy_key -p "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          remote=$(ssh "${opts[@]}" "$target" 'mktemp /tmp/salitemihret-release.XXXXXXXX.tar.gz')
+          [[ "$remote" =~ ^/tmp/salitemihret-release\.[a-zA-Z0-9]+\.tar\.gz$ ]]
+          scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes release.tar.gz "$target:$remote"
+          checksum=$(sha256sum release.tar.gz | cut -d' ' -f1)
+          ssh "${opts[@]}" "$target" bash -s -- "$RELEASE_SHA" "$remote" "$checksum" < scripts/deploy-release.sh
+      - name: Record deployment
+        run: printf 'Deployed commit `%s` to production.\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"

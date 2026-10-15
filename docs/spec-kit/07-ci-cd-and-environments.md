@@ -1,5 +1,9 @@
 # CI/CD and Environments
 
+> This file describes the original target architecture. For the implemented
+> Windows commands, release workflows, verified activation status, and remaining
+> server setup, use [the current deployment guide](../deploy-pipeline.md).
+
 ## Repository Structure
 ```
 /

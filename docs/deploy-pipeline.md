@@ -1,153 +1,65 @@
-# Deployment Pipeline – SaliteMihret Demo/Staging
+# Development and automatic deployment
 
-This document defines the exact workflow for taking a feature from local development to the client’s staging server. Follow these steps every time—no ad‑hoc pushes.
+## Current status (2026-10-15)
 
----
+The Windows project folder is now a real checkout of `javannnn/salitemihret-system`, based on `main` (August 2026), on feature branch `codex/automatic-deployment`. The older `deploy/stmary-staging` branch ends in December 2025. GitHub's default branch is still the much older `001-auth-rbac-baseline`; change it to `main` during activation so `workflow_run` can trigger production deployment.
 
-## 1. Start From the Correct Branch
+The workflows and release tooling are prepared. **Production automation is not activated or verified yet.** SSH to `deploy@178.128.225.48` currently rejects this Windows key. Computer Use reports that product policy blocks Termius. No production files, services, database, or GitHub secrets have been changed.
 
-```bash
-cd ~/projects/salitemihret-system
-git switch deploy/stmary-staging
-git pull
+## Work from this chat or PowerShell
+
+Open this project folder in Codex and work on a `codex/` feature branch. No terminal Codex session or functioning WSL installation is required for editing, frontend builds, or backend tests.
+
+```powershell
+# First setup: use Python 3.11 or 3.12. Existing .venv is reused.
+./scripts/dev.ps1 setup -Python 'C:/path/to/python.exe'
+./scripts/dev.ps1 check
+./scripts/dev.ps1 frontend
+# In a separate session, after configuring a local PostgreSQL database:
+./scripts/dev.ps1 backend
 ```
 
-Optional clean branch:
+The helper uses the project's pinned pnpm 10.15.1 through npx. The frontend runs on localhost:5173 and targets the backend on localhost:8001. Backend tests use an isolated SQLite database and a new local temporary directory for each run. `server/.env` is ignored by Git; set local `DATABASE_URL` and a unique `JWT_SECRET` there before running the backend. Apply migrations to that local database with `.venv/Scripts/python.exe -m alembic upgrade head` from `server/`. Do not use the production database for local work. Docker and WSL are currently unavailable and local PostgreSQL has not been provisioned.
 
-```bash
-git switch -c feature/membership-tweak-001
-```
+## Intended daily pipeline
 
-Build the feature there, then merge back into `deploy/stmary-staging` when ready.
+1. Edit in this checkout, run `./scripts/dev.ps1 check`, commit and push a feature branch.
+2. Open a PR into `main`. GitHub Actions builds the frontend, runs backend tests, and tests the release switch and rollback logic on Linux.
+3. Merge into `main`. The same checks run on the resulting commit.
+4. After all checks pass, Deploy production builds and transfers that exact commit, backs up PostgreSQL, applies migrations, switches the current release, restarts the backend, and verifies internal/public health endpoints.
+5. See the production environment and Actions logs for the result and deployed commit. No operator needs to run the old deployment script for each release.
 
----
+Production jobs are serialized and running deployments are not cancelled. Pull requests and feature branches cannot deploy. An older queued commit is refused if `main` has advanced. GitHub's default branch must contain both workflow files for the workflow_run trigger to operate.
 
-## 2. Backend (Local Parity With Client)
+## One-time activation: inspect first
 
-Systemd service already configured locally:
+After SSH access is available, inspect the existing deployment script, repository/commit (including uncommitted changes), service unit, Nginx site, domain, environment locations, uploads, license files, Python version, database, backups, and sudo permissions. Reconcile the recent uncommitted UAT removal from the original Linux checkout before treating this Windows checkout as authoritative. Preserve the original app and take backups. The paths below are proposed from the repository documentation, not verified droplet facts.
 
-```bash
-sudo systemctl status salitemihret-dev-backend --no-pager
-```
+Prepare `/opt/salitemihret/releases`, `/opt/salitemihret/shared`, and `/opt/salitemihret/current` (a symlink to an initial release). Preserve production state in shared locations:
 
-If inactive:
+- `shared/server.env`: the existing backend environment file, readable only by the deployment/service accounts.
+- `shared/uploads`, `shared/runtime`, `shared/static`: existing uploads, license/runtime state, and static assets. Copy without losing ownership or permissions; check record counts and license state.
+- `shared/backups`: private PostgreSQL custom-format dumps. Configure retention and test restore separately; deployment never deletes them.
 
-```bash
-sudo systemctl restart salitemihret-dev-backend
-curl -s http://127.0.0.1:8000/health  # expect {"status":"ok"}
-```
+Configure the existing service to use WorkingDirectory `/opt/salitemihret/current/server` and ExecStart `/opt/salitemihret/current/server/.venv/bin/uvicorn ...` with the existing bind address, arguments, user, environment, and hardening preserved. Configure Nginx root `/opt/salitemihret/current/frontend/dist`, preserving the existing API proxy, upload locations, TLS, and domain. The service user must be able to traverse/read the release directories and write shared state.
 
-Use the same API base (`http://127.0.0.1:8000`) for local tests.
+Install a root-owned `/etc/salitemihret/deploy.conf` using `scripts/deploy.conf.example`; verify all paths and URLs, then set `PROVISIONED=yes`. The deployment account needs write access to release/current/shared paths, Python with venv, matching PostgreSQL client tools (`pg_dump`), curl, tar, flock, and limited noninteractive sudo for `nginx -t`, backend restart, and Nginx reload. Do not grant blanket passwordless sudo.
 
----
+Use a separate SSH key for GitHub Actions; do not reuse the Windows user's private key. Add its public key to the deployment account, without agent/port/X11 forwarding or a PTY. Configure the GitHub `production` environment, restrict it to `main`, and add:
 
-## 3. Frontend Development
+| Setting | Type | Value |
+|---|---|---|
+| DEPLOY_HOST | environment variable | 178.128.225.48 (verify) |
+| DEPLOY_USER | environment variable | deploy (verify) |
+| DEPLOY_PORT | environment variable | 22 (verify) |
+| DEPLOY_SSH_KEY | environment secret | dedicated CI private key |
+| DEPLOY_KNOWN_HOSTS | environment secret | verified droplet host key entry |
+| AUTO_DEPLOY_ENABLED | repository variable | true, only after provisioning/testing |
 
-### Hot Reload Mode
+Change GitHub's default branch to `main`, merge the workflow changes, then enable AUTO_DEPLOY_ENABLED and push the first reviewed production commit. Keep branch protection and passing Build and test jobs required before merging. A required environment reviewer would pause each deployment; omit that gate if fully automatic deployment is desired.
 
-```bash
-cd ~/projects/salitemihret-system/frontend
-echo 'VITE_API_BASE=http://localhost:8000' > .env.local
-pnpm install
-pnpm dev   # visit http://localhost:5173/
-```
+## Failure and recovery
 
-### Client-Parity Check (Nginx + /api proxy)
+A failed install, backup, or migration leaves the current application symlink in place. After activation, restart or health-check failures restore the preceding application release and restart it. Database migrations are not automatically reversed or restored: changes must remain compatible with the previous release. Failed/previous releases and database dumps are retained for inspection. The existing application remains the recovery source during the first migration to this release layout.
 
-```bash
-echo 'VITE_API_BASE=/api' > .env.production
-pnpm build
-sudo rsync -a dist/ /var/www/salitemihret-dev/
-sudo systemctl reload nginx
-```
-
-Open the site via your local Nginx endpoint (e.g. `http://localhost/` or assigned IP) to ensure `/api` → `127.0.0.1:8000` works like the client server.
-
----
-
-## 4. Database Changes (Mandatory Flow)
-
-If you modify models/schemas:
-
-```bash
-cd ~/projects/salitemihret-system/server
-source .venv/bin/activate
-export PYTHONPATH=$(pwd)
-alembic revision -m "describe_the_change" --autogenerate
-alembic upgrade head
-```
-
-Commit the migration and related model/router updates. If migrations fail locally, stop—do **not** deploy.
-
----
-
-## 5. Commit & Push (Local Repo)
-
-```bash
-git status
-git add .
-git commit -m "Feature: membership XYZ improvements"
-# if using feature branch:
-git switch deploy/stmary-staging
-git merge feature/membership-tweak-001
-git push origin deploy/stmary-staging
-```
-
----
-
-## 6. Deploy to Client Server (stmary@…)
-
-```bash
-ssh stmary@CLIENT_HOST
-cd /opt/salitemihret/app
-sudo -u salitemihret -H git pull
-```
-
-### Backend
-
-```bash
-cd /opt/salitemihret/app/server
-sudo -u salitemihret -H bash -lc 'source .venv/bin/activate && pip install -r requirements.txt && alembic upgrade head'
-sudo systemctl restart salitemihret-backend
-sudo systemctl status salitemihret-backend --no-pager
-```
-
-### Frontend
-
-```bash
-cd /opt/salitemihret/app/frontend
-sudo -u salitemihret -H pnpm install
-sudo -u salitemihret -H pnpm build
-sudo rsync -a /opt/salitemihret/app/frontend/dist/ /var/www/salitemihret/
-sudo systemctl reload nginx
-```
-
-### Smoke Tests
-
-```bash
-curl -s http://127.0.0.1:8000/health
-curl -I http://10.0.0.5/
-curl -I http://10.0.0.5/api/health
-TOKEN=$(curl -s -X POST http://127.0.0.1:8000/auth/login -H "Content-Type: application/json" -d '{"email":"finance@example.com","password":"Demo123!"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
-curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8000/payments?page=1" | head -c 200
-curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8000/payments/export.csv?status=Pending" | head -n 2
-```
-
-Open the site in a browser, log in as `superadmin@example.com / Demo123!` (and as `finance@example.com / Demo123!`), then verify:
-
-- Members list (filters, actions dropdown, quick-add modal)
-- Payments ledger (summary cards, export report button, record/correction dialog, Office Admin read-only banner)
-
----
-
-## 7. Summary Loop
-
-1. `deploy/stmary-staging` → optional feature branch.
-2. Backend service on port 8000 (systemd) mirrors client.
-3. Frontend dev via Vite; parity check with Nginx proxy.
-4. Migrations via Alembic (always run locally first).
-5. Commit & push.
-6. On client box: `git pull`, pip install, Alembic upgrade, restart backend, build frontend, rsync, reload Nginx.
-7. Smoke tests (health endpoints + UI login).
-
-Follow this pipeline every time—no manual shortcuts.
+Before switching production to the new layout, test it against a restored/scrubbed database, verify a new release, deliberately test a failed health check, and verify recovery. A successful local build does not establish production deployment success.
