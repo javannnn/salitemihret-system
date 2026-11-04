@@ -208,6 +208,10 @@ class ParishCouncilOverviewResponse(BaseModel):
     recent_activity: list[ParishCouncilActivityOut] = Field(default_factory=list)
 
 
+class ParishCouncilDepartmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+
+
 class ParishCouncilDepartmentUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     status: Optional[ParishCouncilDepartmentStatus] = None
