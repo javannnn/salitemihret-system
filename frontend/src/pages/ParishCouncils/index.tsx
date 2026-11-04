@@ -60,6 +60,8 @@ import {
   uploadParishCouncilDocument,
 } from "@/lib/api";
 
+import { DepartmentManager } from "./DepartmentManager";
+
 type WorkspaceView = "overview" | "departments" | "assignments" | "timeline";
 type MemberLookupMode = "member" | "manual";
 type DepartmentDetailTab = "summary" | "trainees" | "documents" | "history";
@@ -817,6 +819,7 @@ export default function ParishCouncilsWorkspace() {
   const [activity, setActivity] = useState<ParishCouncilActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [departmentManagerOpen, setDepartmentManagerOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
 
   const [departmentFilters, setDepartmentFilters] = useState<DepartmentFilterState>({
@@ -1092,7 +1095,7 @@ export default function ParishCouncilsWorkspace() {
 
   const openAssignmentEditor = (assignment?: ParishCouncilAssignment) => {
     setAssignmentEditing(assignment ?? null);
-    setAssignmentForm(assignment ? toAssignmentForm(assignment) : emptyAssignmentForm(selectedDepartmentId));
+    setAssignmentForm(assignment ? toAssignmentForm(assignment) : emptyAssignmentForm(meta?.departments.find((item) => item.id === selectedDepartmentId && item.status === "Active")?.id ?? null));
     setAssignmentMemberQuery("");
     setAssignmentMemberResults([]);
     setAssignmentStep(0);
@@ -1379,6 +1382,10 @@ export default function ParishCouncilsWorkspace() {
                 <Button onClick={() => openAssignmentEditor()}>
                   <PlusCircle size={16} />
                   Assign trainee
+                </Button>
+                <Button variant="ghost" onClick={() => setDepartmentManagerOpen(true)} disabled={!meta}>
+                  <Building2 size={16} />
+                  Manage Departments
                 </Button>
                 <Button variant="ghost" onClick={openDepartmentEditor} disabled={!selectedDepartment}>
                   <PencilLine size={16} />
@@ -2207,6 +2214,10 @@ export default function ParishCouncilsWorkspace() {
         </div>
       ) : null}
 
+      {canManage && departmentManagerOpen && meta && (
+        <DepartmentManager departments={meta.departments} canChangeStatus={canWriteDepartmentStatus} onClose={() => setDepartmentManagerOpen(false)} onChange={refreshWorkspace} />
+      )}
+
       <ModalShell
         open={departmentEditorOpen}
         title="Department Lead Settings"
@@ -2396,8 +2407,12 @@ export default function ParishCouncilsWorkspace() {
                   onChange={(event) => setAssignmentForm((current) => ({ ...current, department_id: event.target.value }))}
                 >
                   <option value="">Select department</option>
-                  {(meta?.departments ?? []).map((department) => (
-                    <option key={department.id} value={department.id}>{department.name}</option>
+                  {(meta?.departments ?? []).filter((department) =>
+                    department.status === "Active" || department.id === assignmentEditing?.department_id
+                  ).map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.name}{department.status === "Inactive" ? " (Archived)" : ""}
+                    </option>
                   ))}
                 </Select>
               </div>

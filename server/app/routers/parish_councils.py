@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import require_roles
@@ -31,6 +31,7 @@ from app.schemas.parish_council import (
     ParishCouncilAssignmentListResponse,
     ParishCouncilAssignmentOut,
     ParishCouncilAssignmentUpdate,
+    ParishCouncilDepartmentCreate,
     ParishCouncilDepartmentDetail,
     ParishCouncilDepartmentListResponse,
     ParishCouncilDepartmentSummary,
@@ -319,14 +320,6 @@ def _validate_assignment_payload(
     values: dict[str, object],
     existing_assignment_id: int | None = None,
 ) -> None:
-    status_value = str(values["status"])
-    department_status = getattr(department.status, "value", department.status)
-    if status_value in parish_council_service.OPEN_ASSIGNMENT_STATUSES and department_status == "Inactive":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive departments cannot receive open trainee assignments",
-        )
-
     trainee_first_name = str(values.get("trainee_first_name") or "").strip()
     trainee_last_name = str(values.get("trainee_last_name") or "").strip()
     if not trainee_first_name or not trainee_last_name:
@@ -474,6 +467,35 @@ def list_parish_council_departments(
     return ParishCouncilDepartmentListResponse(items=items, total=len(items))
 
 
+@router.post("/departments", response_model=ParishCouncilDepartmentDetail, status_code=201)
+def create_parish_council_department(
+    payload: ParishCouncilDepartmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*WRITE_ROLES)),
+) -> ParishCouncilDepartmentDetail:
+    name = " ".join(payload.name.split())
+    if not name:
+        raise HTTPException(status_code=422, detail="Enter a department name.")
+    parish_council_service.ensure_default_departments(db)
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("LOCK TABLE parish_council_departments IN SHARE ROW EXCLUSIVE MODE"))
+    if any(" ".join(existing.split()).casefold() == name.casefold()
+           for (existing,) in db.query(ParishCouncilDepartment.name)):
+        raise HTTPException(status_code=409, detail="That department already exists. Restore it if it is archived.")
+    department = ParishCouncilDepartment(name=name, created_by_id=current_user.id, updated_by_id=current_user.id)
+    db.add(department)
+    db.flush()
+    parish_council_service.record_audit_event(
+        db, entity_type="Department", action="created", summary=f"Created {name}",
+        actor_user_id=current_user.id, department_id=department.id,
+        after_state=parish_council_service.snapshot_department(department),
+    )
+    db.commit()
+    return ParishCouncilDepartmentDetail(**parish_council_service.serialize_department_detail(
+        _department_or_404(db, department.id)
+    ))
+
+
 @router.get("/departments/{department_id:int}", response_model=ParishCouncilDepartmentDetail)
 def get_parish_council_department(
     department_id: int,
@@ -521,11 +543,14 @@ def update_parish_council_department(
     department.updated_by_id = current_user.id
 
     after = parish_council_service.snapshot_department(department)
+    change_label = "Updated"
+    if before["status"] != after["status"]:
+        change_label = "Archived" if department.status == "Inactive" else "Restored"
     parish_council_service.record_audit_event(
         db,
         entity_type="Department",
         action="updated",
-        summary=f"Updated {department.name}",
+        summary=f"{change_label} {department.name}",
         actor_user_id=current_user.id,
         department_id=department.id,
         before_state=before,
@@ -586,6 +611,8 @@ def create_parish_council_assignment(
     current_user: User = Depends(require_roles(*WRITE_ROLES)),
 ) -> ParishCouncilAssignmentOut:
     department = _department_or_404(db, payload.department_id)
+    if department.status != "Active":
+        raise HTTPException(status_code=409, detail="Restore this department before assigning trainees.")
     values = _resolve_assignment_values(db, department=department, payload=payload, existing=None)
     _validate_assignment_payload(db, department=department, values=values)
 
@@ -634,6 +661,8 @@ def update_parish_council_assignment(
 ) -> ParishCouncilAssignmentOut:
     assignment = _assignment_or_404(db, assignment_id)
     target_department = _department_or_404(db, payload.department_id) if "department_id" in payload.__fields_set__ and payload.department_id is not None else assignment.department
+    if target_department.id != assignment.department_id and target_department.status != "Active":
+        raise HTTPException(status_code=409, detail="Restore this department before moving trainees into it.")
     values = _resolve_assignment_values(db, department=target_department, payload=payload, existing=assignment)
     _validate_assignment_payload(
         db,

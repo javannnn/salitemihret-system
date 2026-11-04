@@ -221,3 +221,43 @@ def test_parish_council_document_upload_and_approval_flow(
     delete_response = client.delete(f"/parish-councils/documents/{document_payload['id']}")
     assert delete_response.status_code == 204
     assert len(list(tmp_path.iterdir())) == 0
+
+def test_department_lifecycle_preserves_assignments_and_rejects_duplicates(
+    client, authorize, parish_council_admin_user, db_session
+):
+    authorize(parish_council_admin_user)
+    base = "/parish-councils"
+    created = client.post(f"{base}/departments", json={"name": "  Community   Outreach "})
+    assert created.status_code == 201, created.text
+    department = created.json()
+    assert department["name"] == "Community Outreach"
+    path = f"{base}/departments/{department['id']}"
+    assert client.post(f"{base}/departments", json={"name": "community outreach"}).status_code == 409
+    assert client.post(f"{base}/departments", json={"name": "   "}).status_code == 422
+    member = _create_member(db_session, first_name="Test", last_name="Trainee", birth_date=date(2000, 1, 1))
+    payload = {
+        "department_id": department["id"],
+        "trainee_member_id": member.id,
+        "training_from": "2026-01-01",
+        "training_to": "2026-02-01",
+        "status": "Active",
+    }
+    assignment = client.post(f"{base}/assignments", json=payload)
+    assert assignment.status_code == 201, assignment.text
+    assert client.patch(path, json={"status": "Inactive"}).json()["status"] == "Inactive"
+    assert client.post(f"{base}/assignments", json=payload).status_code == 409
+    assert client.post(f"{base}/departments", json={"name": "Community Outreach"}).status_code == 409
+    assignment_id = assignment.json()["id"]
+    updated = client.patch(f"{base}/assignments/{assignment_id}", json={"notes": "Historical update"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["department_id"] == department["id"]
+    assert client.patch(path, json={"status": "Active"}).json()["status"] == "Active"
+    assert _department_id_by_name(client, "Community Outreach") == department["id"]
+
+
+def test_read_only_staff_cannot_create_or_archive_departments(client, authorize, office_admin_user):
+    authorize(office_admin_user)
+    base = "/parish-councils/departments"
+    department_id = _department_id_by_name(client, "Finance Department")
+    assert client.post(base, json={"name": "Restricted"}).status_code == 403
+    assert client.patch(f"{base}/{department_id}", json={"status": "Inactive"}).status_code == 403

@@ -2216,6 +2216,13 @@ export async function getParishCouncilDepartment(departmentId: number): Promise<
   return api<ParishCouncilDepartmentDetail>(`/parish-councils/departments/${departmentId}`);
 }
 
+export async function createParishCouncilDepartment(name: string) {
+  return api<ParishCouncilDepartmentDetail>("/parish-councils/departments", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function updateParishCouncilDepartment(
   departmentId: number,
   payload: ParishCouncilDepartmentUpdatePayload,
